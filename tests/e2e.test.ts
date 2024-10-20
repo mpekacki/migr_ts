@@ -8,6 +8,7 @@ test('migrate record', async () => {
     jest.setTimeout(30000);
 
     // given
+    console.log('creating orgs');
     const org1: Org = await Org.create({ aliasOrUsername: 'testMigrationOrgA' });
     await org1.refreshAuth();
     const org2: Org = await Org.create({ aliasOrUsername: 'testMigrationOrgB' });
@@ -27,6 +28,7 @@ test('migrate record', async () => {
         accessToken: org2.getConnection().accessToken!
     });
 
+    console.log('creating records');
     const account = await conn1.sobject('Account').create({ Name: 'ACME' });
     console.log(account);
     expect(account.id).toBeDefined();

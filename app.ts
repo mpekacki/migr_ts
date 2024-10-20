@@ -1,4 +1,5 @@
-import { Connection as SfConnection, AuthInfo } from '@salesforce/core';
+import { Connection, AuthInfo } from '@salesforce/core';
+import { Field } from 'jsforce';
 
 async function main(orgA: string, orgB: string, recordId: string, onOutput: (output: string) => void) {
     console.log('orgA', orgA);
@@ -6,7 +7,6 @@ async function main(orgA: string, orgB: string, recordId: string, onOutput: (out
     console.log('recordId', recordId);
 
     const allAuths = await AuthInfo.listAllAuthorizations();
-    console.log('allAuths', allAuths);
 
     const orgAUsername = allAuths.find(auth => auth.aliases!.includes(orgA))?.username;
     const orgBUsername = allAuths.find(auth => auth.aliases!.includes(orgB))?.username;
@@ -20,18 +20,89 @@ async function main(orgA: string, orgB: string, recordId: string, onOutput: (out
     const authInfoA = await AuthInfo.create(authInfoOptionsA);
     const authInfoB = await AuthInfo.create(authInfoOptionsB);
 
-    const connA = await SfConnection.create({ authInfo: authInfoA });
-    const connB = await SfConnection.create({ authInfo: authInfoB });
+    const connA = await Connection.create({ authInfo: authInfoA });
+    const connB = await Connection.create({ authInfo: authInfoB });
 
-    const record = await connA.sobject('Account').retrieve(recordId);
-    console.log('record', record);
+    const describeGlobal = await connA.describeGlobal();
 
-    const newRecord = await connB.sobject('Account').create({Name: record.Name});
-    console.log('newRecord', newRecord);
+    let recordIdsToFetch = [recordId];
+    const fetchedRecordsByIds: Record<string, any> = {};
+    const lookupFieldsByObjectPrefix: Record<string, Field[]> = {};
+
+    while (recordIdsToFetch.length > 0) {
+        const newRecordIdsToFetch: string[] = [];
+        for (const recordId of recordIdsToFetch) {
+            const prefix = recordId.substring(0, 3);
+            const sObjectName = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix)?.name;
+            if (sObjectName) {
+                const sobjectDescribe = await connA.sobject(sObjectName).describe();
+                console.log(`fetching ${sObjectName} ${recordId}`);
+                let record = await connA.sobject(sObjectName).retrieve(recordId);
+                const creatableFields = (await connA.sobject(sObjectName).describe()).fields.filter(field => field.createable);
+                const newRecord: Record<string, any> = {};
+                for (const field of creatableFields) {
+                    newRecord[field.name] = record[field.name];
+                }
+                record = newRecord;
+                fetchedRecordsByIds[recordId] = record;
+                const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
+                if (lookupFields.length > 0) {
+                    lookupFieldsByObjectPrefix[prefix] = lookupFields;
+                }
+                for (const lookupField of lookupFields) {
+                    const lookupValue = record[lookupField.name];
+                    if (lookupValue) {
+                        if (!(lookupValue in fetchedRecordsByIds) && !recordIdsToFetch.includes(lookupValue)) {
+                            recordIdsToFetch.push(lookupValue);
+                        }
+                    }
+                }
+            }
+        }
+        recordIdsToFetch = newRecordIdsToFetch;
+    }
+
+    const old2new: Record<string, string> = {};
+    while (Object.keys(fetchedRecordsByIds).length > 0) {
+        for (const recordId of Object.keys(fetchedRecordsByIds)) {
+            const record = fetchedRecordsByIds[recordId];
+            const prefix = recordId.substring(0, 3);
+            let recordReady = true;
+            const lookupFields = lookupFieldsByObjectPrefix[prefix];
+            if (lookupFields) {
+                for (const lookupField of lookupFields) {
+                    const lookupValue = record[lookupField.name];
+                    if (lookupValue) {
+                        if (!(lookupValue in old2new)) {
+                            recordReady = false;
+                            console.log(`${lookupField.name} ${lookupValue} not found in old2new`);
+                        } else {
+                            record[lookupField.name] = old2new[lookupValue];
+                            if (record[lookupField.name] === '') {
+                                delete record[lookupField.name];
+                            }
+                        }
+                    }
+                }
+            }
+            if (recordReady) {
+                const sObjectName = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix)?.name;
+                if (sObjectName) {
+                    let migratedRecordId = '';
+                    const isObjectCreatable = (await connA.sobject(sObjectName).describe()).createable && !(['User', 'Profile'].includes(sObjectName));
+                    if (isObjectCreatable) {
+                        console.log(`creating ${sObjectName} ${recordId}`);
+                        const savedRecord: any = await connB.sobject(sObjectName).create(record);
+                        console.log(`save result`, savedRecord);
+                        migratedRecordId = savedRecord.id;
+                    }
+                    old2new[recordId] = migratedRecordId!;
+                    delete fetchedRecordsByIds[recordId];
+                }
+            }
+        }
+    }
     
-    const old2new = {
-        [recordId]: newRecord.id
-    };
     onOutput(JSON.stringify(old2new));
 }
 
