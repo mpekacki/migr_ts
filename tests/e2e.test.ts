@@ -1,6 +1,5 @@
 import { test, expect } from '@jest/globals';
 import { Connection, AuthInfo } from '@salesforce/core';
-import { main } from '../app';
 import { exec } from 'child_process';
 
 test('migrate record', async () => {
@@ -8,6 +7,7 @@ test('migrate record', async () => {
     jest.setTimeout(30000);
 
     // given
+    console.log('logging in to test orgs');
     const allAuths = await AuthInfo.listAllAuthorizations();
 
     const orgAUsername = allAuths.find(auth => auth.aliases!.includes('testMigrationOrgA'))?.username;
@@ -56,8 +56,10 @@ test('migrate record', async () => {
             try {
                 // then
                 // should output old record ids to new record ids, e.g. {"006xx000001234AAA":"006yy000002345BBB","001xx000003456CCC":"001yy000004567DDD"}
-                console.log('capturedOutput', capturedOutput);
-                const parsedOutput = JSON.parse(capturedOutput);
+                const outputLines = capturedOutput.split('\n');
+                console.log('outputLines', outputLines);
+                expect(outputLines.length).toBeGreaterThan(0);
+                const parsedOutput = JSON.parse(outputLines[outputLines.length - 2]);
             
                 // Check if opportunity was migrated
                 expect(parsedOutput).toHaveProperty(opportunity.id!);

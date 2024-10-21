@@ -32,6 +32,7 @@ async function main(orgA: string, orgB: string, recordId: string, onOutput: (out
             const sObjectName = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix)?.name;
             if (sObjectName) {
                 const sobjectDescribe = await connA.sobject(sObjectName).describe();
+                console.log(`fetching record ${recordId} of type ${sObjectName}`);
                 let record = await connA.sobject(sObjectName).retrieve(recordId);
                 const creatableFields = (await connA.sobject(sObjectName).describe()).fields.filter(field => field.createable);
                 const newRecord: Record<string, any> = {};
@@ -85,8 +86,10 @@ async function main(orgA: string, orgB: string, recordId: string, onOutput: (out
                     let migratedRecordId = '';
                     const isObjectCreatable = (await connA.sobject(sObjectName).describe()).createable && !(['User', 'Profile'].includes(sObjectName));
                     if (isObjectCreatable) {
+                        console.log(`creating record ${recordId} of type ${sObjectName}`);
                         const savedRecord: any = await connB.sobject(sObjectName).create(record);
                         migratedRecordId = savedRecord.id;
+                        console.log(`created record ${migratedRecordId} of type ${sObjectName}`);
                     }
                     old2new[recordId] = migratedRecordId!;
                     delete fetchedRecordsByIds[recordId];
