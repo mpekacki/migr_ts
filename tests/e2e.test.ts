@@ -45,7 +45,7 @@ test('migrate record', async () => {
     // when
     // await main('testMigrationOrgA', 'testMigrationOrgB', opportunity.id!, onOutput);
     await new Promise<void>((resolve, reject) => {
-        exec(`npx ts-node ./app.ts testMigrationOrgA testMigrationOrgB ${opportunity.id!}`, async (error, stdout, stderr) => {
+        exec(`npx ts-node ./main.ts -s testMigrationOrgA -t testMigrationOrgB -r ${opportunity.id!}`, async (error, stdout, stderr) => {
             if (error) {
                 console.error(`exec error: ${error}`);
                 reject(error);

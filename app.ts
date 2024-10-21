@@ -102,7 +102,3 @@ async function main(orgA: string, orgB: string, recordId: string, onOutput: (out
 }
 
 export { main };
-
-main(process.argv[2], process.argv[3], process.argv[4], (output: string) => {
-    console.log(output);
-});
