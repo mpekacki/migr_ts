@@ -2,10 +2,6 @@ import { Connection, AuthInfo } from '@salesforce/core';
 import { Field } from 'jsforce';
 
 async function main(orgA: string, orgB: string, recordId: string, onOutput: (output: string) => void) {
-    console.log('orgA', orgA);
-    console.log('orgB', orgB);
-    console.log('recordId', recordId);
-
     const allAuths = await AuthInfo.listAllAuthorizations();
 
     const orgAUsername = allAuths.find(auth => auth.aliases!.includes(orgA))?.username;
@@ -36,7 +32,6 @@ async function main(orgA: string, orgB: string, recordId: string, onOutput: (out
             const sObjectName = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix)?.name;
             if (sObjectName) {
                 const sobjectDescribe = await connA.sobject(sObjectName).describe();
-                console.log(`fetching ${sObjectName} ${recordId}`);
                 let record = await connA.sobject(sObjectName).retrieve(recordId);
                 const creatableFields = (await connA.sobject(sObjectName).describe()).fields.filter(field => field.createable);
                 const newRecord: Record<string, any> = {};
@@ -75,7 +70,6 @@ async function main(orgA: string, orgB: string, recordId: string, onOutput: (out
                     if (lookupValue) {
                         if (!(lookupValue in old2new)) {
                             recordReady = false;
-                            console.log(`${lookupField.name} ${lookupValue} not found in old2new`);
                         } else {
                             record[lookupField.name] = old2new[lookupValue];
                             if (record[lookupField.name] === '') {
@@ -91,9 +85,7 @@ async function main(orgA: string, orgB: string, recordId: string, onOutput: (out
                     let migratedRecordId = '';
                     const isObjectCreatable = (await connA.sobject(sObjectName).describe()).createable && !(['User', 'Profile'].includes(sObjectName));
                     if (isObjectCreatable) {
-                        console.log(`creating ${sObjectName} ${recordId}`);
                         const savedRecord: any = await connB.sobject(sObjectName).create(record);
-                        console.log(`save result`, savedRecord);
                         migratedRecordId = savedRecord.id;
                     }
                     old2new[recordId] = migratedRecordId!;
@@ -107,3 +99,7 @@ async function main(orgA: string, orgB: string, recordId: string, onOutput: (out
 }
 
 export { main };
+
+main(process.argv[2], process.argv[3], process.argv[4], (output: string) => {
+    console.log(output);
+});
