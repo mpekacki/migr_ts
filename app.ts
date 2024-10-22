@@ -1,11 +1,17 @@
 import { Connection, AuthInfo } from '@salesforce/core';
 import { Field } from 'jsforce';
 
-async function main(orgA: string, orgB: string, recordId: string, onOutput: (output: string) => void) {
+interface Options {
+    sourceOrg: string;
+    targetOrg: string;
+    recordId: string;
+}
+
+async function main(options: Options, onOutput: (output: string) => void) {
     const allAuths = await AuthInfo.listAllAuthorizations();
 
-    const orgAUsername = allAuths.find(auth => auth.aliases!.includes(orgA))?.username;
-    const orgBUsername = allAuths.find(auth => auth.aliases!.includes(orgB))?.username;
+    const orgAUsername = allAuths.find(auth => auth.aliases!.includes(options.sourceOrg))?.username;
+    const orgBUsername = allAuths.find(auth => auth.aliases!.includes(options.targetOrg))?.username;
 
     const authInfoOptionsA: AuthInfo.Options = {
         username: orgAUsername!
@@ -21,7 +27,7 @@ async function main(orgA: string, orgB: string, recordId: string, onOutput: (out
 
     const describeGlobal = await connA.describeGlobal();
 
-    let recordIdsToFetch = [recordId];
+    let recordIdsToFetch = [options.recordId];
     const fetchedRecordsByIds: Record<string, any> = {};
     const lookupFieldsByObjectPrefix: Record<string, Field[]> = {};
 
@@ -101,4 +107,4 @@ async function main(orgA: string, orgB: string, recordId: string, onOutput: (out
     onOutput(JSON.stringify(old2new));
 }
 
-export { main };
+export { main, Options };

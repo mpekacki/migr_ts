@@ -1,5 +1,5 @@
 import { program } from 'commander';
-import { main } from './app';
+import { main, Options } from './app';
 
 program
     .option('-s, --source-org <source-org>', 'The alias of the source organization')
@@ -8,6 +8,6 @@ program
 
 program.parse();
 
-main(program.opts().sourceOrg, program.opts().targetOrg, program.opts().recordId, (output: string) => {
+main(program.opts() as Options, (output: string) => {
     console.log(output);
 });
