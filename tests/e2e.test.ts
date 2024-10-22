@@ -1,6 +1,7 @@
 import { test, expect } from '@jest/globals';
 import { Connection, AuthInfo } from '@salesforce/core';
 import { exec } from 'child_process';
+import fs from 'fs';
 
 test('migrate record', async () => {
     // Increase timeout to 30 seconds
@@ -42,10 +43,18 @@ test('migrate record', async () => {
         capturedOutput += output;
     };
 
+    const config = {
+        sourceOrg: 'testMigrationOrgA',
+        targetOrg: 'testMigrationOrgB',
+        recordId: opportunity.id!
+    };
+
+    fs.writeFileSync('./config.json', JSON.stringify(config, null, 2));
+
     // when
     // await main('testMigrationOrgA', 'testMigrationOrgB', opportunity.id!, onOutput);
     await new Promise<void>((resolve, reject) => {
-        exec(`npx ts-node ./main.ts -s testMigrationOrgA -t testMigrationOrgB -r ${opportunity.id!}`, async (error, stdout, stderr) => {
+        exec(`npx ts-node ./main.ts --config-json ./config.json`, async (error, stdout, stderr) => {
             if (error) {
                 console.error(`exec error: ${error}`);
                 reject(error);
@@ -58,7 +67,7 @@ test('migrate record', async () => {
                 // should output old record ids to new record ids, e.g. {"006xx000001234AAA":"006yy000002345BBB","001xx000003456CCC":"001yy000004567DDD"}
                 const outputLines = capturedOutput.split('\n');
                 console.log('outputLines', outputLines);
-                expect(outputLines.length).toBeGreaterThan(0);
+                expect(outputLines.length).toBeGreaterThan(1);
                 const parsedOutput = JSON.parse(outputLines[outputLines.length - 2]);
             
                 // Check if opportunity was migrated
