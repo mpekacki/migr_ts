@@ -5,6 +5,13 @@ interface Options {
     sourceOrg: string;
     targetOrg: string;
     recordId: string;
+    matchers: {
+        sObjectType: string;
+        fieldMappings: {
+            sourceField: string;
+            targetField: string;
+        }[];
+    }[];
 }
 
 async function main(options: Options, onOutput: (output: string) => void) {
@@ -90,12 +97,24 @@ async function main(options: Options, onOutput: (output: string) => void) {
                 const sObjectName = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix)?.name;
                 if (sObjectName) {
                     let migratedRecordId = '';
-                    const isObjectCreatable = (await connA.sobject(sObjectName).describe()).createable && !(['User', 'Profile'].includes(sObjectName));
-                    if (isObjectCreatable) {
-                        console.log(`creating record ${recordId} of type ${sObjectName}`);
-                        const savedRecord: any = await connB.sobject(sObjectName).create(record);
-                        migratedRecordId = savedRecord.id;
-                        console.log(`created record ${migratedRecordId} of type ${sObjectName}`);
+                    const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
+                    if (matcher) {
+                        let query = `SELECT Id FROM ${sObjectName} WHERE `;
+                        for (const fieldMapping of matcher.fieldMappings) {
+                            query += `${fieldMapping.targetField} = '${record[fieldMapping.sourceField]}' AND `;
+                        }
+                        query = query.slice(0, -5);
+                        console.log(`querying for existing record: ${query}`);
+                        const migratedRecord = await connB.query(query);
+                        migratedRecordId = migratedRecord.records[0].Id!;
+                    } else {
+                        const isObjectCreatable = (await connA.sobject(sObjectName).describe()).createable && !(['User', 'Profile'].includes(sObjectName));
+                        if (isObjectCreatable) {
+                            console.log(`creating record ${recordId} of type ${sObjectName}`);
+                            const savedRecord: any = await connB.sobject(sObjectName).create(record);
+                            migratedRecordId = savedRecord.id;
+                            console.log(`created record ${migratedRecordId} of type ${sObjectName}`);
+                        }
                     }
                     old2new[recordId] = migratedRecordId!;
                     delete fetchedRecordsByIds[recordId];

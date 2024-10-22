@@ -30,11 +30,21 @@ test('migrate record', async () => {
     expect(conn2).toBeDefined();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'ACME' });
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
     console.log(account);
     expect(account.id).toBeDefined();
 
-    const opportunity = await conn1.sobject('Opportunity').create({ Name: 'Blasto Bandage', AccountId: account.id!, StageName: 'Prospecting', CloseDate: new Date().toISOString() });
+    const campaignFields = { Name: 'Aaa!' };
+
+    const campaignOrgA = await conn1.sobject('Campaign').create(campaignFields);
+    console.log(campaignOrgA);
+    expect(campaignOrgA.id).toBeDefined();
+
+    const campaignOrgB = await conn2.sobject('Campaign').create(campaignFields);
+    console.log(campaignOrgB);
+    expect(campaignOrgB.id).toBeDefined();
+
+    const opportunity = await conn1.sobject('Opportunity').create({ Name: 'Blasto Bandage', CampaignId: campaignOrgA.id!, AccountId: account.id!, StageName: 'Prospecting', CloseDate: new Date().toISOString() });
     console.log(opportunity);
     expect(opportunity.id).toBeDefined();
 
@@ -46,7 +56,18 @@ test('migrate record', async () => {
     const config = {
         sourceOrg: 'testMigrationOrgA',
         targetOrg: 'testMigrationOrgB',
-        recordId: opportunity.id!
+        recordId: opportunity.id!,
+        matchers: [
+            {
+                sObjectType: 'Campaign',
+                fieldMappings: [
+                    {
+                        sourceField: 'Name',
+                        targetField: 'Name'
+                    }
+                ]
+            }
+        ]
     };
 
     fs.writeFileSync('./config.json', JSON.stringify(config, null, 2));
@@ -86,11 +107,12 @@ test('migrate record', async () => {
                 const newOpportunity: any = await conn2.sobject('Opportunity').retrieve(newOpportunityId);
                 expect(newOpportunity).toBeDefined();
                 expect(newOpportunity.Name).toEqual('Blasto Bandage');
+                expect(newOpportunity.CampaignId).toEqual(campaignOrgB.id);
 
                 // should be able to query the new account record
                 const newAccount: any = await conn2.sobject('Account').retrieve(newAccountId);
                 expect(newAccount).toBeDefined();
-                expect(newAccount.Name).toEqual('ACME');
+                expect(newAccount.Name).toEqual('Ebola Cola');
 
                 // Check if the new opportunity is associated with the new account
                 expect(newOpportunity.AccountId).toEqual(newAccountId);
