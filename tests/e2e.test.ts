@@ -34,7 +34,11 @@ test('migrate record', async () => {
     console.log(account);
     expect(account.id).toBeDefined();
 
-    const campaignFields = { Name: 'Aaa!' };
+    const contact = await conn1.sobject('Contact').create({ FirstName: 'Spider', LastName: 'Jerusalem', AccountId: account.id! });
+    console.log(contact);
+    expect(contact.id).toBeDefined();
+
+    const campaignFields = { Name: `Aaa! ${Math.random()}` };
 
     const campaignOrgA = await conn1.sobject('Campaign').create(campaignFields);
     console.log(campaignOrgA);
@@ -67,7 +71,14 @@ test('migrate record', async () => {
                     }
                 ]
             }
-        ]
+        ],
+        relationships: {
+            "Account": [
+                {
+                    "name": "Contacts"
+                }
+            ]
+        }
     };
 
     fs.writeFileSync('./config.json', JSON.stringify(config, null, 2));
@@ -103,6 +114,12 @@ test('migrate record', async () => {
                 expect(newAccountId).toBeTruthy();
                 expect(newAccountId).not.toEqual(account.id);
 
+                // Check if contact was migrated
+                expect(parsedOutput).toHaveProperty(contact.id!);
+                const newContactId = parsedOutput[contact.id!];
+                expect(newContactId).toBeTruthy();
+                expect(newContactId).not.toEqual(contact.id);
+
                 // should be able to query the new opportunity record
                 const newOpportunity: any = await conn2.sobject('Opportunity').retrieve(newOpportunityId);
                 expect(newOpportunity).toBeDefined();
@@ -113,6 +130,12 @@ test('migrate record', async () => {
                 const newAccount: any = await conn2.sobject('Account').retrieve(newAccountId);
                 expect(newAccount).toBeDefined();
                 expect(newAccount.Name).toEqual('Ebola Cola');
+
+                // should be able to query the new contact record
+                const newContact: any = await conn2.sobject('Contact').retrieve(newContactId);
+                expect(newContact).toBeDefined();
+                expect(newContact.FirstName).toEqual('Spider');
+                expect(newContact.LastName).toEqual('Jerusalem');
 
                 // Check if the new opportunity is associated with the new account
                 expect(newOpportunity.AccountId).toEqual(newAccountId);

@@ -12,6 +12,11 @@ interface Options {
             targetField: string;
         }[];
     }[];
+    relationships: {
+        [sObjectType: string]: {
+            name: string;
+        }[];
+    };
 }
 
 async function main(options: Options, onOutput: (output: string) => void) {
@@ -45,14 +50,22 @@ async function main(options: Options, onOutput: (output: string) => void) {
             const sObjectName = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix)?.name;
             if (sObjectName) {
                 const sobjectDescribe = await connA.sobject(sObjectName).describe();
-                console.log(`fetching record ${recordId} of type ${sObjectName}`);
-                let record = await connA.sobject(sObjectName).retrieve(recordId);
-                const creatableFields = (await connA.sobject(sObjectName).describe()).fields.filter(field => field.createable);
-                const newRecord: Record<string, any> = {};
-                for (const field of creatableFields) {
-                    newRecord[field.name] = record[field.name];
+                const relationships = options.relationships[sObjectName];
+                const selector = connA.sobject(sObjectName).select('*');
+                if (relationships) {
+                    for (const relationship of relationships) {
+                        selector.include(relationship.name);
+                    }
                 }
-                record = newRecord;
+                selector.where(`Id = '${recordId}'`);
+                console.log(`fetching record ${recordId} of type ${sObjectName}`);
+                const records = await selector.execute();
+                let fetchedRecord = records[0];
+                const creatableFields = (await connA.sobject(sObjectName).describe()).fields.filter(field => field.createable);
+                const record: Record<string, any> = {};
+                for (const field of creatableFields) {
+                    record[field.name] = fetchedRecord[field.name];
+                }
                 fetchedRecordsByIds[recordId] = record;
                 const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
                 if (lookupFields.length > 0) {
@@ -63,6 +76,19 @@ async function main(options: Options, onOutput: (output: string) => void) {
                     if (lookupValue) {
                         if (!(lookupValue in fetchedRecordsByIds) && !recordIdsToFetch.includes(lookupValue)) {
                             recordIdsToFetch.push(lookupValue);
+                        }
+                    }
+                }
+                if (relationships) {
+                    for (const relationship of relationships) {
+                        const relatedRecords = fetchedRecord[relationship.name]?.records;
+                        console.log(`related records of ${relationship.name}: ${relatedRecords?.length}`);
+                        if (relatedRecords) {
+                            for (const relatedRecord of relatedRecords) {
+                                if (!(relatedRecord.Id in fetchedRecordsByIds) && !recordIdsToFetch.includes(relatedRecord.Id!)) {
+                                    recordIdsToFetch.push(relatedRecord.Id!);
+                                }
+                            }
                         }
                     }
                 }
