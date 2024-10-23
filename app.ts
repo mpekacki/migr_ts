@@ -22,29 +22,33 @@ interface Options {
 async function main(options: Options, output: (output: string) => void) {
     const allAuths = await AuthInfo.listAllAuthorizations();
 
-    const orgAUsername = allAuths.find(auth => auth.aliases!.includes(options.sourceOrg))?.username;
-    const orgBUsername = allAuths.find(auth => auth.aliases!.includes(options.targetOrg))?.username;
+    const getOrgUsername = (orgAlias: string) => allAuths.find(auth => auth.aliases?.includes(orgAlias))?.username;
+    const orgAUsername = getOrgUsername(options.sourceOrg);
+    const orgBUsername = getOrgUsername(options.targetOrg);
 
-    const authInfoOptionsA: AuthInfo.Options = {
-        username: orgAUsername!
-    };
-    const authInfoOptionsB: AuthInfo.Options = {
-        username: orgBUsername!
-    };
-    const authInfoA = await AuthInfo.create(authInfoOptionsA);
-    const authInfoB = await AuthInfo.create(authInfoOptionsB);
+    if (!orgAUsername || !orgBUsername) {
+        throw new Error('Unable to find username for source or target org');
+    }
 
-    const connA = await Connection.create({ authInfo: authInfoA });
-    const connB = await Connection.create({ authInfo: authInfoB });
+    const createAuthInfo = (username: string) => AuthInfo.create({ username });
+    const [authInfoA, authInfoB] = await Promise.all([
+        createAuthInfo(orgAUsername),
+        createAuthInfo(orgBUsername)
+    ]);
+
+    const [connA, connB] = await Promise.all([
+        Connection.create({ authInfo: authInfoA }),
+        Connection.create({ authInfo: authInfoB })
+    ]);
 
     const describeGlobal = await connA.describeGlobal();
     const sObjectDescribes: Record<string, DescribeSObjectResult> = {};
-    async function getSObjectDescribe(sObjectName: string): Promise<DescribeSObjectResult> {
+    const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
         if (!(sObjectName in sObjectDescribes)) {
             sObjectDescribes[sObjectName] = await connA.sobject(sObjectName).describe();
         }
         return sObjectDescribes[sObjectName];
-    }
+    };
 
     let recordIdsToFetch = [options.recordId];
     const fetchedRecordsByIds: Record<string, any> = {};
