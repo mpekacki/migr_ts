@@ -8,6 +8,7 @@ const execPromise = util.promisify(exec);
 
 afterEach(async () => {
     fs.unlinkSync('./config.json');
+    fs.unlinkSync('./testMigrationOrgB__history.json');
 });
 
 test('migrate record', async () => {
@@ -60,9 +61,6 @@ test('migrate record', async () => {
     expect(opportunity.id).toBeDefined();
 
     let capturedOutput = '';
-    const onOutput = (output: string) => {
-        capturedOutput += output;
-    };
 
     const config = {
         sourceOrg: 'testMigrationOrgA',
@@ -96,6 +94,9 @@ test('migrate record', async () => {
 
     // when
     const { stdout, stderr } = await execPromise(`npx ts-node ./main.ts --config-json ./config.json`);
+    if (stderr) {
+        throw new Error(stderr);
+    }
     capturedOutput += stdout;
     
     // then
@@ -142,4 +143,36 @@ test('migrate record', async () => {
 
     // Check if the new opportunity is associated with the new account
     expect(newOpportunity.AccountId).toEqual(newAccountId);
+
+    // given
+    const contact2 = await conn1.sobject('Contact').create({ FirstName: 'Ocean', LastName: 'Man', AccountId: account.id! });
+    expect(contact2.id).toBeDefined();
+    
+    config.recordId = contact2.id!;
+    fs.writeFileSync('./config.json', JSON.stringify(config, null, 2));
+    capturedOutput = '';
+
+    // when
+    const { stdout: stdout2, stderr: stderr2 } = await execPromise(`npx ts-node ./main.ts --config-json ./config.json`);
+    if (stderr2) {
+        throw new Error(stderr2);
+    }
+    capturedOutput += stdout2;
+
+    // then
+    const outputLines2 = capturedOutput.split('\n');
+    console.log('outputLines', outputLines);
+    expect(outputLines.length).toBeGreaterThan(1);
+    const parsedOutput2 = JSON.parse(outputLines2[outputLines2.length - 2]);
+    expect(parsedOutput2).toHaveProperty(contact2.id!);
+    const newContactId2 = parsedOutput2[contact2.id!];
+    expect(newContactId2).toBeTruthy();
+    expect(newContactId2).not.toEqual(contact2.id);
+
+    // should be able to query the new contact record
+    const newContact2: any = await conn2.sobject('Contact').retrieve(newContactId2);
+    expect(newContact2).toBeDefined();
+    expect(newContact2.FirstName).toEqual('Ocean');
+    expect(newContact2.LastName).toEqual('Man');
+    expect(newContact2.AccountId).toEqual(newAccountId);
 }, 30000);

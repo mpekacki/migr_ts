@@ -1,5 +1,7 @@
 import { Connection, AuthInfo } from '@salesforce/core';
 import { DescribeSObjectResult, Field } from 'jsforce';
+import fs from 'fs';
+import path from 'path';
 
 interface Options {
     sourceOrg: string;
@@ -40,6 +42,13 @@ async function main(options: Options, output: (output: string) => void) {
         Connection.create({ authInfo: authInfoA }),
         Connection.create({ authInfo: authInfoB })
     ]);
+
+    // check if history file exists for target org
+    const historyFilePath = path.join(process.cwd(), `${options.targetOrg}__history.json`);
+    let history: Record<string, string> = {};
+    if (fs.existsSync(historyFilePath)) {
+        history = JSON.parse(fs.readFileSync(historyFilePath, 'utf8'));
+    }
 
     const describeGlobal = await connA.describeGlobal();
     const sObjectDescribes: Record<string, DescribeSObjectResult> = {};
@@ -134,23 +143,27 @@ async function main(options: Options, output: (output: string) => void) {
                 const sObjectName = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix)?.name;
                 if (sObjectName) {
                     let migratedRecordId = '';
-                    const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
-                    if (matcher) {
-                        const conditions: Record<string, any> = {};
-                        for (const fieldMapping of matcher.fieldMappings) {
-                            conditions[fieldMapping.targetField] = record[fieldMapping.sourceField];
-                        }
-                        const selector = connB.sobject(sObjectName).find(conditions).select('Id');
-                        output(`querying for existing record: ${await selector.toSOQL()}`);
-                        const migratedRecord = await selector.execute();
-                        migratedRecordId = migratedRecord[0].Id!;
+                    if (recordId in history) {
+                        migratedRecordId = history[recordId];
                     } else {
-                        const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable && !(['User', 'Profile'].includes(sObjectName));
-                        if (isObjectCreatable) {
-                            output(`creating record ${recordId} of type ${sObjectName}`);
-                            const savedRecord: any = await connB.sobject(sObjectName).create(record);
-                            migratedRecordId = savedRecord.id;
-                            output(`created record ${migratedRecordId} of type ${sObjectName}`);
+                        const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
+                        if (matcher) {
+                            const conditions: Record<string, any> = {};
+                            for (const fieldMapping of matcher.fieldMappings) {
+                                conditions[fieldMapping.targetField] = record[fieldMapping.sourceField];
+                            }
+                            const selector = connB.sobject(sObjectName).find(conditions).select('Id');
+                            output(`querying for existing record: ${await selector.toSOQL()}`);
+                            const migratedRecord = await selector.execute();
+                            migratedRecordId = migratedRecord[0].Id!;
+                        } else {
+                            const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable && !(['User', 'Profile'].includes(sObjectName));
+                            if (isObjectCreatable) {
+                                output(`creating record ${recordId} of type ${sObjectName}`);
+                                const savedRecord: any = await connB.sobject(sObjectName).create(record);
+                                migratedRecordId = savedRecord.id;
+                                output(`created record ${migratedRecordId} of type ${sObjectName}`);
+                            }
                         }
                     }
                     old2new[recordId] = migratedRecordId!;
@@ -159,7 +172,8 @@ async function main(options: Options, output: (output: string) => void) {
             }
         }
     }
-    
+
+    fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
     output(JSON.stringify(old2new));
 }
 
