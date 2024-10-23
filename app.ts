@@ -22,6 +22,8 @@ interface Options {
 }
 
 async function main(options: Options, output: (output: string) => void) {
+    output(`starting migration: ${JSON.stringify(options)}`);
+    
     const allAuths = await AuthInfo.listAllAuthorizations();
 
     const getOrgUsername = (orgAlias: string) => allAuths.find(auth => auth.aliases?.includes(orgAlias))?.username;
@@ -94,8 +96,8 @@ async function main(options: Options, output: (output: string) => void) {
                 for (const lookupField of lookupFields) {
                     const lookupValue = record[lookupField.name];
                     if (lookupValue) {
-                        if (!(lookupValue in fetchedRecordsByIds) && !recordIdsToFetch.includes(lookupValue)) {
-                            recordIdsToFetch.push(lookupValue);
+                        if (!(lookupValue in fetchedRecordsByIds) && !newRecordIdsToFetch.includes(lookupValue)) {
+                            newRecordIdsToFetch.push(lookupValue);
                         }
                     }
                 }
@@ -105,8 +107,8 @@ async function main(options: Options, output: (output: string) => void) {
                         output(`related records of ${relationship.name}: ${relatedRecords?.length}`);
                         if (relatedRecords) {
                             for (const relatedRecord of relatedRecords) {
-                                if (!(relatedRecord.Id in fetchedRecordsByIds) && !recordIdsToFetch.includes(relatedRecord.Id!)) {
-                                    recordIdsToFetch.push(relatedRecord.Id!);
+                                if (!(relatedRecord.Id in fetchedRecordsByIds) && !newRecordIdsToFetch.includes(relatedRecord.Id!)) {
+                                    newRecordIdsToFetch.push(relatedRecord.Id!);
                                 }
                             }
                         }
@@ -119,6 +121,7 @@ async function main(options: Options, output: (output: string) => void) {
 
     const old2new: Record<string, string> = {};
     while (Object.keys(fetchedRecordsByIds).length > 0) {
+        let anyRecordMigrated = false;
         for (const recordId of Object.keys(fetchedRecordsByIds)) {
             const record = fetchedRecordsByIds[recordId];
             const prefix = recordId.substring(0, 3);
@@ -128,8 +131,9 @@ async function main(options: Options, output: (output: string) => void) {
                 for (const lookupField of lookupFields) {
                     const lookupValue = record[lookupField.name];
                     if (lookupValue) {
-                        if (!(lookupValue in old2new)) {
+                        if (!(lookupValue in old2new) && lookupValue in fetchedRecordsByIds) {
                             recordReady = false;
+                            output(`record ${recordId} is not ready because lookup field ${lookupField.name} (${lookupValue}) is not migrated`);
                         } else {
                             record[lookupField.name] = old2new[lookupValue];
                             if (record[lookupField.name] === '') {
@@ -156,20 +160,27 @@ async function main(options: Options, output: (output: string) => void) {
                             output(`querying for existing record: ${await selector.toSOQL()}`);
                             const migratedRecord = await selector.execute();
                             migratedRecordId = migratedRecord[0].Id!;
+                            output(`found existing record ${migratedRecordId} of type ${sObjectName}`);
                         } else {
-                            const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable && !(['User', 'Profile'].includes(sObjectName));
+                            const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
                             if (isObjectCreatable) {
                                 output(`creating record ${recordId} of type ${sObjectName}`);
                                 const savedRecord: any = await connB.sobject(sObjectName).create(record);
                                 migratedRecordId = savedRecord.id;
                                 output(`created record ${migratedRecordId} of type ${sObjectName}`);
+                            } else {
+                                output(`record ${recordId} of type ${sObjectName} is not creatable`);
                             }
                         }
                     }
                     old2new[recordId] = migratedRecordId!;
                     delete fetchedRecordsByIds[recordId];
+                    anyRecordMigrated = true;
                 }
             }
+        }
+        if (!anyRecordMigrated) {
+            throw new Error('No records migrated');
         }
     }
 

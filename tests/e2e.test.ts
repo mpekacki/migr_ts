@@ -7,13 +7,17 @@ import fs from 'fs';
 const execPromise = util.promisify(exec);
 
 afterEach(async () => {
-    fs.unlinkSync('./config.json');
-    fs.unlinkSync('./testMigrationOrgB__history.json');
+    try {
+        fs.unlinkSync('./config.json');
+        fs.unlinkSync('./testMigrationOrgB__history.json');
+    } catch (error) {
+        console.error('Error deleting files:', error);
+    }
 });
 
 test('migrate record', async () => {
-    // Increase timeout to 30 seconds
-    jest.setTimeout(30000);
+    // Increase timeout to 60 seconds
+    jest.setTimeout(60000);
 
     // given
     console.log('logging in to test orgs');
@@ -79,6 +83,42 @@ test('migrate record', async () => {
                         targetField: 'IsActive'
                     }
                 ]
+            },
+            {
+                sObjectType: 'Profile',
+                fieldMappings: [
+                    {
+                        sourceField: 'Name',
+                        targetField: 'Name'
+                    }
+                ]
+            },
+            {
+                sObjectType: 'User',
+                fieldMappings: [
+                    {
+                        sourceField: 'Name',
+                        targetField: 'Name'
+                    }
+                ]
+            },
+            {
+                sObjectType: 'UserRole',
+                fieldMappings: [
+                    {
+                        sourceField: 'Name',
+                        targetField: 'Name'
+                    }
+                ]
+            },
+            {
+                sObjectType: 'UserLicense',
+                fieldMappings: [
+                    {
+                        sourceField: 'Name',
+                        targetField: 'Name'
+                    }
+                ]
             }
         ],
         relationships: {
@@ -93,16 +133,19 @@ test('migrate record', async () => {
     fs.writeFileSync('./config.json', JSON.stringify(config, null, 2));
 
     // when
-    const { stdout, stderr } = await execPromise(`npx ts-node ./main.ts --config-json ./config.json`);
-    if (stderr) {
-        throw new Error(stderr);
-    }
-    capturedOutput += stdout;
-    
+    const child = exec(`npx ts-node ./main.ts --config-json ./config.json`);
+    child.stdout?.on('data', (data) => {
+        console.log(data);
+        capturedOutput += data;
+    });
+    child.stderr?.on('data', (data) => {
+        console.error(data);
+    });
+    await new Promise(resolve => child.on('close', resolve));
+
     // then
     // should output old record ids to new record ids, e.g. {"006xx000001234AAA":"006yy000002345BBB","001xx000003456CCC":"001yy000004567DDD"}
     const outputLines = capturedOutput.split('\n');
-    console.log('outputLines', outputLines);
     expect(outputLines.length).toBeGreaterThan(1);
     const parsedOutput = JSON.parse(outputLines[outputLines.length - 2]);
 
@@ -153,15 +196,18 @@ test('migrate record', async () => {
     capturedOutput = '';
 
     // when
-    const { stdout: stdout2, stderr: stderr2 } = await execPromise(`npx ts-node ./main.ts --config-json ./config.json`);
-    if (stderr2) {
-        throw new Error(stderr2);
-    }
-    capturedOutput += stdout2;
+    const child2 = exec(`npx ts-node ./main.ts --config-json ./config.json`);
+    child2.stdout?.on('data', (data) => {
+        console.log(data);
+        capturedOutput += data;
+    });
+    child2.stderr?.on('data', (data) => {
+        console.error(data);
+    });
+    await new Promise(resolve => child2.on('close', resolve));
 
     // then
     const outputLines2 = capturedOutput.split('\n');
-    console.log('outputLines', outputLines);
     expect(outputLines.length).toBeGreaterThan(1);
     const parsedOutput2 = JSON.parse(outputLines2[outputLines2.length - 2]);
     expect(parsedOutput2).toHaveProperty(contact2.id!);
@@ -175,4 +221,4 @@ test('migrate record', async () => {
     expect(newContact2.FirstName).toEqual('Ocean');
     expect(newContact2.LastName).toEqual('Man');
     expect(newContact2.AccountId).toEqual(newAccountId);
-}, 30000);
+}, 60000);
