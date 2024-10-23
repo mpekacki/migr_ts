@@ -38,7 +38,7 @@ test('migrate record', async () => {
     console.log(contact);
     expect(contact.id).toBeDefined();
 
-    const campaignFields = { Name: `Aaa! ${Math.random()}` };
+    const campaignFields = { Name: `Aaa! ${Math.random()}`, IsActive: true };
 
     const campaignOrgA = await conn1.sobject('Campaign').create(campaignFields);
     console.log(campaignOrgA);
@@ -68,6 +68,10 @@ test('migrate record', async () => {
                     {
                         sourceField: 'Name',
                         targetField: 'Name'
+                    },
+                    {
+                        sourceField: 'IsActive',
+                        targetField: 'IsActive'
                     }
                 ]
             }
