@@ -6,12 +6,15 @@ import fs from 'fs';
 
 const execPromise = util.promisify(exec);
 
+const sourceOrgAlias = 'tesrMigrationOrgA';
+const targetOrgAlias = 'tesrMigrationOrgB';
+
 afterEach(async () => {
     try {
         fs.unlinkSync('./config.json');
-        fs.unlinkSync('./testMigrationOrgB__history.json');
+        fs.unlinkSync(`${targetOrgAlias}__history.json`);
     } catch (error) {
-        console.error('Error deleting files:', error);
+        console.log('Error deleting files:', error);
     }
 });
 
@@ -23,8 +26,11 @@ test('migrate record', async () => {
     console.log('logging in to test orgs');
     const allAuths = await AuthInfo.listAllAuthorizations();
 
-    const orgAUsername = allAuths.find(auth => auth.aliases!.includes('testMigrationOrgA'))?.username;
-    const orgBUsername = allAuths.find(auth => auth.aliases!.includes('testMigrationOrgB'))?.username;
+    const orgAUsername = allAuths.find(auth => auth.aliases!.includes(sourceOrgAlias))?.username;
+    const orgBUsername = allAuths.find(auth => auth.aliases!.includes(targetOrgAlias))?.username;
+
+    expect(orgAUsername).toBeDefined();
+    expect(orgBUsername).toBeDefined();
 
     const authInfoOptionsA: AuthInfo.Options = {
         username: orgAUsername!
@@ -64,12 +70,26 @@ test('migrate record', async () => {
     console.log(opportunity);
     expect(opportunity.id).toBeDefined();
 
+    const custObjC = await conn1.sobject('Custom_Object_C__c').create({ });
+    console.log(custObjC);
+    expect(custObjC.id).toBeDefined();
+
+    const custObjB = await conn1.sobject('Custom_Object_B__c').create({ Lookup_to_C__c: custObjC.id! });
+    console.log(custObjB);
+    expect(custObjB.id).toBeDefined();
+
+    const custObjA = await conn1.sobject('Custom_Object_A__c').create({ Lookup_to_B__c: custObjB.id! });
+    console.log(custObjA);
+    expect(custObjA.id).toBeDefined();
+
+    await conn1.sobject('Custom_Object_C__c').update({ Id: custObjC.id!, Lookup_to_A__c: custObjA.id! });
+
     let capturedOutput = '';
 
     const config = {
-        sourceOrg: 'testMigrationOrgA',
-        targetOrg: 'testMigrationOrgB',
-        recordId: opportunity.id!,
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [opportunity.id!, custObjB.id!],
         matchers: [
             {
                 sObjectType: 'Campaign',
@@ -191,7 +211,7 @@ test('migrate record', async () => {
     const contact2 = await conn1.sobject('Contact').create({ FirstName: 'Ocean', LastName: 'Man', AccountId: account.id! });
     expect(contact2.id).toBeDefined();
     
-    config.recordId = contact2.id!;
+    config.recordIds = [contact2.id!];
     fs.writeFileSync('./config.json', JSON.stringify(config, null, 2));
     capturedOutput = '';
 

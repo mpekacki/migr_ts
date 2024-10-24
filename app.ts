@@ -6,7 +6,7 @@ import path from 'path';
 interface Options {
     sourceOrg: string;
     targetOrg: string;
-    recordId: string;
+    recordIds: string[];
     matchers: {
         sObjectType: string;
         fieldMappings: {
@@ -61,7 +61,7 @@ async function main(options: Options, output: (output: string) => void) {
         return sObjectDescribes[sObjectName];
     };
 
-    let recordIdsToFetch = [options.recordId];
+    let recordIdsToFetch = options.recordIds;
     const fetchedRecordsByIds: Record<string, any> = {};
     const lookupFieldsByObjectPrefix: Record<string, Field[]> = {};
 
@@ -180,7 +180,7 @@ async function main(options: Options, output: (output: string) => void) {
             }
         }
         if (!anyRecordMigrated) {
-            throw new Error('No records migrated');
+            throw new Error('No records migrated. Circular dependency?');
         }
     }
 
