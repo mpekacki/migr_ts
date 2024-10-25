@@ -186,21 +186,26 @@ async function main(options: Options, output: (output: string) => void) {
         }
         if (!anyRecordMigrated) {
             // build lookupFieldsBySObjectType from object describes
-            const lookupFieldsBySObjectType: Record<string, string[]> = {};
+            const requiredLookupFieldsBySObjectType: Record<string, string[]> = {};
+            const allLookupFieldsBySObjectType: Record<string, string[]> = {};
             const uniqueSObjectTypes = [...new Set(Object.values(fetchedRecordsByIds).map(record => record.attributes?.type))];
             for (const sObjectName of uniqueSObjectTypes) {
                 if (sObjectName) {
-                    lookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
+                    requiredLookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
                         .filter(field => field.type === 'reference' && !field.nillable && field.createable)
+                        .map(field => field.name);
+                    allLookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
+                        .filter(field => field.type === 'reference' && field.createable)
                         .map(field => field.name);
                 }
             }
             const records = Object.values(fetchedRecordsByIds).map(record => ({
-                ...record,
+                attributes: record.attributes,
+                ...Object.fromEntries(Object.entries(record).filter(([key]) => key === 'attributes' || allLookupFieldsBySObjectType[record.attributes?.type]?.includes(key))),
                 Id: Object.keys(fetchedRecordsByIds).find(key => fetchedRecordsByIds[key] === record)
             }));
-            output(`looking for circular dependencies with ${JSON.stringify(lookupFieldsBySObjectType)} for records ${JSON.stringify(records)}`);
-            const toClear = scanForCircularDependency(records, lookupFieldsBySObjectType);
+            output(`looking for circular dependencies with ${JSON.stringify(requiredLookupFieldsBySObjectType)} for records ${JSON.stringify(records)}`);
+            const toClear = scanForCircularDependency(records, requiredLookupFieldsBySObjectType);
             if (toClear.length > 0) {
                 output(`found circular dependency: ${JSON.stringify(toClear)}`);
                 // clear the fields that are causing the circular dependency

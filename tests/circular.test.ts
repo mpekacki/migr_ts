@@ -8,6 +8,16 @@ describe('scanForCircularDependency', () => {
     it('should indicate a field to clear if circular dependency is found', () => {
         expect(scanForCircularDependency([
                 {
+                    "Lookup_to_B__c": "a01KO000000ZOGxYAO",
+                    "attributes":
+                    {
+                        "type": "Custom_Object_A__c",
+                        "url": "/services/data/v62.0/sobjects/Custom_Object_A__c/a00KO0000017wtaYAB"
+                    },
+                    "Id": "a00KO0000017wtaYAB",
+                    "OwnerId": "005KH000001TsIiYAK"
+                },
+                {
                     "Lookup_to_C__c": "a02KO0000014XX8YAM",
                     "attributes":
                     {
@@ -24,7 +34,8 @@ describe('scanForCircularDependency', () => {
                         "type": "Custom_Object_A__c",
                         "url": "/services/data/v62.0/sobjects/Custom_Object_A__c/a00KO0000016wtaYAA"
                     },
-                    "Id": "a00KO0000016wtaYAA"
+                    "Id": "a00KO0000016wtaYAA",
+                    "OwnerId": "005KH000001TsIiYAK"
                 },
                 {
                     "Lookup_to_A__c": "a00KO0000016wtaYAA",

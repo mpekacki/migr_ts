@@ -248,11 +248,11 @@ test('migrate record', async () => {
     expect(contact2.id).toBeDefined();
     
     config.recordIds = [contact2.id!];
-    fs.writeFileSync('./config.json', JSON.stringify(config, null, 2));
+    fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
     capturedOutput = '';
 
     // when
-    const child2 = exec(`npx ts-node ./main.ts --config-json ./config.json`);
+    const child2 = exec(`npx ts-node ./main.ts --config-json ./config_test.json`);
     child2.stdout?.on('data', (data) => {
         console.log(data);
         capturedOutput += data;
