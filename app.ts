@@ -140,7 +140,8 @@ async function main(options: Options, output: (output: string) => void) {
                         if (!(lookupValue in old2new) && lookupValue in fetchedRecordsByIds) {
                             recordReady = false;
                             output(`record ${recordId} is not ready because lookup field ${lookupField.name} (${lookupValue}) is not migrated`);
-                        } else {
+                        } else if (lookupValue in old2new) {
+                            output(`mapping ${lookupField.name} to ${lookupValue} for record ${recordId} of type ${sObjectName} - new value: ${old2new[lookupValue]}`);
                             record[lookupField.name] = old2new[lookupValue];
                             if (record[lookupField.name] === '') {
                                 delete record[lookupField.name];

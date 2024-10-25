@@ -70,7 +70,12 @@ test('migrate record', async () => {
     console.log(opportunity);
     expect(opportunity.id).toBeDefined();
 
-    const custObjC = await conn1.sobject('Custom_Object_C__c').create({ });
+    const user = await conn1.sobject('User').select('Id').where(`Name = 'Integration User'`).execute();
+    console.log(user);
+    expect(user.length).toBeGreaterThan(0);
+    expect(user[0].Id).toBeDefined();
+
+    const custObjC = await conn1.sobject('Custom_Object_C__c').create({ OwnerId: user[0].Id! });
     console.log(custObjC);
     expect(custObjC.id).toBeDefined();
 
@@ -116,8 +121,12 @@ test('migrate record', async () => {
                 sObjectType: 'User',
                 fieldMappings: [
                     {
-                        sourceField: 'Name',
-                        targetField: 'Name'
+                        sourceField: 'FirstName',
+                        targetField: 'FirstName'
+                    },
+                    {
+                        sourceField: 'LastName',
+                        targetField: 'LastName'
                     }
                 ]
             },
@@ -229,9 +238,10 @@ test('migrate record', async () => {
     expect(newCustObjCId).not.toEqual(custObjC.id);
 
     // should be able to query the new custom object C record
-    const newCustObjC: any = await conn2.sobject('Custom_Object_C__c').retrieve(newCustObjCId);
+    const newCustObjC: any = (await conn2.sobject('Custom_Object_C__c').select('*, Owner.Name').where(`Id = '${newCustObjCId}'`).execute())[0];
     expect(newCustObjC).toBeDefined();
     expect(newCustObjC.Lookup_to_A__c).toEqual(newCustObjAId);
+    expect(newCustObjC.Owner.Name).toEqual('Integration User');
 
     // should be able to query the new custom object A record
     const newCustObjA: any = await conn2.sobject('Custom_Object_A__c').retrieve(newCustObjAId);
