@@ -2,6 +2,7 @@ import { Connection, AuthInfo } from '@salesforce/core';
 import { DescribeSObjectResult, Field } from 'jsforce';
 import fs from 'fs';
 import path from 'path';
+import { scanForCircularDependency } from './circular';
 
 interface Options {
     sourceOrg: string;
@@ -60,16 +61,19 @@ async function main(options: Options, output: (output: string) => void) {
         }
         return sObjectDescribes[sObjectName];
     };
+    const getSObjectType = async (recordId: string): Promise<string> => {
+        const prefix = recordId.substring(0, 3);
+        return describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix)?.name!;
+    };
 
     let recordIdsToFetch = options.recordIds;
     const fetchedRecordsByIds: Record<string, any> = {};
-    const lookupFieldsByObjectPrefix: Record<string, Field[]> = {};
+    const lookupFieldsBySObjectType: Record<string, Field[]> = {};
 
     while (recordIdsToFetch.length > 0) {
         const newRecordIdsToFetch: string[] = [];
         for (const recordId of recordIdsToFetch) {
-            const prefix = recordId.substring(0, 3);
-            const sObjectName = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix)?.name;
+            const sObjectName = await getSObjectType(recordId);
             if (sObjectName) {
                 const sobjectDescribe = await getSObjectDescribe(sObjectName);
                 const relationships = options.relationships[sObjectName];
@@ -88,10 +92,11 @@ async function main(options: Options, output: (output: string) => void) {
                 for (const field of creatableFields) {
                     record[field.name] = fetchedRecord[field.name];
                 }
+                record.attributes = fetchedRecord.attributes;
                 fetchedRecordsByIds[recordId] = record;
                 const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
                 if (lookupFields.length > 0) {
-                    lookupFieldsByObjectPrefix[prefix] = lookupFields;
+                    lookupFieldsBySObjectType[sObjectName] = lookupFields;
                 }
                 for (const lookupField of lookupFields) {
                     const lookupValue = record[lookupField.name];
@@ -120,13 +125,14 @@ async function main(options: Options, output: (output: string) => void) {
     }
 
     const old2new: Record<string, string> = {};
+    const toUpdateLater: Record<string, Record<string, any>> = {};
     while (Object.keys(fetchedRecordsByIds).length > 0) {
         let anyRecordMigrated = false;
         for (const recordId of Object.keys(fetchedRecordsByIds)) {
             const record = fetchedRecordsByIds[recordId];
-            const prefix = recordId.substring(0, 3);
+            const sObjectName = await getSObjectType(recordId);
             let recordReady = true;
-            const lookupFields = lookupFieldsByObjectPrefix[prefix];
+            const lookupFields = lookupFieldsBySObjectType[sObjectName];
             if (lookupFields) {
                 for (const lookupField of lookupFields) {
                     const lookupValue = record[lookupField.name];
@@ -144,7 +150,6 @@ async function main(options: Options, output: (output: string) => void) {
                 }
             }
             if (recordReady) {
-                const sObjectName = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix)?.name;
                 if (sObjectName) {
                     let migratedRecordId = '';
                     if (recordId in history) {
@@ -180,8 +185,52 @@ async function main(options: Options, output: (output: string) => void) {
             }
         }
         if (!anyRecordMigrated) {
-            throw new Error('No records migrated. Circular dependency?');
+            // build lookupFieldsBySObjectType from object describes
+            const lookupFieldsBySObjectType: Record<string, string[]> = {};
+            const uniqueSObjectTypes = [...new Set(Object.values(fetchedRecordsByIds).map(record => record.attributes?.type))];
+            for (const sObjectName of uniqueSObjectTypes) {
+                if (sObjectName) {
+                    lookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
+                        .filter(field => field.type === 'reference' && !field.nillable && field.createable)
+                        .map(field => field.name);
+                }
+            }
+            const records = Object.values(fetchedRecordsByIds).map(record => ({
+                ...record,
+                Id: Object.keys(fetchedRecordsByIds).find(key => fetchedRecordsByIds[key] === record)
+            }));
+            output(`looking for circular dependencies with ${JSON.stringify(lookupFieldsBySObjectType)} for records ${JSON.stringify(records)}`);
+            const toClear = scanForCircularDependency(records, lookupFieldsBySObjectType);
+            if (toClear.length > 0) {
+                output(`found circular dependency: ${JSON.stringify(toClear)}`);
+                // clear the fields that are causing the circular dependency
+                for (const clear of toClear) {
+                    if (!(clear.recordId in toUpdateLater)) {
+                        toUpdateLater[clear.recordId] = {
+                            attributes: fetchedRecordsByIds[clear.recordId].attributes
+                        };
+                    }
+                    toUpdateLater[clear.recordId][clear.field] = fetchedRecordsByIds[clear.recordId][clear.field];
+                    fetchedRecordsByIds[clear.recordId][clear.field] = '';
+
+                }
+            } else {
+                throw new Error('Cannot find record ready to migrate. Circular dependency?');
+            }
         }
+    }
+
+    // update the fields that were cleared
+    for (const recordId of Object.keys(toUpdateLater)) {
+        const record = toUpdateLater[recordId];
+        for (const field of Object.keys(record)) {
+            if (field !== 'attributes') {
+                record[field] = old2new[record[field]];
+            }
+        }
+        record.Id = old2new[recordId];
+        output(`updating record ${recordId} of type ${record.attributes?.type} to ${JSON.stringify(record)}`);
+        await connB.sobject(record.attributes?.type!).update(record as any);
     }
 
     fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));

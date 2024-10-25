@@ -11,7 +11,7 @@ const targetOrgAlias = 'tesrMigrationOrgB';
 
 afterEach(async () => {
     try {
-        fs.unlinkSync('./config.json');
+        fs.unlinkSync('./config_test.json');
         fs.unlinkSync(`${targetOrgAlias}__history.json`);
     } catch (error) {
         console.log('Error deleting files:', error);
@@ -82,14 +82,13 @@ test('migrate record', async () => {
     console.log(custObjA);
     expect(custObjA.id).toBeDefined();
 
+    // create circular dependency
     await conn1.sobject('Custom_Object_C__c').update({ Id: custObjC.id!, Lookup_to_A__c: custObjA.id! });
-
-    let capturedOutput = '';
 
     const config = {
         sourceOrg: sourceOrgAlias,
         targetOrg: targetOrgAlias,
-        recordIds: [opportunity.id!, custObjB.id!],
+        recordIds: [opportunity.id!, custObjB.id!, custObjA.id!],
         matchers: [
             {
                 sObjectType: 'Campaign',
@@ -150,20 +149,24 @@ test('migrate record', async () => {
         }
     };
 
-    fs.writeFileSync('./config.json', JSON.stringify(config, null, 2));
+    fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
+    let capturedOutput = '';
+    let capturedError = '';
 
     // when
-    const child = exec(`npx ts-node ./main.ts --config-json ./config.json`);
+    const child = exec(`npx ts-node ./main.ts --config-json ./config_test.json`);
     child.stdout?.on('data', (data) => {
         console.log(data);
         capturedOutput += data;
     });
     child.stderr?.on('data', (data) => {
         console.error(data);
+        capturedError += data;
     });
     await new Promise(resolve => child.on('close', resolve));
 
     // then
+    expect(capturedError).toBe('');
     // should output old record ids to new record ids, e.g. {"006xx000001234AAA":"006yy000002345BBB","001xx000003456CCC":"001yy000004567DDD"}
     const outputLines = capturedOutput.split('\n');
     expect(outputLines.length).toBeGreaterThan(1);
@@ -206,6 +209,39 @@ test('migrate record', async () => {
 
     // Check if the new opportunity is associated with the new account
     expect(newOpportunity.AccountId).toEqual(newAccountId);
+
+    // Check if custom object A was migrated
+    expect(parsedOutput).toHaveProperty(custObjA.id!);
+    const newCustObjAId = parsedOutput[custObjA.id!];
+    expect(newCustObjAId).toBeTruthy();
+    expect(newCustObjAId).not.toEqual(custObjA.id);
+
+    // Check if custom object B was migrated
+    expect(parsedOutput).toHaveProperty(custObjB.id!);
+    const newCustObjBId = parsedOutput[custObjB.id!];
+    expect(newCustObjBId).toBeTruthy();
+    expect(newCustObjBId).not.toEqual(custObjB.id);
+
+    // Check if custom object C was migrated
+    expect(parsedOutput).toHaveProperty(custObjC.id!);
+    const newCustObjCId = parsedOutput[custObjC.id!];
+    expect(newCustObjCId).toBeTruthy();
+    expect(newCustObjCId).not.toEqual(custObjC.id);
+
+    // should be able to query the new custom object C record
+    const newCustObjC: any = await conn2.sobject('Custom_Object_C__c').retrieve(newCustObjCId);
+    expect(newCustObjC).toBeDefined();
+    expect(newCustObjC.Lookup_to_A__c).toEqual(newCustObjAId);
+
+    // should be able to query the new custom object A record
+    const newCustObjA: any = await conn2.sobject('Custom_Object_A__c').retrieve(newCustObjAId);
+    expect(newCustObjA).toBeDefined();
+    expect(newCustObjA.Lookup_to_B__c).toEqual(newCustObjBId);
+
+    // should be able to query the new custom object B record
+    const newCustObjB: any = await conn2.sobject('Custom_Object_B__c').retrieve(newCustObjBId);
+    expect(newCustObjB).toBeDefined();
+    expect(newCustObjB.Lookup_to_C__c).toEqual(newCustObjCId);
 
     // given
     const contact2 = await conn1.sobject('Contact').create({ FirstName: 'Ocean', LastName: 'Man', AccountId: account.id! });
