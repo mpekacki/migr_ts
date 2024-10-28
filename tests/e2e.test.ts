@@ -257,7 +257,7 @@ test('migrate record', async () => {
     const contact2 = await conn1.sobject('Contact').create({ FirstName: 'Ocean', LastName: 'Man', AccountId: account.id! });
     expect(contact2.id).toBeDefined();
     
-    config.recordIds = [contact2.id!];
+    config.recordIds = [contact2.id!, custObjA.id!];
     fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
     capturedOutput = '';
 
@@ -265,6 +265,7 @@ test('migrate record', async () => {
     const child2 = exec(`npx ts-node ./main.ts --config-json ./config_test.json`);
     child2.stdout?.on('data', (data) => {
         console.log(data);
+        expect(data).not.toContain('updating'); // should only create new record
         capturedOutput += data;
     });
     child2.stderr?.on('data', (data) => {

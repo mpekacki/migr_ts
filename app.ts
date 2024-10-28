@@ -69,6 +69,12 @@ async function main(options: Options, output: (output: string) => void) {
     let recordIdsToFetch = options.recordIds;
     const fetchedRecordsByIds: Record<string, any> = {};
     const lookupFieldsBySObjectType: Record<string, Field[]> = {};
+    const old2new: Record<string, string> = {};
+
+    for (const recordId of Object.keys(history)) {
+        old2new[recordId] = history[recordId];
+        recordIdsToFetch = recordIdsToFetch.filter(id => id !== recordId);
+    }
 
     while (recordIdsToFetch.length > 0) {
         const newRecordIdsToFetch: string[] = [];
@@ -124,7 +130,6 @@ async function main(options: Options, output: (output: string) => void) {
         recordIdsToFetch = newRecordIdsToFetch;
     }
 
-    const old2new: Record<string, string> = {};
     const toUpdateLater: Record<string, Record<string, any>> = {};
     while (Object.keys(fetchedRecordsByIds).length > 0) {
         let anyRecordMigrated = false;
@@ -151,38 +156,32 @@ async function main(options: Options, output: (output: string) => void) {
                 }
             }
             if (recordReady) {
-                if (sObjectName) {
-                    let migratedRecordId = '';
-                    if (recordId in history) {
-                        migratedRecordId = history[recordId];
-                    } else {
-                        const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
-                        if (matcher) {
-                            const conditions: Record<string, any> = {};
-                            for (const fieldMapping of matcher.fieldMappings) {
-                                conditions[fieldMapping.targetField] = record[fieldMapping.sourceField];
-                            }
-                            const selector = connB.sobject(sObjectName).find(conditions).select('Id');
-                            output(`querying for existing record: ${await selector.toSOQL()}`);
-                            const migratedRecord = await selector.execute();
-                            migratedRecordId = migratedRecord[0].Id!;
-                            output(`found existing record ${migratedRecordId} of type ${sObjectName}`);
-                        } else {
-                            const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
-                            if (isObjectCreatable) {
-                                output(`creating record ${recordId} of type ${sObjectName}`);
-                                const savedRecord: any = await connB.sobject(sObjectName).create(record);
-                                migratedRecordId = savedRecord.id;
-                                output(`created record ${migratedRecordId} of type ${sObjectName}`);
-                            } else {
-                                output(`record ${recordId} of type ${sObjectName} is not creatable`);
-                            }
-                        }
+                let migratedRecordId = '';
+                const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
+                if (matcher) {
+                    const conditions: Record<string, any> = {};
+                    for (const fieldMapping of matcher.fieldMappings) {
+                        conditions[fieldMapping.targetField] = record[fieldMapping.sourceField];
                     }
-                    old2new[recordId] = migratedRecordId!;
-                    delete fetchedRecordsByIds[recordId];
-                    anyRecordMigrated = true;
+                    const selector = connB.sobject(sObjectName).find(conditions).select('Id');
+                    output(`querying for existing record: ${await selector.toSOQL()}`);
+                    const migratedRecord = await selector.execute();
+                    migratedRecordId = migratedRecord[0].Id!;
+                    output(`found existing record ${migratedRecordId} of type ${sObjectName}`);
+                } else {
+                    const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
+                    if (isObjectCreatable) {
+                        output(`creating record ${recordId} of type ${sObjectName}`);
+                        const savedRecord: any = await connB.sobject(sObjectName).create(record);
+                        migratedRecordId = savedRecord.id;
+                        output(`created record ${migratedRecordId} of type ${sObjectName}`);
+                    } else {
+                        output(`record ${recordId} of type ${sObjectName} is not creatable`);
+                    }
                 }
+                old2new[recordId] = migratedRecordId!;
+                delete fetchedRecordsByIds[recordId];
+                anyRecordMigrated = true;
             }
         }
         if (!anyRecordMigrated) {
