@@ -70,6 +70,12 @@ test('migrate record', async () => {
     console.log(opportunity);
     expect(opportunity.id).toBeDefined();
 
+    const contract = await conn1.sobject('Contract').create({ AccountId: account.id!, Status: 'Draft', StartDate: new Date().toISOString(), ContractTerm: 12 });
+    console.log(contract);
+    expect(contract.id).toBeDefined();
+
+    await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
+
     const user = await conn1.sobject('User').select('Id').where(`Name = 'Integration User'`).execute();
     console.log(user);
     expect(user.length).toBeGreaterThan(0);
@@ -93,7 +99,7 @@ test('migrate record', async () => {
     const config = {
         sourceOrg: sourceOrgAlias,
         targetOrg: targetOrgAlias,
-        recordIds: [opportunity.id!, custObjB.id!, custObjA.id!],
+        recordIds: [opportunity.id!, custObjB.id!, custObjA.id!, contract.id!],
         matchers: [
             {
                 sObjectType: 'Campaign',
@@ -237,6 +243,12 @@ test('migrate record', async () => {
     expect(newCustObjCId).toBeTruthy();
     expect(newCustObjCId).not.toEqual(custObjC.id);
 
+    // Check if contract was migrated
+    expect(parsedOutput).toHaveProperty(contract.id!);
+    const newContractId = parsedOutput[contract.id!];
+    expect(newContractId).toBeTruthy();
+    expect(newContractId).not.toEqual(contract.id);
+
     // should be able to query the new custom object C record
     const newCustObjC: any = (await conn2.sobject('Custom_Object_C__c').select('*, Owner.Name').where(`Id = '${newCustObjCId}'`).execute())[0];
     expect(newCustObjC).toBeDefined();
@@ -252,6 +264,11 @@ test('migrate record', async () => {
     const newCustObjB: any = await conn2.sobject('Custom_Object_B__c').retrieve(newCustObjBId);
     expect(newCustObjB).toBeDefined();
     expect(newCustObjB.Lookup_to_C__c).toEqual(newCustObjCId);
+
+    // should be able to query the new contract record
+    const newContract: any = await conn2.sobject('Contract').retrieve(contract.id!);
+    expect(newContract).toBeDefined();
+    expect(newContract.Status).toEqual('Activated');
 
     // given
     const contact2 = await conn1.sobject('Contact').create({ FirstName: 'Ocean', LastName: 'Man', AccountId: account.id! });
