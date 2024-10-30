@@ -1,10 +1,8 @@
 import { test, expect } from '@jest/globals';
 import { Connection, AuthInfo } from '@salesforce/core';
-import util from 'util';
 import { exec } from 'child_process';
 import fs from 'fs';
 
-const execPromise = util.promisify(exec);
 
 const sourceOrgAlias = 'tesrMigrationOrgA';
 const targetOrgAlias = 'tesrMigrationOrgB';
@@ -18,11 +16,7 @@ afterEach(async () => {
     }
 });
 
-test('migrate record', async () => {
-    // Increase timeout to 60 seconds
-    jest.setTimeout(60000);
-
-    // given
+async function setupTestConnections() {
     console.log('logging in to test orgs');
     const allAuths = await AuthInfo.listAllAuthorizations();
 
@@ -32,20 +26,82 @@ test('migrate record', async () => {
     expect(orgAUsername).toBeDefined();
     expect(orgBUsername).toBeDefined();
 
-    const authInfoOptionsA: AuthInfo.Options = {
-        username: orgAUsername!
-    };
-    const authInfoOptionsB: AuthInfo.Options = {
-        username: orgBUsername!
-    };
-    const authInfoA = await AuthInfo.create(authInfoOptionsA);
-    const authInfoB = await AuthInfo.create(authInfoOptionsB);
+    const authInfoOptionsA: AuthInfo.Options = { username: orgAUsername! };
+    const authInfoOptionsB: AuthInfo.Options = { username: orgBUsername! };
+    
+    const [authInfoA, authInfoB] = await Promise.all([
+        AuthInfo.create(authInfoOptionsA),
+        AuthInfo.create(authInfoOptionsB)
+    ]);
 
-    const conn1 = await Connection.create({ authInfo: authInfoA });
-    const conn2 = await Connection.create({ authInfo: authInfoB });
+    const [conn1, conn2] = await Promise.all([
+        Connection.create({ authInfo: authInfoA }),
+        Connection.create({ authInfo: authInfoB })
+    ]);
 
     expect(conn1).toBeDefined();
     expect(conn2).toBeDefined();
+
+    return { conn1, conn2 };
+}
+
+async function runMigration(config: any) {
+    fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
+    let capturedOutput = '';
+    let capturedError = '';
+
+    const child = exec(`npx ts-node ./main.ts --config-json ./config_test.json`);
+    child.stdout?.on('data', (data) => {
+        console.log(data);
+        capturedOutput += data;
+    });
+    child.stderr?.on('data', (data) => {
+        console.error(data);
+        capturedError += data;
+    });
+    await new Promise(resolve => child.on('close', resolve));
+
+    expect(capturedError).toBe('');
+    const outputLines = capturedOutput.split('\n');
+    expect(outputLines.length).toBeGreaterThan(1);
+    return { 
+        parsedOutput: JSON.parse(outputLines[outputLines.length - 2]),
+        capturedOutput
+    };
+}
+
+const defaultMatchers = [
+    {
+        sObjectType: 'Profile',
+        fieldMappings: [
+            { sourceField: 'Name', targetField: 'Name' }
+        ]
+    },
+    {
+        sObjectType: 'User',
+        fieldMappings: [
+            { sourceField: 'FirstName', targetField: 'FirstName' },
+            { sourceField: 'LastName', targetField: 'LastName' }
+        ]
+    },
+    {
+        sObjectType: 'UserRole',
+        fieldMappings: [
+            { sourceField: 'Name', targetField: 'Name' }
+        ]
+    },
+    {
+        sObjectType: 'UserLicense',
+        fieldMappings: [
+            { sourceField: 'Name', targetField: 'Name' }
+        ]
+    }
+];
+
+test('migrate record', async () => {
+    jest.setTimeout(60000);
+
+    const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
     const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
@@ -66,7 +122,13 @@ test('migrate record', async () => {
     console.log(campaignOrgB);
     expect(campaignOrgB.id).toBeDefined();
 
-    const opportunity = await conn1.sobject('Opportunity').create({ Name: 'Blasto Bandage', CampaignId: campaignOrgA.id!, AccountId: account.id!, StageName: 'Prospecting', CloseDate: new Date().toISOString() });
+    const opportunity = await conn1.sobject('Opportunity').create({ 
+        Name: 'Blasto Bandage', 
+        CampaignId: campaignOrgA.id!, 
+        AccountId: account.id!, 
+        StageName: 'Prospecting', 
+        CloseDate: new Date().toISOString() 
+    });
     console.log(opportunity);
     expect(opportunity.id).toBeDefined();
 
@@ -94,61 +156,13 @@ test('migrate record', async () => {
         sourceOrg: sourceOrgAlias,
         targetOrg: targetOrgAlias,
         recordIds: [opportunity.id!, custObjB.id!, custObjA.id!],
-        matchers: [
-            {
-                sObjectType: 'Campaign',
-                fieldMappings: [
-                    {
-                        sourceField: 'Name',
-                        targetField: 'Name'
-                    },
-                    {
-                        sourceField: 'IsActive',
-                        targetField: 'IsActive'
-                    }
-                ]
-            },
-            {
-                sObjectType: 'Profile',
-                fieldMappings: [
-                    {
-                        sourceField: 'Name',
-                        targetField: 'Name'
-                    }
-                ]
-            },
-            {
-                sObjectType: 'User',
-                fieldMappings: [
-                    {
-                        sourceField: 'FirstName',
-                        targetField: 'FirstName'
-                    },
-                    {
-                        sourceField: 'LastName',
-                        targetField: 'LastName'
-                    }
-                ]
-            },
-            {
-                sObjectType: 'UserRole',
-                fieldMappings: [
-                    {
-                        sourceField: 'Name',
-                        targetField: 'Name'
-                    }
-                ]
-            },
-            {
-                sObjectType: 'UserLicense',
-                fieldMappings: [
-                    {
-                        sourceField: 'Name',
-                        targetField: 'Name'
-                    }
-                ]
-            }
-        ],
+        matchers: [...defaultMatchers, {
+            sObjectType: 'Campaign',
+            fieldMappings: [
+                { sourceField: 'Name', targetField: 'Name' },
+                { sourceField: 'IsActive', targetField: 'IsActive' }
+            ]
+        }],
         relationships: {
             "Account": [
                 {
@@ -158,28 +172,7 @@ test('migrate record', async () => {
         }
     };
 
-    fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
-    let capturedOutput = '';
-    let capturedError = '';
-
-    // when
-    const child = exec(`npx ts-node ./main.ts --config-json ./config_test.json`);
-    child.stdout?.on('data', (data) => {
-        console.log(data);
-        capturedOutput += data;
-    });
-    child.stderr?.on('data', (data) => {
-        console.error(data);
-        capturedError += data;
-    });
-    await new Promise(resolve => child.on('close', resolve));
-
-    // then
-    expect(capturedError).toBe('');
-    // should output old record ids to new record ids, e.g. {"006xx000001234AAA":"006yy000002345BBB","001xx000003456CCC":"001yy000004567DDD"}
-    const outputLines = capturedOutput.split('\n');
-    expect(outputLines.length).toBeGreaterThan(1);
-    const parsedOutput = JSON.parse(outputLines[outputLines.length - 2]);
+    const { parsedOutput } = await runMigration(config);
 
     // Check if opportunity was migrated
     expect(parsedOutput).toHaveProperty(opportunity.id!);
@@ -258,25 +251,10 @@ test('migrate record', async () => {
     expect(contact2.id).toBeDefined();
     
     config.recordIds = [contact2.id!, custObjA.id!];
-    fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
-    capturedOutput = '';
 
-    // when
-    const child2 = exec(`npx ts-node ./main.ts --config-json ./config_test.json`);
-    child2.stdout?.on('data', (data) => {
-        console.log(data);
-        expect(data).not.toContain('updating'); // should only create new record
-        capturedOutput += data;
-    });
-    child2.stderr?.on('data', (data) => {
-        console.error(data);
-    });
-    await new Promise(resolve => child2.on('close', resolve));
+    const { parsedOutput: parsedOutput2, capturedOutput } = await runMigration(config);
+    expect(capturedOutput).not.toContain('updating'); // should only create new record
 
-    // then
-    const outputLines2 = capturedOutput.split('\n');
-    expect(outputLines.length).toBeGreaterThan(1);
-    const parsedOutput2 = JSON.parse(outputLines2[outputLines2.length - 2]);
     expect(parsedOutput2).toHaveProperty(contact2.id!);
     const newContactId2 = parsedOutput2[contact2.id!];
     expect(newContactId2).toBeTruthy();
@@ -291,40 +269,21 @@ test('migrate record', async () => {
 }, 60000);
 
 test('migrate record with error', async () => {
-    // Increase timeout to 60 seconds
     jest.setTimeout(60000);
 
-    // given
-    console.log('logging in to test orgs');
-    const allAuths = await AuthInfo.listAllAuthorizations();
-
-    const orgAUsername = allAuths.find(auth => auth.aliases!.includes(sourceOrgAlias))?.username;
-    const orgBUsername = allAuths.find(auth => auth.aliases!.includes(targetOrgAlias))?.username;
-
-    expect(orgAUsername).toBeDefined();
-    expect(orgBUsername).toBeDefined();
-
-    const authInfoOptionsA: AuthInfo.Options = {
-        username: orgAUsername!
-    };
-    const authInfoOptionsB: AuthInfo.Options = {
-        username: orgBUsername!
-    };
-    const authInfoA = await AuthInfo.create(authInfoOptionsA);
-    const authInfoB = await AuthInfo.create(authInfoOptionsB);
-
-    const conn1 = await Connection.create({ authInfo: authInfoA });
-    const conn2 = await Connection.create({ authInfo: authInfoB });
-
-    expect(conn1).toBeDefined();
-    expect(conn2).toBeDefined();
+    const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
     const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
     console.log(account);
     expect(account.id).toBeDefined();
 
-    const contract = await conn1.sobject('Contract').create({ AccountId: account.id!, Status: 'Draft', StartDate: new Date().toISOString(), ContractTerm: 12 });
+    const contract = await conn1.sobject('Contract').create({ 
+        AccountId: account.id!, 
+        Status: 'Draft', 
+        StartDate: new Date().toISOString(), 
+        ContractTerm: 12 
+    });
     console.log(contract);
     expect(contract.id).toBeDefined();
 
@@ -334,71 +293,10 @@ test('migrate record with error', async () => {
         sourceOrg: sourceOrgAlias,
         targetOrg: targetOrgAlias,
         recordIds: [contract.id!],
-        matchers: [
-            {
-                sObjectType: 'Profile',
-                fieldMappings: [
-                    {
-                        sourceField: 'Name',
-                        targetField: 'Name'
-                    }
-                ]
-            },
-            {
-                sObjectType: 'User',
-                fieldMappings: [
-                    {
-                        sourceField: 'FirstName',
-                        targetField: 'FirstName'
-                    },
-                    {
-                        sourceField: 'LastName',
-                        targetField: 'LastName'
-                    }
-                ]
-            },
-            {
-                sObjectType: 'UserRole',
-                fieldMappings: [
-                    {
-                        sourceField: 'Name',
-                        targetField: 'Name'
-                    }
-                ]
-            },
-            {
-                sObjectType: 'UserLicense',
-                fieldMappings: [
-                    {
-                        sourceField: 'Name',
-                        targetField: 'Name'
-                    }
-                ]
-            }
-        ]
+        matchers: defaultMatchers
     };
-    fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
-    let capturedOutput = '';
-    let capturedError = '';
 
-    // when
-    const child = exec(`npx ts-node ./main.ts --config-json ./config_test.json`);
-    child.stdout?.on('data', (data) => {
-        console.log(data);
-        capturedOutput += data;
-    });
-    child.stderr?.on('data', (data) => {
-        console.error(data);
-        capturedError += data;
-    });
-    await new Promise(resolve => child.on('close', resolve));
-
-    // then
-    expect(capturedError).toBe('');
-    // should output old record ids to new record ids, e.g. {"006xx000001234AAA":"006yy000002345BBB","001xx000003456CCC":"001yy000004567DDD"}
-    const outputLines = capturedOutput.split('\n');
-    expect(outputLines.length).toBeGreaterThan(1);
-    const parsedOutput = JSON.parse(outputLines[outputLines.length - 2]);
+    const { parsedOutput } = await runMigration(config);
 
     // Check if contract was migrated
     expect(parsedOutput).toHaveProperty(contract.id!);

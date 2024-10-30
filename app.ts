@@ -82,7 +82,7 @@ async function main(options: Options, output: (output: string) => void) {
             const sObjectName = await getSObjectType(recordId);
             if (sObjectName) {
                 const sobjectDescribe = await getSObjectDescribe(sObjectName);
-                const relationships = options.relationships[sObjectName];
+                const relationships = options.relationships?.[sObjectName];
                 const selector = connA.sobject(sObjectName).select('*');
                 if (relationships) {
                     for (const relationship of relationships) {
