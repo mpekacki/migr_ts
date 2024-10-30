@@ -20,6 +20,13 @@ interface Options {
             name: string;
         }[];
     };
+    solvers: {
+        message: string;
+        changeFields: {
+            field: string;
+            value: string;
+        }[];
+    }[];
 }
 
 async function main(options: Options, output: (output: string) => void) {
@@ -172,8 +179,28 @@ async function main(options: Options, output: (output: string) => void) {
                     const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
                     if (isObjectCreatable) {
                         output(`creating record ${recordId} of type ${sObjectName}`);
-                        const savedRecord: any = await connB.sobject(sObjectName).create(record);
-                        migratedRecordId = savedRecord.id;
+                        try {
+                            const savedRecord: any = await connB.sobject(sObjectName).create(record);
+                            migratedRecordId = savedRecord.id;
+                        } catch (e: any) {
+                            if (options.solvers) {
+                                // find solver that matches the error message
+                                const solver = options.solvers.find(solver => e.message.includes(solver.message));
+                                if (solver) {
+                                    toUpdateLater[recordId] = {
+                                        attributes: record.attributes
+                                    };
+                                    for (const changeField of solver.changeFields) {
+                                        toUpdateLater[recordId][changeField.field] = record[changeField.field];
+                                        record[changeField.field] = changeField.value;
+                                    }
+                                    output(`fixing using solver: ${solver.message}`);
+                                    output(`saved old fields in toUpdateLater: ${JSON.stringify(toUpdateLater[recordId])}`);
+                                    anyRecordMigrated = true;
+                                    continue;
+                                }
+                            }
+                        }
                         output(`created record ${migratedRecordId} of type ${sObjectName}`);
                     } else {
                         output(`record ${recordId} of type ${sObjectName} is not creatable`);
@@ -229,7 +256,7 @@ async function main(options: Options, output: (output: string) => void) {
     for (const recordId of Object.keys(toUpdateLater)) {
         const record = toUpdateLater[recordId];
         for (const field of Object.keys(record)) {
-            if (field !== 'attributes') {
+            if (field !== 'attributes' && record[field] in old2new) {
                 record[field] = old2new[record[field]];
             }
         }

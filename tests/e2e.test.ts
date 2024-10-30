@@ -293,7 +293,18 @@ test('migrate record with error', async () => {
         sourceOrg: sourceOrgAlias,
         targetOrg: targetOrgAlias,
         recordIds: [contract.id!],
-        matchers: defaultMatchers
+        matchers: defaultMatchers,
+        solvers: [
+            {
+                message: 'Choose a valid contract status and save your changes. Ask your admin for details.',
+                changeFields: [
+                    {
+                        field: 'Status',
+                        value: 'Draft'
+                    }
+                ]
+            }
+        ]
     };
 
     const { parsedOutput } = await runMigration(config);
@@ -305,7 +316,7 @@ test('migrate record with error', async () => {
     expect(newContractId).not.toEqual(contract.id);
 
     // should be able to query the new contract record
-    const newContract: any = await conn2.sobject('Contract').retrieve(contract.id!);
+    const newContract: any = await conn2.sobject('Contract').retrieve(newContractId);
     expect(newContract).toBeDefined();
     expect(newContract.Status).toEqual('Activated');
 }, 60000);
