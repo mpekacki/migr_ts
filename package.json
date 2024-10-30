@@ -18,7 +18,9 @@
   "dependencies": {
     "@salesforce/core": "^8.6.2",
     "@types/jsforce": "^1.11.5",
+    "@types/terminal-kit": "^2.5.6",
     "commander": "^12.1.0",
-    "jsforce": "^3.5.2"
+    "jsforce": "^3.5.2",
+    "terminal-kit": "^3.1.1"
   }
 }

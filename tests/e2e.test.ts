@@ -70,12 +70,6 @@ test('migrate record', async () => {
     console.log(opportunity);
     expect(opportunity.id).toBeDefined();
 
-    const contract = await conn1.sobject('Contract').create({ AccountId: account.id!, Status: 'Draft', StartDate: new Date().toISOString(), ContractTerm: 12 });
-    console.log(contract);
-    expect(contract.id).toBeDefined();
-
-    await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
-
     const user = await conn1.sobject('User').select('Id').where(`Name = 'Integration User'`).execute();
     console.log(user);
     expect(user.length).toBeGreaterThan(0);
@@ -99,7 +93,7 @@ test('migrate record', async () => {
     const config = {
         sourceOrg: sourceOrgAlias,
         targetOrg: targetOrgAlias,
-        recordIds: [opportunity.id!, custObjB.id!, custObjA.id!, contract.id!],
+        recordIds: [opportunity.id!, custObjB.id!, custObjA.id!],
         matchers: [
             {
                 sObjectType: 'Campaign',
@@ -243,12 +237,6 @@ test('migrate record', async () => {
     expect(newCustObjCId).toBeTruthy();
     expect(newCustObjCId).not.toEqual(custObjC.id);
 
-    // Check if contract was migrated
-    expect(parsedOutput).toHaveProperty(contract.id!);
-    const newContractId = parsedOutput[contract.id!];
-    expect(newContractId).toBeTruthy();
-    expect(newContractId).not.toEqual(contract.id);
-
     // should be able to query the new custom object C record
     const newCustObjC: any = (await conn2.sobject('Custom_Object_C__c').select('*, Owner.Name').where(`Id = '${newCustObjCId}'`).execute())[0];
     expect(newCustObjC).toBeDefined();
@@ -264,11 +252,6 @@ test('migrate record', async () => {
     const newCustObjB: any = await conn2.sobject('Custom_Object_B__c').retrieve(newCustObjBId);
     expect(newCustObjB).toBeDefined();
     expect(newCustObjB.Lookup_to_C__c).toEqual(newCustObjCId);
-
-    // should be able to query the new contract record
-    const newContract: any = await conn2.sobject('Contract').retrieve(contract.id!);
-    expect(newContract).toBeDefined();
-    expect(newContract.Status).toEqual('Activated');
 
     // given
     const contact2 = await conn1.sobject('Contact').create({ FirstName: 'Ocean', LastName: 'Man', AccountId: account.id! });
@@ -305,4 +288,126 @@ test('migrate record', async () => {
     expect(newContact2.FirstName).toEqual('Ocean');
     expect(newContact2.LastName).toEqual('Man');
     expect(newContact2.AccountId).toEqual(newAccountId);
+}, 60000);
+
+test('migrate record with error', async () => {
+    // Increase timeout to 60 seconds
+    jest.setTimeout(60000);
+
+    // given
+    console.log('logging in to test orgs');
+    const allAuths = await AuthInfo.listAllAuthorizations();
+
+    const orgAUsername = allAuths.find(auth => auth.aliases!.includes(sourceOrgAlias))?.username;
+    const orgBUsername = allAuths.find(auth => auth.aliases!.includes(targetOrgAlias))?.username;
+
+    expect(orgAUsername).toBeDefined();
+    expect(orgBUsername).toBeDefined();
+
+    const authInfoOptionsA: AuthInfo.Options = {
+        username: orgAUsername!
+    };
+    const authInfoOptionsB: AuthInfo.Options = {
+        username: orgBUsername!
+    };
+    const authInfoA = await AuthInfo.create(authInfoOptionsA);
+    const authInfoB = await AuthInfo.create(authInfoOptionsB);
+
+    const conn1 = await Connection.create({ authInfo: authInfoA });
+    const conn2 = await Connection.create({ authInfo: authInfoB });
+
+    expect(conn1).toBeDefined();
+    expect(conn2).toBeDefined();
+
+    console.log('creating records');
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    console.log(account);
+    expect(account.id).toBeDefined();
+
+    const contract = await conn1.sobject('Contract').create({ AccountId: account.id!, Status: 'Draft', StartDate: new Date().toISOString(), ContractTerm: 12 });
+    console.log(contract);
+    expect(contract.id).toBeDefined();
+
+    await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [contract.id!],
+        matchers: [
+            {
+                sObjectType: 'Profile',
+                fieldMappings: [
+                    {
+                        sourceField: 'Name',
+                        targetField: 'Name'
+                    }
+                ]
+            },
+            {
+                sObjectType: 'User',
+                fieldMappings: [
+                    {
+                        sourceField: 'FirstName',
+                        targetField: 'FirstName'
+                    },
+                    {
+                        sourceField: 'LastName',
+                        targetField: 'LastName'
+                    }
+                ]
+            },
+            {
+                sObjectType: 'UserRole',
+                fieldMappings: [
+                    {
+                        sourceField: 'Name',
+                        targetField: 'Name'
+                    }
+                ]
+            },
+            {
+                sObjectType: 'UserLicense',
+                fieldMappings: [
+                    {
+                        sourceField: 'Name',
+                        targetField: 'Name'
+                    }
+                ]
+            }
+        ]
+    };
+    fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
+    let capturedOutput = '';
+    let capturedError = '';
+
+    // when
+    const child = exec(`npx ts-node ./main.ts --config-json ./config_test.json`);
+    child.stdout?.on('data', (data) => {
+        console.log(data);
+        capturedOutput += data;
+    });
+    child.stderr?.on('data', (data) => {
+        console.error(data);
+        capturedError += data;
+    });
+    await new Promise(resolve => child.on('close', resolve));
+
+    // then
+    expect(capturedError).toBe('');
+    // should output old record ids to new record ids, e.g. {"006xx000001234AAA":"006yy000002345BBB","001xx000003456CCC":"001yy000004567DDD"}
+    const outputLines = capturedOutput.split('\n');
+    expect(outputLines.length).toBeGreaterThan(1);
+    const parsedOutput = JSON.parse(outputLines[outputLines.length - 2]);
+
+    // Check if contract was migrated
+    expect(parsedOutput).toHaveProperty(contract.id!);
+    const newContractId = parsedOutput[contract.id!];
+    expect(newContractId).toBeTruthy();
+    expect(newContractId).not.toEqual(contract.id);
+
+    // should be able to query the new contract record
+    const newContract: any = await conn2.sobject('Contract').retrieve(contract.id!);
+    expect(newContract).toBeDefined();
+    expect(newContract.Status).toEqual('Activated');
 }, 60000);
