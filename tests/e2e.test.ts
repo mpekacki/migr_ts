@@ -54,6 +54,10 @@ async function runMigration(config: any) {
     child.stdout?.on('data', (data) => {
         console.log(data);
         capturedOutput += data;
+        if (data.includes('Do you want to continue? (y/n)')) {
+            console.log('sending y');
+            child.stdin?.write('y\n');
+        }
     });
     child.stderr?.on('data', (data) => {
         console.error(data);
@@ -62,6 +66,7 @@ async function runMigration(config: any) {
     await new Promise(resolve => child.on('close', resolve));
 
     expect(capturedError).toBe('');
+    expect(capturedOutput).toContain('Do you want to continue? (y/n)');
     const outputLines = capturedOutput.split('\n');
     expect(outputLines.length).toBeGreaterThan(1);
     return { 

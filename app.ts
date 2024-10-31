@@ -29,7 +29,7 @@ interface Options {
     }[];
 }
 
-async function main(options: Options, output: (output: string) => void) {
+async function main(options: Options, output: (output: string) => void, input: (question: string) => Promise<string>) {
     output(`starting migration: ${JSON.stringify(options)}`);
     
     const allAuths = await AuthInfo.listAllAuthorizations();
@@ -137,6 +137,21 @@ async function main(options: Options, output: (output: string) => void) {
         recordIdsToFetch = newRecordIdsToFetch;
     }
 
+    output(`fetched ${Object.keys(fetchedRecordsByIds).length} records`);
+    // print numbers of records by sobject type
+    const sObjectTypes = [...new Set(Object.values(fetchedRecordsByIds).map(record => record.attributes?.type))];
+    for (const sObjectType of sObjectTypes) {
+        output(`${sObjectType}: ${Object.values(fetchedRecordsByIds).filter(record => record.attributes?.type === sObjectType).length}`);
+    }
+
+    // ask for confirmation
+    const confirmation = await input(`Do you want to continue? (y/n)`);
+    output(`confirmation: ${confirmation}`);
+    if (confirmation !== 'y') {
+        output('Aborted');
+        return;
+    }
+
     const toUpdateLater: Record<string, Record<string, any>> = {};
     while (Object.keys(fetchedRecordsByIds).length > 0) {
         let anyRecordMigrated = false;
@@ -187,9 +202,11 @@ async function main(options: Options, output: (output: string) => void) {
                                 // find solver that matches the error message
                                 const solver = options.solvers.find(solver => e.message.includes(solver.message));
                                 if (solver) {
-                                    toUpdateLater[recordId] = {
-                                        attributes: record.attributes
-                                    };
+                                    if (!(recordId in toUpdateLater)) {
+                                        toUpdateLater[recordId] = {
+                                            attributes: record.attributes
+                                        };
+                                    }
                                     for (const changeField of solver.changeFields) {
                                         toUpdateLater[recordId][changeField.field] = record[changeField.field];
                                         record[changeField.field] = changeField.value;

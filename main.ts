@@ -2,6 +2,12 @@ import { program } from 'commander';
 import { main, Options } from './app';
 import fs from 'fs';
 import { terminal } from 'terminal-kit';
+import readline from 'readline';
+
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+});
 
 program
     .option('-c, --config-json <config-json>', 'The path to the config file');
@@ -17,4 +23,8 @@ if (!program.opts().configJson) {
 main(options, (output: string) => {
     terminal(output);
     terminal('\n');
+}, async (question: string) => {
+    return new Promise((resolve) => rl.question(question, resolve));
+}).finally(() => {
+    rl.close();
 });
