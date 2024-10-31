@@ -1,5 +1,5 @@
 import { Connection, AuthInfo } from '@salesforce/core';
-import { DescribeSObjectResult, Field } from 'jsforce';
+import { DescribeSObjectResult, Field, SaveResult, Schema, SObjectRecord, SObjectInputRecord, SObjectUpdateRecord } from 'jsforce';
 import fs from 'fs';
 import path from 'path';
 import { scanForCircularDependency } from './circular';
@@ -70,11 +70,15 @@ async function main(options: Options, output: (output: string) => void, input: (
     };
     const getSObjectType = async (recordId: string): Promise<string> => {
         const prefix = recordId.substring(0, 3);
-        return describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix)?.name!;
+        const sobject = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix);
+        if (!sobject) {
+            throw new Error(`SObject with prefix ${prefix} not found`);
+        }
+        return sobject.name;
     };
 
     let recordIdsToFetch = options.recordIds;
-    const fetchedRecordsByIds: Record<string, any> = {};
+    const fetchedRecordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     const lookupFieldsBySObjectType: Record<string, Field[]> = {};
     const old2new: Record<string, string> = {};
 
@@ -99,9 +103,9 @@ async function main(options: Options, output: (output: string) => void, input: (
                 selector.where(`Id = '${recordId}'`);
                 output(`fetching record ${recordId} of type ${sObjectName}`);
                 const records = await selector.execute();
-                let fetchedRecord = records[0];
+                const fetchedRecord = records[0];
                 const creatableFields = (await getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
-                const record: Record<string, any> = {};
+                const record: SObjectRecord<Schema, string> = {};
                 for (const field of creatableFields) {
                     record[field.name] = fetchedRecord[field.name];
                 }
@@ -152,7 +156,7 @@ async function main(options: Options, output: (output: string) => void, input: (
         return;
     }
 
-    const toUpdateLater: Record<string, Record<string, any>> = {};
+    const toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
     while (Object.keys(fetchedRecordsByIds).length > 0) {
         let anyRecordMigrated = false;
         for (const recordId of Object.keys(fetchedRecordsByIds)) {
@@ -181,7 +185,7 @@ async function main(options: Options, output: (output: string) => void, input: (
                 let migratedRecordId = '';
                 const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
                 if (matcher) {
-                    const conditions: Record<string, any> = {};
+                    const conditions: Record<string, string> = {};
                     for (const fieldMapping of matcher.fieldMappings) {
                         conditions[fieldMapping.targetField] = record[fieldMapping.sourceField];
                     }
@@ -195,9 +199,9 @@ async function main(options: Options, output: (output: string) => void, input: (
                     if (isObjectCreatable) {
                         output(`creating record ${recordId} of type ${sObjectName}`);
                         try {
-                            const savedRecord: any = await connB.sobject(sObjectName).create(record);
-                            migratedRecordId = savedRecord.id;
-                        } catch (e: any) {
+                            const savedRecord: SaveResult = await connB.sobject(sObjectName).create(record as SObjectInputRecord<Schema, string>);
+                            migratedRecordId = savedRecord.id!;
+                        } catch (e) {
                             if (options.solvers) {
                                 // find solver that matches the error message
                                 const solver = options.solvers.find(solver => e.message.includes(solver.message));
@@ -205,7 +209,7 @@ async function main(options: Options, output: (output: string) => void, input: (
                                     if (!(recordId in toUpdateLater)) {
                                         toUpdateLater[recordId] = {
                                             attributes: record.attributes
-                                        };
+                                        } as SObjectRecord<Schema, string>;
                                     }
                                     for (const changeField of solver.changeFields) {
                                         toUpdateLater[recordId][changeField.field] = record[changeField.field];
@@ -245,7 +249,7 @@ async function main(options: Options, output: (output: string) => void, input: (
             }
             const records = Object.values(fetchedRecordsByIds).map(record => ({
                 attributes: record.attributes,
-                ...Object.fromEntries(Object.entries(record).filter(([key]) => key === 'attributes' || allLookupFieldsBySObjectType[record.attributes?.type]?.includes(key))),
+                ...Object.fromEntries(Object.entries(record).filter(([key]) => key === 'attributes' || allLookupFieldsBySObjectType[record.attributes!.type]?.includes(key))),
                 Id: Object.keys(fetchedRecordsByIds).find(key => fetchedRecordsByIds[key] === record)
             }));
             output(`looking for circular dependencies with ${JSON.stringify(requiredLookupFieldsBySObjectType)} for records ${JSON.stringify(records)}`);
@@ -257,7 +261,7 @@ async function main(options: Options, output: (output: string) => void, input: (
                     if (!(clear.recordId in toUpdateLater)) {
                         toUpdateLater[clear.recordId] = {
                             attributes: fetchedRecordsByIds[clear.recordId].attributes
-                        };
+                        } as SObjectRecord<Schema, string>;
                     }
                     toUpdateLater[clear.recordId][clear.field] = fetchedRecordsByIds[clear.recordId][clear.field];
                     fetchedRecordsByIds[clear.recordId][clear.field] = '';
@@ -278,8 +282,8 @@ async function main(options: Options, output: (output: string) => void, input: (
             }
         }
         record.Id = old2new[recordId];
-        output(`updating record ${recordId} of type ${record.attributes?.type} to ${JSON.stringify(record)}`);
-        await connB.sobject(record.attributes?.type!).update(record as any);
+        output(`updating record ${recordId} of type ${record.attributes!.type} to ${JSON.stringify(record)}`);
+        await connB.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
     }
 
     fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));

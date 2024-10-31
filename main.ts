@@ -14,7 +14,7 @@ program
 
 program.parse();
 
-let options: Options = JSON.parse(fs.readFileSync(program.opts().configJson, 'utf8')) as Options;
+const options: Options = JSON.parse(fs.readFileSync(program.opts().configJson, 'utf8')) as Options;
 
 if (!program.opts().configJson) {
     throw new Error('Config file is required');
