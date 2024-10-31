@@ -1,5 +1,5 @@
 import { Connection, AuthInfo } from '@salesforce/core';
-import { DescribeSObjectResult, Field, SaveResult, Schema, SObjectRecord, SObjectInputRecord, SObjectUpdateRecord } from 'jsforce';
+import { DescribeSObjectResult, Field, SaveResult, Schema, SObjectRecord, SObjectUpdateRecord } from 'jsforce';
 import fs from 'fs';
 import path from 'path';
 import { scanForCircularDependency } from './circular';
@@ -199,7 +199,7 @@ async function main(options: Options, output: (output: string) => void, input: (
                     if (isObjectCreatable) {
                         output(`creating record ${recordId} of type ${sObjectName}`);
                         try {
-                            const savedRecord: SaveResult = await connB.sobject(sObjectName).create(record as SObjectInputRecord<Schema, string>);
+                            const savedRecord: SaveResult = await connB.sobject(sObjectName).create(record);
                             migratedRecordId = savedRecord.id!;
                         } catch (e) {
                             if (options.solvers) {
