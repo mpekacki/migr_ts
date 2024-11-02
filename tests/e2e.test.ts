@@ -4,8 +4,8 @@ import { exec } from 'child_process';
 import fs from 'fs';
 
 
-const sourceOrgAlias = 'tesrMigrationOrgA';
-const targetOrgAlias = 'tesrMigrationOrgB';
+const sourceOrgAlias = 'testMigrationOrgA';
+const targetOrgAlias = 'testMigrationOrgB';
 
 afterEach(async () => {
     try {
@@ -104,6 +104,8 @@ const defaultMatchers = [
 ];
 
 test('migrate record', async () => {
+    console.log('starting test: migrate record');
+
     jest.setTimeout(60000);
 
     const { conn1, conn2 } = await setupTestConnections();
@@ -274,6 +276,8 @@ test('migrate record', async () => {
 }, 60000);
 
 test('migrate record with error', async () => {
+    console.log('starting test: migrate record with error');
+
     jest.setTimeout(60000);
 
     const { conn1, conn2 } = await setupTestConnections();

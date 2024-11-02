@@ -91,47 +91,43 @@ async function main(options: Options, output: (output: string) => void, input: (
         const newRecordIdsToFetch: string[] = [];
         for (const recordId of recordIdsToFetch) {
             const sObjectName = await getSObjectType(recordId);
-            if (sObjectName) {
-                const sobjectDescribe = await getSObjectDescribe(sObjectName);
-                const relationships = options.relationships?.[sObjectName];
-                const selector = connA.sobject(sObjectName).select('*');
-                if (relationships) {
-                    for (const relationship of relationships) {
-                        selector.include(relationship.name);
-                    }
+            const sobjectDescribe = await getSObjectDescribe(sObjectName);
+            const relationships = options.relationships?.[sObjectName];
+            const selector = connA.sobject(sObjectName).select('*');
+            if (relationships) {
+                for (const relationship of relationships) {
+                    selector.include(relationship.name);
                 }
-                selector.where(`Id = '${recordId}'`);
-                output(`fetching record ${recordId} of type ${sObjectName}`);
-                const records = await selector.execute();
-                const fetchedRecord = records[0];
-                const creatableFields = (await getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
-                const record: SObjectRecord<Schema, string> = {};
-                for (const field of creatableFields) {
-                    record[field.name] = fetchedRecord[field.name];
+            }
+            selector.where(`Id = '${recordId}'`);
+            output(`fetching record ${recordId} of type ${sObjectName}`);
+            const records = await selector.execute();
+            const fetchedRecord = records[0];
+            const creatableFields = (await getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
+            const record: SObjectRecord<Schema, string> = {};
+            for (const field of creatableFields) {
+                record[field.name] = fetchedRecord[field.name];
+            }
+            record.attributes = fetchedRecord.attributes;
+            fetchedRecordsByIds[recordId] = record;
+            const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
+            if (lookupFields.length > 0) {
+                lookupFieldsBySObjectType[sObjectName] = lookupFields;
+            }
+            for (const lookupField of lookupFields) {
+                const lookupValue = record[lookupField.name];
+                if (lookupValue && !(lookupValue in fetchedRecordsByIds) && !newRecordIdsToFetch.includes(lookupValue)) {
+                    newRecordIdsToFetch.push(lookupValue);
                 }
-                record.attributes = fetchedRecord.attributes;
-                fetchedRecordsByIds[recordId] = record;
-                const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
-                if (lookupFields.length > 0) {
-                    lookupFieldsBySObjectType[sObjectName] = lookupFields;
-                }
-                for (const lookupField of lookupFields) {
-                    const lookupValue = record[lookupField.name];
-                    if (lookupValue) {
-                        if (!(lookupValue in fetchedRecordsByIds) && !newRecordIdsToFetch.includes(lookupValue)) {
-                            newRecordIdsToFetch.push(lookupValue);
-                        }
-                    }
-                }
-                if (relationships) {
-                    for (const relationship of relationships) {
-                        const relatedRecords = fetchedRecord[relationship.name]?.records;
-                        output(`related records of ${relationship.name}: ${relatedRecords?.length}`);
-                        if (relatedRecords) {
-                            for (const relatedRecord of relatedRecords) {
-                                if (!(relatedRecord.Id in fetchedRecordsByIds) && !newRecordIdsToFetch.includes(relatedRecord.Id!)) {
-                                    newRecordIdsToFetch.push(relatedRecord.Id!);
-                                }
+            }
+            if (relationships) {
+                for (const relationship of relationships) {
+                    const relatedRecords = fetchedRecord[relationship.name]?.records;
+                    output(`related records of ${relationship.name}: ${relatedRecords?.length}`);
+                    if (relatedRecords) {
+                        for (const relatedRecord of relatedRecords) {
+                            if (!(relatedRecord.Id in fetchedRecordsByIds) && !newRecordIdsToFetch.includes(relatedRecord.Id!)) {
+                                newRecordIdsToFetch.push(relatedRecord.Id!);
                             }
                         }
                     }
@@ -236,16 +232,14 @@ async function main(options: Options, output: (output: string) => void, input: (
             // build lookupFieldsBySObjectType from object describes
             const requiredLookupFieldsBySObjectType: Record<string, string[]> = {};
             const allLookupFieldsBySObjectType: Record<string, string[]> = {};
-            const uniqueSObjectTypes = [...new Set(Object.values(fetchedRecordsByIds).map(record => record.attributes?.type))];
+            const uniqueSObjectTypes = [...new Set(Object.values(fetchedRecordsByIds).map(record => record.attributes!.type))];
             for (const sObjectName of uniqueSObjectTypes) {
-                if (sObjectName) {
-                    requiredLookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
-                        .filter(field => field.type === 'reference' && !field.nillable && field.createable)
-                        .map(field => field.name);
-                    allLookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
-                        .filter(field => field.type === 'reference' && field.createable)
-                        .map(field => field.name);
-                }
+                requiredLookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
+                    .filter(field => field.type === 'reference' && !field.nillable && field.createable)
+                    .map(field => field.name);
+                allLookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
+                    .filter(field => field.type === 'reference' && field.createable)
+                    .map(field => field.name);
             }
             const records = Object.values(fetchedRecordsByIds).map(record => ({
                 attributes: record.attributes,
