@@ -15,7 +15,6 @@ export const scanForCircularDependency = (records: SfRecord[], requiredLookupsBy
 
     const search = (recordId: string, path: string[]) => {
         const record = recordsById[recordId];
-        console.log(`Searching ${JSON.stringify(record)} with path ${JSON.stringify(path)}`);
         for (const field of Object.keys(record)) {
             if (field !== 'Id' && field !== 'attributes') {
                 const lookup = record[field as string] as string;

@@ -29,8 +29,15 @@ interface Options {
     }[];
 }
 
-async function main(options: Options, output: (output: string) => void, input: (question: string) => Promise<string>) {
-    output(`starting migration: ${JSON.stringify(options)}`);
+interface IOEvent {
+    category: 'output' | 'input';
+    message: string;
+    type: 'confirm_migration' | 'info';
+    data?: string;
+}
+
+async function main(options: Options, output: (output: IOEvent) => void, input: (question: IOEvent) => Promise<string>) {
+    output({ category: 'output', message: `starting migration: ${JSON.stringify(options)}`, type: 'info' });
     
     const allAuths = await AuthInfo.listAllAuthorizations();
 
@@ -100,7 +107,7 @@ async function main(options: Options, output: (output: string) => void, input: (
                 }
             }
             selector.where(`Id = '${recordId}'`);
-            output(`fetching record ${recordId} of type ${sObjectName}`);
+            output({ category: 'output', message: `fetching record ${recordId} of type ${sObjectName}`, type: 'info' });
             const records = await selector.execute();
             const fetchedRecord = records[0];
             const creatableFields = (await getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
@@ -123,7 +130,7 @@ async function main(options: Options, output: (output: string) => void, input: (
             if (relationships) {
                 for (const relationship of relationships) {
                     const relatedRecords = fetchedRecord[relationship.name]?.records;
-                    output(`related records of ${relationship.name}: ${relatedRecords?.length}`);
+                    output({ category: 'output', message: `related records of ${relationship.name}: ${relatedRecords?.length}`, type: 'info' });
                     if (relatedRecords) {
                         for (const relatedRecord of relatedRecords) {
                             if (!(relatedRecord.Id in fetchedRecordsByIds) && !newRecordIdsToFetch.includes(relatedRecord.Id!)) {
@@ -137,18 +144,18 @@ async function main(options: Options, output: (output: string) => void, input: (
         recordIdsToFetch = newRecordIdsToFetch;
     }
 
-    output(`fetched ${Object.keys(fetchedRecordsByIds).length} records`);
+    output({ category: 'output', message: `fetched ${Object.keys(fetchedRecordsByIds).length} records`, type: 'info' });
     // print numbers of records by sobject type
     const sObjectTypes = [...new Set(Object.values(fetchedRecordsByIds).map(record => record.attributes?.type))];
     for (const sObjectType of sObjectTypes) {
-        output(`${sObjectType}: ${Object.values(fetchedRecordsByIds).filter(record => record.attributes?.type === sObjectType).length}`);
+        output({ category: 'output', message: `${sObjectType}: ${Object.values(fetchedRecordsByIds).filter(record => record.attributes?.type === sObjectType).length}`, type: 'info' });
     }
 
     // ask for confirmation
-    const confirmation = await input(`Do you want to continue? (y/n)`);
-    output(`confirmation: ${confirmation}`);
+    const confirmation = await input({ category: 'input', message: 'Do you want to continue? (y/n)', type: 'confirm_migration' });
+    output({ category: 'output', message: `confirmation: ${confirmation}`, type: 'info' });
     if (confirmation !== 'y') {
-        output('Aborted');
+        output({ category: 'output', message: 'Aborted', type: 'info' });
         return;
     }
 
@@ -166,9 +173,9 @@ async function main(options: Options, output: (output: string) => void, input: (
                     if (lookupValue) {
                         if (!(lookupValue in old2new) && lookupValue in fetchedRecordsByIds) {
                             recordReady = false;
-                            output(`record ${recordId} is not ready because lookup field ${lookupField.name} (${lookupValue}) is not migrated`);
+                            output({ category: 'output', message: `record ${recordId} is not ready because lookup field ${lookupField.name} (${lookupValue}) is not migrated`, type: 'info' });
                         } else if (lookupValue in old2new) {
-                            output(`mapping ${lookupField.name} to ${lookupValue} for record ${recordId} of type ${sObjectName} - new value: ${old2new[lookupValue]}`);
+                            output({ category: 'output', message: `mapping ${lookupField.name} to ${lookupValue} for record ${recordId} of type ${sObjectName} - new value: ${old2new[lookupValue]}`, type: 'info' });
                             record[lookupField.name] = old2new[lookupValue];
                             if (record[lookupField.name] === '') {
                                 delete record[lookupField.name];
@@ -186,14 +193,14 @@ async function main(options: Options, output: (output: string) => void, input: (
                         conditions[fieldMapping.targetField] = record[fieldMapping.sourceField];
                     }
                     const selector = connB.sobject(sObjectName).find(conditions).select('Id');
-                    output(`querying for existing record: ${await selector.toSOQL()}`);
+                    output({ category: 'output', message: `querying for existing record: ${await selector.toSOQL()}`, type: 'info' });
                     const migratedRecord = await selector.execute();
                     migratedRecordId = migratedRecord[0].Id!;
-                    output(`found existing record ${migratedRecordId} of type ${sObjectName}`);
+                    output({ category: 'output', message: `found existing record ${migratedRecordId} of type ${sObjectName}`, type: 'info' });
                 } else {
                     const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
                     if (isObjectCreatable) {
-                        output(`creating record ${recordId} of type ${sObjectName}`);
+                        output({ category: 'output', message: `creating record ${recordId} of type ${sObjectName}`, type: 'info' });
                         try {
                             const savedRecord: SaveResult = await connB.sobject(sObjectName).create(record);
                             migratedRecordId = savedRecord.id!;
@@ -211,16 +218,16 @@ async function main(options: Options, output: (output: string) => void, input: (
                                         toUpdateLater[recordId][changeField.field] = record[changeField.field];
                                         record[changeField.field] = changeField.value;
                                     }
-                                    output(`fixing using solver: ${solver.message}`);
-                                    output(`saved old fields in toUpdateLater: ${JSON.stringify(toUpdateLater[recordId])}`);
+                                    output({ category: 'output', message: `fixing using solver: ${solver.message}`, type: 'info' });
+                                    output({ category: 'output', message: `saved old fields in toUpdateLater: ${JSON.stringify(toUpdateLater[recordId])}`, type: 'info' });
                                     anyRecordMigrated = true;
                                     continue;
                                 }
                             }
                         }
-                        output(`created record ${migratedRecordId} of type ${sObjectName}`);
+                        output({ category: 'output', message: `created record ${migratedRecordId} of type ${sObjectName}`, type: 'info' });
                     } else {
-                        output(`record ${recordId} of type ${sObjectName} is not creatable`);
+                        output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not creatable`, type: 'info' });
                     }
                 }
                 old2new[recordId] = migratedRecordId!;
@@ -246,10 +253,10 @@ async function main(options: Options, output: (output: string) => void, input: (
                 ...Object.fromEntries(Object.entries(record).filter(([key]) => key === 'attributes' || allLookupFieldsBySObjectType[record.attributes!.type]?.includes(key))),
                 Id: Object.keys(fetchedRecordsByIds).find(key => fetchedRecordsByIds[key] === record)
             }));
-            output(`looking for circular dependencies with ${JSON.stringify(requiredLookupFieldsBySObjectType)} for records ${JSON.stringify(records)}`);
+            output({ category: 'output', message: `looking for circular dependencies with ${JSON.stringify(requiredLookupFieldsBySObjectType)} for records ${JSON.stringify(records)}`, type: 'info' });
             const toClear = scanForCircularDependency(records, requiredLookupFieldsBySObjectType);
             if (toClear.length > 0) {
-                output(`found circular dependency: ${JSON.stringify(toClear)}`);
+                output({ category: 'output', message: `found circular dependency: ${JSON.stringify(toClear)}`, type: 'info' });
                 // clear the fields that are causing the circular dependency
                 for (const clear of toClear) {
                     if (!(clear.recordId in toUpdateLater)) {
@@ -276,12 +283,12 @@ async function main(options: Options, output: (output: string) => void, input: (
             }
         }
         record.Id = old2new[recordId];
-        output(`updating record ${recordId} of type ${record.attributes!.type} to ${JSON.stringify(record)}`);
+        output({ category: 'output', message: `updating record ${recordId} of type ${record.attributes!.type} to ${JSON.stringify(record)}`, type: 'info' });
         await connB.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
     }
 
     fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
-    output(JSON.stringify(old2new));
+    output({ category: 'output', message: 'Finished', data: JSON.stringify(old2new), type: 'info' });
 }
 
-export { main, Options };
+export { main, Options, IOEvent };

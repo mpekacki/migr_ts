@@ -1,5 +1,5 @@
 import { program } from 'commander';
-import { main, Options } from './app';
+import { IOEvent, main, Options } from './app';
 import fs from 'fs';
 import { terminal } from 'terminal-kit';
 import readline from 'readline';
@@ -20,11 +20,11 @@ if (!program.opts().configJson) {
     throw new Error('Config file is required');
 }
 
-main(options, (output: string) => {
-    terminal(output);
+main(options, (output: IOEvent) => {
+    terminal(JSON.stringify(output));
     terminal('\n');
-}, async (question: string) => {
-    return new Promise((resolve) => rl.question(question, resolve));
+}, async (question: IOEvent) => {
+    return new Promise((resolve) => rl.question(JSON.stringify(question), resolve));
 }).finally(() => {
     rl.close();
 });

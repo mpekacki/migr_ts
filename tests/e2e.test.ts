@@ -2,6 +2,7 @@ import { test, expect } from '@jest/globals';
 import { Connection, AuthInfo } from '@salesforce/core';
 import { exec } from 'child_process';
 import fs from 'fs';
+import { IOEvent } from '../app';
 
 
 const sourceOrgAlias = 'testMigrationOrgA';
@@ -47,16 +48,24 @@ async function setupTestConnections() {
 
 async function runMigration(config: any) {
     fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
-    let capturedOutput = '';
+    const capturedOutput: IOEvent[] = [];
     let capturedError = '';
 
     const child = exec(`npx ts-node ./main.ts --config-json ./config_test.json`);
     child.stdout?.on('data', (data) => {
         console.log(data);
-        capturedOutput += data;
-        if (data.includes('Do you want to continue? (y/n)')) {
+        const lines = data.toString().split('\n');
+        for (const line of lines) {
+            if (line.trim() === '') {
+                continue;
+            }
+            const event = JSON.parse(line) as IOEvent;
+            capturedOutput.push(event);
+            if (event.category === 'input' && event.type === 'confirm_migration') {
             console.log('sending y');
-            child.stdin?.write('y\n');
+            child.stdin?.write('y');
+                child.stdin?.write('\n');
+            }
         }
     });
     child.stderr?.on('data', (data) => {
@@ -66,11 +75,9 @@ async function runMigration(config: any) {
     await new Promise(resolve => child.on('close', resolve));
 
     expect(capturedError).toBe('');
-    expect(capturedOutput).toContain('Do you want to continue? (y/n)');
-    const outputLines = capturedOutput.split('\n');
-    expect(outputLines.length).toBeGreaterThan(1);
+    expect(capturedOutput.length).toBeGreaterThan(1);
     return { 
-        parsedOutput: JSON.parse(outputLines[outputLines.length - 2]),
+        parsedOutput: JSON.parse(capturedOutput[capturedOutput.length - 1].data!),
         capturedOutput
     };
 }
