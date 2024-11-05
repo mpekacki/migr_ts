@@ -32,7 +32,7 @@ interface Options {
 interface IOEvent {
     category: 'output' | 'input';
     message: string;
-    type: 'confirm_migration' | 'info';
+    type: 'confirm_migration' | 'info' | 'insert_error';
     data?: string;
 }
 

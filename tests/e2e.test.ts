@@ -46,7 +46,7 @@ async function setupTestConnections() {
     return { conn1, conn2 };
 }
 
-async function runMigration(config: any) {
+async function runMigration(config: any, onOutput?: (output: IOEvent, writeToInput: (input: string) => void) => void) {
     fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
     const capturedOutput: IOEvent[] = [];
     let capturedError = '';
@@ -61,9 +61,14 @@ async function runMigration(config: any) {
             }
             const event = JSON.parse(line) as IOEvent;
             capturedOutput.push(event);
-            if (event.category === 'input' && event.type === 'confirm_migration') {
-            console.log('sending y');
-            child.stdin?.write('y');
+            if (onOutput) {
+                onOutput(event, (input: string) => {
+                    console.log('sending input:', input);
+                    child.stdin?.write(input);
+                });
+            } else if (event.category === 'input' && event.type === 'confirm_migration') {
+                console.log('sending y');
+                child.stdin?.write('y');
                 child.stdin?.write('\n');
             }
         }
@@ -282,7 +287,7 @@ test('migrate record', async () => {
     expect(newContact2.AccountId).toEqual(newAccountId);
 }, 60000);
 
-test('migrate record with error', async () => {
+test('migrate record with error fixed automatically', async () => {
     console.log('starting test: migrate record with error');
 
     jest.setTimeout(60000);
@@ -324,6 +329,61 @@ test('migrate record with error', async () => {
     };
 
     const { parsedOutput } = await runMigration(config);
+
+    // Check if contract was migrated
+    expect(parsedOutput).toHaveProperty(contract.id!);
+    const newContractId = parsedOutput[contract.id!];
+    expect(newContractId).toBeTruthy();
+    expect(newContractId).not.toEqual(contract.id);
+
+    // should be able to query the new contract record
+    const newContract: any = await conn2.sobject('Contract').retrieve(newContractId);
+    expect(newContract).toBeDefined();
+    expect(newContract.Status).toEqual('Activated');
+}, 60000);
+
+test('migrate record with error fixed manually', async () => {
+    console.log('starting test: migrate record with error fixed manually');
+
+    jest.setTimeout(60000);
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    console.log(account);
+    expect(account.id).toBeDefined();
+
+    const contract = await conn1.sobject('Contract').create({ 
+        AccountId: account.id!, 
+        Status: 'Draft', 
+        StartDate: new Date().toISOString(), 
+        ContractTerm: 12 
+    });
+    console.log(contract);
+    expect(contract.id).toBeDefined();
+
+    await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [contract.id!],
+        matchers: defaultMatchers
+    };
+
+    let askedToFixError = false;
+    const { parsedOutput } = await runMigration(config, (output, writeToInput) => {
+        if (output.category === 'input' && output.type === 'confirm_migration') {
+            writeToInput('y\n');
+        }
+        if (output.category === 'input' && output.type === 'insert_error') {
+            askedToFixError = true;
+            writeToInput('{"Status": "Draft"}\n');
+        }
+    });
+
+    expect(askedToFixError).toBeTruthy();
 
     // Check if contract was migrated
     expect(parsedOutput).toHaveProperty(contract.id!);
