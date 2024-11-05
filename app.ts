@@ -224,6 +224,20 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                     continue;
                                 }
                             }
+                            // no solver found, ask user what to do
+                            const userInput = await input({ category: 'input', message: `no solver found for error: ${e.message}`, type: 'insert_error' });
+                            const fieldsToUpdate = JSON.parse(userInput);
+                            for (const field of Object.keys(fieldsToUpdate)) {
+                                if (!(recordId in toUpdateLater)) {
+                                    toUpdateLater[recordId] = {
+                                        attributes: record.attributes
+                                    } as SObjectRecord<Schema, string>;
+                                }
+                                toUpdateLater[recordId][field] = record[field];
+                                record[field] = fieldsToUpdate[field];
+                            }
+                            anyRecordMigrated = true;
+                            continue;
                         }
                         output({ category: 'output', message: `created record ${migratedRecordId} of type ${sObjectName}`, type: 'info' });
                     } else {
