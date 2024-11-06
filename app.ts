@@ -195,9 +195,12 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                     const selector = connB.sobject(sObjectName).find(conditions).select('Id');
                     output({ category: 'output', message: `querying for existing record: ${await selector.toSOQL()}`, type: 'info' });
                     const migratedRecord = await selector.execute();
-                    migratedRecordId = migratedRecord[0].Id!;
-                    output({ category: 'output', message: `found existing record ${migratedRecordId} of type ${sObjectName}`, type: 'info' });
-                } else {
+                    if (migratedRecord.length > 0) {
+                        migratedRecordId = migratedRecord[0].Id!;
+                        output({ category: 'output', message: `found existing record ${migratedRecordId} of type ${sObjectName}`, type: 'info' });
+                    }
+                }
+                if (!migratedRecordId) {
                     const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
                     if (isObjectCreatable) {
                         output({ category: 'output', message: `creating record ${recordId} of type ${sObjectName}`, type: 'info' });

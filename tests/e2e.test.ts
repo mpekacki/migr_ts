@@ -396,3 +396,57 @@ test('migrate record with error fixed manually', async () => {
     expect(newContract).toBeDefined();
     expect(newContract.Status).toEqual('Activated');
 }, 60000);
+
+test('match not found, create new record', async () => {
+    console.log('starting test: match not found, create new record');
+
+    jest.setTimeout(60000);
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const account1Name = `Ebola Cola ${Math.random()}`;
+    const account2Name = `ACME ${Math.random()}`;
+
+    console.log('creating records');
+    const account1 = await conn1.sobject('Account').create({ Name: account1Name });
+    console.log(account1);
+    expect(account1.id).toBeDefined();
+
+    const account2 = await conn1.sobject('Account').create({ Name: account2Name });
+    console.log(account2);
+    expect(account2.id).toBeDefined();
+
+    const account1B = await conn2.sobject('Account').create({ Name: account1Name });
+    console.log(account1B);
+    expect(account1B.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [account1.id!, account2.id!],
+        matchers: [...defaultMatchers, {
+            sObjectType: 'Account',
+            fieldMappings: [
+                { sourceField: 'Name', targetField: 'Name' }
+            ],
+            whenMissing: 'create'
+        }]
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(account1.id!);
+    const newAccount1Id = parsedOutput[account1.id!];
+    expect(newAccount1Id).toBeTruthy();
+    expect(newAccount1Id).toEqual(account1B.id);
+
+    expect(parsedOutput).toHaveProperty(account2.id!);
+    const newAccount2Id = parsedOutput[account2.id!];
+    expect(newAccount2Id).toBeTruthy();
+    expect(newAccount2Id).not.toEqual(account2.id);
+
+    // should be able to query the new account record
+    const newAccount2: any = await conn2.sobject('Account').retrieve(newAccount2Id);
+    expect(newAccount2).toBeDefined();
+    expect(newAccount2.Name).toEqual(account2Name);
+}, 60000);
