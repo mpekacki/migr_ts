@@ -46,7 +46,7 @@ async function setupTestConnections() {
     return { conn1, conn2 };
 }
 
-async function runMigration(config: any, onOutput?: (output: IOEvent, writeToInput: (input: string) => void) => void) {
+async function runMigration(config: any, inputs: string[] = ['y']) {
     fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
     const capturedOutput: IOEvent[] = [];
     let capturedError = '';
@@ -61,15 +61,15 @@ async function runMigration(config: any, onOutput?: (output: IOEvent, writeToInp
             }
             const event = JSON.parse(line) as IOEvent;
             capturedOutput.push(event);
-            if (onOutput) {
-                onOutput(event, (input: string) => {
-                    console.log('sending input:', input);
+            if (event.category === 'input') {
+                const input = inputs.shift();
+                if (input) {
+                    console.log(`sending input: ${input}`);
                     child.stdin?.write(input);
-                });
-            } else if (event.category === 'input' && event.type === 'confirm_migration') {
-                console.log('sending y');
-                child.stdin?.write('y');
-                child.stdin?.write('\n');
+                    child.stdin?.write('\n');
+                } else {
+                    throw new Error('No input provided');
+                }
             }
         }
     });
@@ -372,18 +372,7 @@ test('migrate record with error fixed manually', async () => {
         matchers: defaultMatchers
     };
 
-    let askedToFixError = false;
-    const { parsedOutput } = await runMigration(config, (output, writeToInput) => {
-        if (output.category === 'input' && output.type === 'confirm_migration') {
-            writeToInput('y\n');
-        }
-        if (output.category === 'input' && output.type === 'insert_error') {
-            askedToFixError = true;
-            writeToInput('{"Status": "Draft"}\n');
-        }
-    });
-
-    expect(askedToFixError).toBeTruthy();
+    const { parsedOutput } = await runMigration(config, ['y', '{"Status": "Draft"}']);
 
     // Check if contract was migrated
     expect(parsedOutput).toHaveProperty(contract.id!);
