@@ -491,6 +491,50 @@ test('migrate record with error - manually skip record', async () => {
     expect(newAccount.Name).toEqual('Ebola Cola');
 }, 60000);
 
+test('migrate record with error - automatically match duplicate record', async () => {
+    console.log('starting test: migrate record with error - automatically match duplicate record');
+
+    jest.setTimeout(60000);
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const externalId = `ext-${Math.random()}`;
+    const custObjCorgA = await conn1.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    console.log(custObjCorgA);
+    expect(custObjCorgA.id).toBeDefined();
+
+    const custObjCorgB = await conn2.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    console.log(custObjCorgB);
+    expect(custObjCorgB.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [custObjCorgA.id!],
+        matchers: defaultMatchers,
+        solvers: [
+            {
+                action: 'match',
+                message: 'duplicate value found: External_Id__c duplicates value on record with id: ([a-zA-Z0-9]{15,18})'
+            }
+        ]
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    // check if the record was migrated
+    expect(parsedOutput).toHaveProperty(custObjCorgA.id!);
+    const newCustObjCId = parsedOutput[custObjCorgA.id!];
+    expect(newCustObjCId).toBeTruthy();
+    expect(newCustObjCId).toEqual(custObjCorgB.id);
+
+    // should be able to query the new custom object C record
+    const newCustObjC: any = await conn2.sobject('Custom_Object_C__c').retrieve(newCustObjCId);
+    expect(newCustObjC).toBeDefined();
+    expect(newCustObjC.External_Id__c).toEqual(externalId);
+}, 60000);
+
 test('match not found, create new record', async () => {
     console.log('starting test: match not found, create new record');
 

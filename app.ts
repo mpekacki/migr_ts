@@ -20,7 +20,7 @@ interface Options {
             name: string;
         }[];
     };
-    solvers: (FixSolver | SkipSolver)[];
+    solvers: (FixSolver | SkipSolver | MatchSolver)[];
 }
 
 interface Solver {
@@ -37,6 +37,10 @@ interface FixSolver extends Solver {
 
 interface SkipSolver extends Solver {
     action: 'skip';
+}
+
+interface MatchSolver extends Solver {
+    action: 'match';
 }
 
 interface IOEvent {
@@ -224,7 +228,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                             let fixedUsingSolver = false;
                             if (options.solvers) {
                                 // find solver that matches the error message
-                                const solver = options.solvers.find(solver => e.message.includes(solver.message));
+                                const solver = options.solvers.find(solver => new RegExp(solver.message).test(e.message));
                                 if (solver) {
                                     if (solver.action === 'fix') {
                                         if (!(recordId in toUpdateLater)) {
@@ -243,6 +247,13 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                     } else if (solver.action === 'skip') {
                                         output({ category: 'output', message: `skipping record ${recordId} of type ${sObjectName} using solver: ${solver.message}`, type: 'info' });
                                         fixedUsingSolver = true;
+                                    } else if (solver.action === 'match') {
+                                        output({ category: 'output', message: `matching record ${recordId} of type ${sObjectName} using solver: ${solver.message}`, type: 'info' });
+                                        const matchId = new RegExp(solver.message).exec(e.message)?.[1];
+                                        if (matchId) {
+                                            migratedRecordId = matchId;
+                                            fixedUsingSolver = true;
+                                        }
                                     }
                                 }
                             }
