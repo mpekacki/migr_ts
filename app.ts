@@ -20,13 +20,23 @@ interface Options {
             name: string;
         }[];
     };
-    solvers: {
-        message: string;
-        changeFields: {
-            field: string;
-            value: string;
-        }[];
+    solvers: (FixSolver | SkipSolver)[];
+}
+
+interface Solver {
+    message: string;
+}
+
+interface FixSolver extends Solver {
+    action: 'fix';
+    changeFields: {
+        field: string;
+        value: string;
     }[];
+}
+
+interface SkipSolver extends Solver {
+    action: 'skip';
 }
 
 interface IOEvent {
@@ -161,7 +171,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
 
     const toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
     while (Object.keys(fetchedRecordsByIds).length > 0) {
-        let anyRecordMigrated = false;
+        let anyRecordProcessed = false;
         for (const recordId of Object.keys(fetchedRecordsByIds)) {
             const record = fetchedRecordsByIds[recordId];
             const sObjectName = await getSObjectType(recordId);
@@ -185,7 +195,9 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                 }
             }
             if (recordReady) {
+                anyRecordProcessed = true;
                 let migratedRecordId = '';
+                let retryRecord = false;
                 const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
                 if (matcher) {
                     const conditions: Record<string, string> = {};
@@ -207,55 +219,64 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                         try {
                             const savedRecord: SaveResult = await connB.sobject(sObjectName).create(record);
                             migratedRecordId = savedRecord.id!;
+                            output({ category: 'output', message: `created record ${migratedRecordId} of type ${sObjectName}`, type: 'info' });
                         } catch (e) {
+                            let fixedUsingSolver = false;
                             if (options.solvers) {
                                 // find solver that matches the error message
                                 const solver = options.solvers.find(solver => e.message.includes(solver.message));
                                 if (solver) {
-                                    if (!(recordId in toUpdateLater)) {
-                                        toUpdateLater[recordId] = {
-                                            attributes: record.attributes
-                                        } as SObjectRecord<Schema, string>;
+                                    if (solver.action === 'fix') {
+                                        if (!(recordId in toUpdateLater)) {
+                                            toUpdateLater[recordId] = {
+                                                attributes: record.attributes
+                                            } as SObjectRecord<Schema, string>;
+                                        }
+                                        for (const changeField of solver.changeFields) {
+                                            toUpdateLater[recordId][changeField.field] = record[changeField.field];
+                                            record[changeField.field] = changeField.value;
+                                        }
+                                        output({ category: 'output', message: `fixing using solver: ${solver.message}`, type: 'info' });
+                                        output({ category: 'output', message: `saved old fields in toUpdateLater: ${JSON.stringify(toUpdateLater[recordId])}`, type: 'info' });
+                                        fixedUsingSolver = true;
+                                        retryRecord = true;
+                                    } else if (solver.action === 'skip') {
+                                        output({ category: 'output', message: `skipping record ${recordId} of type ${sObjectName} using solver: ${solver.message}`, type: 'info' });
+                                        fixedUsingSolver = true;
                                     }
-                                    for (const changeField of solver.changeFields) {
-                                        toUpdateLater[recordId][changeField.field] = record[changeField.field];
-                                        record[changeField.field] = changeField.value;
-                                    }
-                                    output({ category: 'output', message: `fixing using solver: ${solver.message}`, type: 'info' });
-                                    output({ category: 'output', message: `saved old fields in toUpdateLater: ${JSON.stringify(toUpdateLater[recordId])}`, type: 'info' });
-                                    anyRecordMigrated = true;
-                                    continue;
                                 }
                             }
-                            // no solver found, ask user what to do
-                            const userInput = await input({ category: 'input', message: `no solver found for error: ${e.message}`, type: 'insert_error' });
-                            if (userInput === 'f') {
-                                const fieldsJson = await input({ category: 'input', message: 'Enter the fields to update in JSON format:', type: 'insert_error' });
-                                const fieldsToUpdate = JSON.parse(fieldsJson);
-                                for (const field of Object.keys(fieldsToUpdate)) {
-                                    if (!(recordId in toUpdateLater)) {
-                                        toUpdateLater[recordId] = {
-                                            attributes: record.attributes
-                                        } as SObjectRecord<Schema, string>;
+                            if (!fixedUsingSolver) {
+                                // no solver found, ask user what to do
+                                const userInput = await input({ category: 'input', message: `no solver found for error: ${e.message}`, type: 'insert_error' });
+                                if (userInput === 'f') {
+                                    const fieldsJson = await input({ category: 'input', message: 'Enter the fields to update in JSON format:', type: 'insert_error' });
+                                    const fieldsToUpdate = JSON.parse(fieldsJson);
+                                    for (const field of Object.keys(fieldsToUpdate)) {
+                                        if (!(recordId in toUpdateLater)) {
+                                            toUpdateLater[recordId] = {
+                                                attributes: record.attributes
+                                            } as SObjectRecord<Schema, string>;
+                                        }
+                                        toUpdateLater[recordId][field] = record[field];
+                                        record[field] = fieldsToUpdate[field];
                                     }
-                                    toUpdateLater[recordId][field] = record[field];
-                                    record[field] = fieldsToUpdate[field];
+                                    retryRecord = true;
                                 }
-                                anyRecordMigrated = true;
-                                continue;
                             }
                         }
-                        output({ category: 'output', message: `created record ${migratedRecordId} of type ${sObjectName}`, type: 'info' });
                     } else {
                         output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not creatable`, type: 'info' });
                     }
                 }
+                if (retryRecord) {
+                    continue;
+                }
                 old2new[recordId] = migratedRecordId!;
                 delete fetchedRecordsByIds[recordId];
-                anyRecordMigrated = true;
             }
         }
-        if (!anyRecordMigrated) {
+        if (!anyRecordProcessed) {
             // build lookupFieldsBySObjectType from object describes
             const requiredLookupFieldsBySObjectType: Record<string, string[]> = {};
             const allLookupFieldsBySObjectType: Record<string, string[]> = {};

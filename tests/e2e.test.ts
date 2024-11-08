@@ -287,7 +287,7 @@ test('migrate record', async () => {
     expect(newContact2.AccountId).toEqual(newAccountId);
 }, 60000);
 
-test('migrate record with error fixed automatically', async () => {
+test('migrate record with error - fixed automatically', async () => {
     console.log('starting test: migrate record with error');
 
     jest.setTimeout(60000);
@@ -317,6 +317,7 @@ test('migrate record with error fixed automatically', async () => {
         matchers: defaultMatchers,
         solvers: [
             {
+                action: 'fix',
                 message: 'Choose a valid contract status and save your changes. Ask your admin for details.',
                 changeFields: [
                     {
@@ -386,8 +387,63 @@ test('migrate record with error - fixed manually', async () => {
     expect(newContract.Status).toEqual('Activated');
 }, 60000);
 
-test('migrate record with error - skip record', async () => {
-    console.log('starting test: migrate record with error - skip record');
+test('migrate record with error - automatically skip record', async () => {
+    console.log('starting test: migrate record with error - automatically skip record');
+
+    jest.setTimeout(60000);
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    console.log(account);
+    expect(account.id).toBeDefined();
+
+    const contract = await conn1.sobject('Contract').create({ 
+        AccountId: account.id!, 
+        Status: 'Draft', 
+        StartDate: new Date().toISOString(), 
+        ContractTerm: 12 
+    });
+    console.log(contract);
+    expect(contract.id).toBeDefined();
+
+    await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [contract.id!],
+        matchers: defaultMatchers,
+        solvers: [
+            {
+                action: 'skip',
+                message: 'Choose a valid contract status and save your changes. Ask your admin for details.'
+            }
+        ]
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    // Check if contract was migrated
+    expect(parsedOutput).toHaveProperty(contract.id!);
+    const newContractId = parsedOutput[contract.id!];
+    expect(newContractId).toBe('');
+
+    // Check if account was migrated
+    expect(parsedOutput).toHaveProperty(account.id!);
+    const newAccountId = parsedOutput[account.id!];
+    expect(newAccountId).toBeTruthy();
+    expect(newAccountId).not.toEqual(account.id);
+
+    // should be able to query the new account record
+    const newAccount: any = await conn2.sobject('Account').retrieve(newAccountId);
+    expect(newAccount).toBeDefined();
+    expect(newAccount.Name).toEqual('Ebola Cola');
+}, 60000);
+
+test('migrate record with error - manually skip record', async () => {
+    console.log('starting test: migrate record with error - manually skip record');
 
     jest.setTimeout(60000);
 
