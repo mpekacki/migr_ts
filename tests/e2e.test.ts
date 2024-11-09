@@ -8,6 +8,8 @@ import { IOEvent } from '../app';
 const sourceOrgAlias = 'testMigrationOrgA';
 const targetOrgAlias = 'testMigrationOrgB';
 
+jest.setTimeout(60000);
+
 afterEach(async () => {
     try {
         fs.unlinkSync('./config_test.json');
@@ -117,8 +119,6 @@ const defaultMatchers = [
 
 test('migrate record', async () => {
     console.log('starting test: migrate record');
-
-    jest.setTimeout(60000);
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -285,12 +285,10 @@ test('migrate record', async () => {
     expect(newContact2.FirstName).toEqual('Ocean');
     expect(newContact2.LastName).toEqual('Man');
     expect(newContact2.AccountId).toEqual(newAccountId);
-}, 60000);
+});
 
 test('migrate record with error - fixed automatically', async () => {
     console.log('starting test: migrate record with error');
-
-    jest.setTimeout(60000);
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -341,12 +339,10 @@ test('migrate record with error - fixed automatically', async () => {
     const newContract: any = await conn2.sobject('Contract').retrieve(newContractId);
     expect(newContract).toBeDefined();
     expect(newContract.Status).toEqual('Activated');
-}, 60000);
+});
 
 test('migrate record with error - fixed manually', async () => {
     console.log('starting test: migrate record with error fixed manually');
-
-    jest.setTimeout(60000);
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -385,12 +381,10 @@ test('migrate record with error - fixed manually', async () => {
     const newContract: any = await conn2.sobject('Contract').retrieve(newContractId);
     expect(newContract).toBeDefined();
     expect(newContract.Status).toEqual('Activated');
-}, 60000);
+});
 
 test('migrate record with error - automatically skip record', async () => {
     console.log('starting test: migrate record with error - automatically skip record');
-
-    jest.setTimeout(60000);
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -440,12 +434,10 @@ test('migrate record with error - automatically skip record', async () => {
     const newAccount: any = await conn2.sobject('Account').retrieve(newAccountId);
     expect(newAccount).toBeDefined();
     expect(newAccount.Name).toEqual('Ebola Cola');
-}, 60000);
+});
 
 test('migrate record with error - manually skip record', async () => {
     console.log('starting test: migrate record with error - manually skip record');
-
-    jest.setTimeout(60000);
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -489,12 +481,10 @@ test('migrate record with error - manually skip record', async () => {
     const newAccount: any = await conn2.sobject('Account').retrieve(newAccountId);
     expect(newAccount).toBeDefined();
     expect(newAccount.Name).toEqual('Ebola Cola');
-}, 60000);
+});
 
 test('migrate record with error - automatically match duplicate record', async () => {
     console.log('starting test: migrate record with error - automatically match duplicate record');
-
-    jest.setTimeout(60000);
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -533,12 +523,10 @@ test('migrate record with error - automatically match duplicate record', async (
     const newCustObjC: any = await conn2.sobject('Custom_Object_C__c').retrieve(newCustObjCId);
     expect(newCustObjC).toBeDefined();
     expect(newCustObjC.External_Id__c).toEqual(externalId);
-}, 60000);
+});
 
 test('match not found, create new record', async () => {
     console.log('starting test: match not found, create new record');
-
-    jest.setTimeout(60000);
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -587,4 +575,54 @@ test('match not found, create new record', async () => {
     const newAccount2: any = await conn2.sobject('Account').retrieve(newAccount2Id);
     expect(newAccount2).toBeDefined();
     expect(newAccount2.Name).toEqual(account2Name);
-}, 60000);
+});
+
+test('match not found, skip record', async () => {
+    console.log('starting test: match not found, skip record');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const account1Name = `Ebola Cola ${Math.random()}`;
+    const account2Name = `ACME ${Math.random()}`;
+
+    console.log('creating records');
+    const account1 = await conn1.sobject('Account').create({ Name: account1Name });
+    console.log(account1);
+    expect(account1.id).toBeDefined();
+
+    const account2 = await conn1.sobject('Account').create({ Name: account2Name });
+    console.log(account2);
+    expect(account2.id).toBeDefined();
+
+    const account1B = await conn2.sobject('Account').create({ Name: account1Name });
+    console.log(account1B);
+    expect(account1B.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [account1.id!, account2.id!],
+        matchers: [...defaultMatchers, {
+            sObjectType: 'Account',
+            fieldMappings: [
+                { sourceField: 'Name', targetField: 'Name' }
+            ],
+            whenMissing: 'skip'
+        }]
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(account1.id!);
+    const newAccount1Id = parsedOutput[account1.id!];
+    expect(newAccount1Id).toBeTruthy();
+    expect(newAccount1Id).toEqual(account1B.id);
+
+    expect(parsedOutput).toHaveProperty(account2.id!);
+    const newAccount2Id = parsedOutput[account2.id!];
+    expect(newAccount2Id).toBe('');
+
+    // should not be able to query the new account record by account name
+    const newAccount2: any = await conn2.sobject('Account').select('Id').where(`Name = '${account2Name}'`).execute();
+    expect(newAccount2.length).toBe(0);
+});

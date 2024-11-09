@@ -14,6 +14,7 @@ interface Options {
             sourceField: string;
             targetField: string;
         }[];
+        whenMissing: 'skip' | 'create';
     }[];
     relationships: {
         [sObjectType: string]: {
@@ -202,6 +203,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                 anyRecordProcessed = true;
                 let migratedRecordId = '';
                 let retryRecord = false;
+                let skipRecord = false;
                 const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
                 if (matcher) {
                     const conditions: Record<string, string> = {};
@@ -214,9 +216,12 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                     if (migratedRecord.length > 0) {
                         migratedRecordId = migratedRecord[0].Id!;
                         output({ category: 'output', message: `found existing record ${migratedRecordId} of type ${sObjectName}`, type: 'info' });
+                    } else if (matcher.whenMissing === 'skip') {
+                        output({ category: 'output', message: `skipping record ${recordId} of type ${sObjectName} because no existing record was found`, type: 'info' });
+                        skipRecord = true;
                     }
                 }
-                if (!migratedRecordId) {
+                if (!migratedRecordId && !skipRecord) {
                     const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
                     if (isObjectCreatable) {
                         output({ category: 'output', message: `creating record ${recordId} of type ${sObjectName}`, type: 'info' });
