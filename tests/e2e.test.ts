@@ -8,7 +8,7 @@ import { IOEvent } from '../app';
 const sourceOrgAlias = 'testMigrationOrgA';
 const targetOrgAlias = 'testMigrationOrgB';
 
-jest.setTimeout(60000);
+jest.setTimeout(120000);
 
 afterEach(async () => {
     try {

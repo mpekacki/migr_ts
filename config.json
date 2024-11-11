@@ -1,0 +1,65 @@
+{
+  "sourceOrg": "tesrMigrationOrgA",
+  "targetOrg": "tesrMigrationOrgB",
+  "recordIds": [
+    "001KO000008VaWiYAK"
+  ],
+  "matchers": [
+    {
+      "sObjectType": "Profile",
+      "fieldMappings": [
+        {
+          "sourceField": "Name",
+          "targetField": "Name"
+        }
+      ]
+    },
+    {
+      "sObjectType": "User",
+      "fieldMappings": [
+        {
+          "sourceField": "Name",
+          "targetField": "Name"
+        }
+      ]
+    },
+    {
+      "sObjectType": "UserRole",
+      "fieldMappings": [
+        {
+          "sourceField": "Name",
+          "targetField": "Name"
+        }
+      ]
+    },
+    {
+      "sObjectType": "UserLicense",
+      "fieldMappings": [
+        {
+          "sourceField": "Name",
+          "targetField": "Name"
+        }
+      ]
+    },
+    {
+      "sObjectType": "RecordType",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        },
+        {
+          "sourceField": "SobjectType",
+          "targetField": "SobjectType"
+        }
+      ]
+    }
+  ],
+  "relationships": {
+    "Account": [
+      {
+        "name": "Contacts"
+      }
+    ]
+  }
+}
