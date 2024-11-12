@@ -48,7 +48,7 @@ async function setupTestConnections() {
     return { conn1, conn2 };
 }
 
-async function runMigration(config: any, inputs: string[] = ['y']) {
+async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInput: (input: string) => void) => void) | string[] = ['y']) {
     fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
     const capturedOutput: IOEvent[] = [];
     let capturedError = '';
@@ -64,13 +64,21 @@ async function runMigration(config: any, inputs: string[] = ['y']) {
             const event = JSON.parse(line) as IOEvent;
             capturedOutput.push(event);
             if (event.category === 'input') {
-                const input = inputs.shift();
-                if (input) {
-                    console.log(`sending input: ${input}`);
-                    child.stdin?.write(input);
-                    child.stdin?.write('\n');
+                if (typeof inputHandler === 'function') {
+                    inputHandler(event, (input: string) => {
+                        console.log(`sending input: ${input}`);
+                        child.stdin?.write(input);
+                        child.stdin?.write('\n');
+                    });
                 } else {
-                    throw new Error('No input provided');
+                    const input = inputHandler.shift();
+                    if (input) {
+                        console.log(`sending input: ${input}`);
+                        child.stdin?.write(input);
+                        child.stdin?.write('\n');
+                    } else {
+                        throw new Error('No input provided');
+                    }
                 }
             }
         }
@@ -518,6 +526,52 @@ test('migrate record with error - automatically match duplicate record', async (
     const newCustObjCId = parsedOutput[custObjCorgA.id!];
     expect(newCustObjCId).toBeTruthy();
     expect(newCustObjCId).toEqual(custObjCorgB.id);
+
+    // should be able to query the new custom object C record
+    const newCustObjC: any = await conn2.sobject('Custom_Object_C__c').retrieve(newCustObjCId);
+    expect(newCustObjC).toBeDefined();
+    expect(newCustObjC.External_Id__c).toEqual(externalId);
+});
+
+test('migrate record with error - manually retry insert', async () => {
+    console.log('starting test: migrate record with error - manually retry insert');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const externalId = `ext-${Math.random()}`;
+    const custObjCorgA = await conn1.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    console.log(custObjCorgA);
+    expect(custObjCorgA.id).toBeDefined();
+
+    const custObjCorgB = await conn2.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    console.log(custObjCorgB);
+    expect(custObjCorgB.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [custObjCorgA.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config, async (ioEvent: IOEvent, sendInput: (input: string) => void) => {
+        if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
+            sendInput('y');
+        } else if (ioEvent.category === 'input' && ioEvent.type === 'insert_error') {
+            expect(ioEvent.message).toContain('duplicate value found: External_Id__c duplicates value on record with id:');
+            // delete record from Org B
+            await conn2.sobject('Custom_Object_C__c').delete(custObjCorgB.id!);
+            // retry insert
+            sendInput('r');
+        }
+    });
+
+    // check if the record was migrated
+    expect(parsedOutput).toHaveProperty(custObjCorgA.id!);
+    const newCustObjCId = parsedOutput[custObjCorgA.id!];
+    expect(newCustObjCId).toBeTruthy();
+    expect(newCustObjCId).not.toEqual(custObjCorgB.id);
 
     // should be able to query the new custom object C record
     const newCustObjC: any = await conn2.sobject('Custom_Object_C__c').retrieve(newCustObjCId);

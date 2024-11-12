@@ -278,6 +278,8 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                         record[field] = fieldsToUpdate[field];
                                     }
                                     retryRecord = true;
+                                } else if (userInput === 'r') {
+                                    retryRecord = true;
                                 }
                             }
                         }
