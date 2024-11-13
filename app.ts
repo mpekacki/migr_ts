@@ -280,6 +280,8 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                     retryRecord = true;
                                 } else if (userInput === 'r') {
                                     retryRecord = true;
+                                } else if (userInput === 'm') {
+                                    migratedRecordId = await input({ category: 'input', message: `Enter the ID of the record to match:`, type: 'insert_error' });
                                 }
                             }
                         }
