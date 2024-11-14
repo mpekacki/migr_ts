@@ -160,14 +160,17 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
     }
 
     output({ category: 'output', message: `fetched ${Object.keys(fetchedRecordsByIds).length} records`, type: 'info' });
-    // print numbers of records by sobject type
-    const sObjectTypes = [...new Set(Object.values(fetchedRecordsByIds).map(record => record.attributes?.type))];
-    for (const sObjectType of sObjectTypes) {
-        output({ category: 'output', message: `${sObjectType}: ${Object.values(fetchedRecordsByIds).filter(record => record.attributes?.type === sObjectType).length}`, type: 'info' });
+    // build map of record counts by sobject type
+    const recordCountsBySObjectType: Record<string, number> = {};
+    for (const record of Object.values(fetchedRecordsByIds)) {
+        if (!(record.attributes!.type in recordCountsBySObjectType)) {
+            recordCountsBySObjectType[record.attributes!.type] = 0;
+        }
+        recordCountsBySObjectType[record.attributes!.type]++;
     }
 
     // ask for confirmation
-    const confirmation = await input({ category: 'input', message: 'Do you want to continue? (y/n)', type: 'confirm_migration' });
+    const confirmation = await input({ category: 'input', message: 'Do you want to continue? (y/n)', type: 'confirm_migration', data: JSON.stringify(recordCountsBySObjectType) });
     output({ category: 'output', message: `confirmation: ${confirmation}`, type: 'info' });
     if (confirmation !== 'y') {
         output({ category: 'output', message: 'Aborted', type: 'info' });

@@ -199,7 +199,25 @@ test('migrate record', async () => {
         }
     };
 
-    const { parsedOutput } = await runMigration(config);
+    const { parsedOutput } = await runMigration(config, async (ioEvent, sendInput) => {
+        if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
+            sendInput('y');
+            // event data should contain record counts by sobject type
+            const recordCounts = JSON.parse(ioEvent.data!);
+            expect(recordCounts).toHaveProperty('Account');
+            expect(recordCounts).toHaveProperty('Contact');
+            expect(recordCounts).toHaveProperty('Opportunity');
+            expect(recordCounts).toHaveProperty('Custom_Object_A__c');
+            expect(recordCounts).toHaveProperty('Custom_Object_B__c');
+            expect(recordCounts).toHaveProperty('Custom_Object_C__c');
+            expect(recordCounts.Account).toBe(1);
+            expect(recordCounts.Contact).toBe(1);
+            expect(recordCounts.Opportunity).toBe(1);
+            expect(recordCounts['Custom_Object_A__c']).toBe(1);
+            expect(recordCounts['Custom_Object_B__c']).toBe(1);
+            expect(recordCounts['Custom_Object_C__c']).toBe(1);
+        }
+    });
 
     // Check if opportunity was migrated
     expect(parsedOutput).toHaveProperty(opportunity.id!);
