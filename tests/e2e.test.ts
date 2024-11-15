@@ -365,6 +365,16 @@ test('migrate record with error - fixed automatically', async () => {
     const newContract: any = await conn2.sobject('Contract').retrieve(newContractId);
     expect(newContract).toBeDefined();
     expect(newContract.Status).toEqual('Activated');
+
+    // output should contain the error message
+    expect(parsedOutput).toHaveProperty('errors');
+    expect(parsedOutput.errors).toHaveProperty(contract.id!);
+    expect(parsedOutput.errors[contract.id!]).toHaveLength(1);
+    expect(parsedOutput.errors[contract.id!][0].message).toEqual('Choose a valid contract status and save your changes. Ask your admin for details.');
+    expect(parsedOutput.errors[contract.id!][0].fixed).toBeTruthy();
+    expect(parsedOutput.errors[contract.id!][0].solver).toBeDefined();
+    expect(parsedOutput.errors[contract.id!][0].solver.action).toEqual('fix');
+    expect(parsedOutput.errors[contract.id!][0].solver.changeFields).toEqual([{ field: 'Status', value: 'Draft' }]);
 });
 
 test('migrate record with error - fixed manually', async () => {
@@ -407,6 +417,16 @@ test('migrate record with error - fixed manually', async () => {
     const newContract: any = await conn2.sobject('Contract').retrieve(newContractId);
     expect(newContract).toBeDefined();
     expect(newContract.Status).toEqual('Activated');
+
+    // output should contain the error message
+    expect(parsedOutput).toHaveProperty('errors');
+    expect(parsedOutput.errors).toHaveProperty(contract.id!);
+    expect(parsedOutput.errors[contract.id!]).toHaveLength(1);
+    expect(parsedOutput.errors[contract.id!][0].message).toEqual('Choose a valid contract status and save your changes. Ask your admin for details.');
+    expect(parsedOutput.errors[contract.id!][0].fixed).toBeTruthy();
+    expect(parsedOutput.errors[contract.id!][0].solver).toBeDefined();
+    expect(parsedOutput.errors[contract.id!][0].solver.action).toEqual('fix');
+    expect(parsedOutput.errors[contract.id!][0].solver.changeFields).toEqual([{ field: 'Status', value: 'Draft' }]);
 });
 
 test('migrate record with error - automatically skip record', async () => {

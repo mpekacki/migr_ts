@@ -103,6 +103,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
     const fetchedRecordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     const lookupFieldsBySObjectType: Record<string, Field[]> = {};
     const old2new: Record<string, string> = {};
+    const errors: Record<string, { message: string, fixed: boolean, solver?: (FixSolver | SkipSolver | MatchSolver) }[]> = {};
 
     for (const recordId of Object.keys(history)) {
         old2new[recordId] = history[recordId];
@@ -233,10 +234,11 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                             migratedRecordId = savedRecord.id!;
                             output({ category: 'output', message: `created record ${migratedRecordId} of type ${sObjectName}`, type: 'info' });
                         } catch (e) {
-                            let fixedUsingSolver = false;
+                            let errorFixed = false;
+                            let solver: (FixSolver | SkipSolver | MatchSolver) | undefined;
                             if (options.solvers) {
                                 // find solver that matches the error message
-                                const solver = options.solvers.find(solver => new RegExp(solver.message).test(e.message));
+                                solver = options.solvers.find(solver => new RegExp(solver.message).test(e.message));
                                 if (solver) {
                                     if (solver.action === 'fix') {
                                         if (!(recordId in toUpdateLater)) {
@@ -250,27 +252,32 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                         }
                                         output({ category: 'output', message: `fixing using solver: ${solver.message}`, type: 'info' });
                                         output({ category: 'output', message: `saved old fields in toUpdateLater: ${JSON.stringify(toUpdateLater[recordId])}`, type: 'info' });
-                                        fixedUsingSolver = true;
+                                        errorFixed = true;
                                         retryRecord = true;
                                     } else if (solver.action === 'skip') {
                                         output({ category: 'output', message: `skipping record ${recordId} of type ${sObjectName} using solver: ${solver.message}`, type: 'info' });
-                                        fixedUsingSolver = true;
+                                        errorFixed = true;
                                     } else if (solver.action === 'match') {
                                         output({ category: 'output', message: `matching record ${recordId} of type ${sObjectName} using solver: ${solver.message}`, type: 'info' });
                                         const matchId = new RegExp(solver.message).exec(e.message)?.[1];
                                         if (matchId) {
                                             migratedRecordId = matchId;
-                                            fixedUsingSolver = true;
+                                            errorFixed = true;
                                         }
                                     }
                                 }
                             }
-                            if (!fixedUsingSolver) {
+                            if (!errorFixed) {
                                 // no solver found, ask user what to do
                                 const userInput = await input({ category: 'input', message: `no solver found for error: ${e.message}`, type: 'insert_error' });
                                 if (userInput === 'f') {
                                     const fieldsJson = await input({ category: 'input', message: 'Enter the fields to update in JSON format:', type: 'insert_error' });
                                     const fieldsToUpdate = JSON.parse(fieldsJson);
+                                    solver = {
+                                        action: 'fix',
+                                        message: e.message,
+                                        changeFields: []
+                                    }
                                     for (const field of Object.keys(fieldsToUpdate)) {
                                         if (!(recordId in toUpdateLater)) {
                                             toUpdateLater[recordId] = {
@@ -279,14 +286,20 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                         }
                                         toUpdateLater[recordId][field] = record[field];
                                         record[field] = fieldsToUpdate[field];
+                                        solver.changeFields.push({ field, value: fieldsToUpdate[field] });
                                     }
                                     retryRecord = true;
+                                    errorFixed = true;
                                 } else if (userInput === 'r') {
                                     retryRecord = true;
                                 } else if (userInput === 'm') {
                                     migratedRecordId = await input({ category: 'input', message: `Enter the ID of the record to match:`, type: 'insert_error' });
                                 }
                             }
+                            if (!(recordId in errors)) {
+                                errors[recordId] = [];
+                            }
+                            errors[recordId].push({ message: e.message, fixed: errorFixed, solver });
                         }
                     } else {
                         output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not creatable`, type: 'info' });
@@ -352,7 +365,11 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
     }
 
     fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
-    output({ category: 'output', message: 'Finished', data: JSON.stringify(old2new), type: 'info' });
+    const outputData = {
+        ...old2new,
+        errors
+    };
+    output({ category: 'output', message: 'Finished', data: JSON.stringify(outputData), type: 'info' });
 }
 
 export { main, Options, IOEvent };
