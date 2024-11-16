@@ -27,8 +27,8 @@
       "sObjectType": "UserRole",
       "fieldMappings": [
         {
-          "sourceField": "Name",
-          "targetField": "Name"
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
         }
       ]
     },
@@ -51,6 +51,720 @@
         {
           "sourceField": "SobjectType",
           "targetField": "SobjectType"
+        }
+      ]
+    },
+    {
+      "sObjectType": "BusinessProcess",
+      "fieldMappings": [
+        {
+          "sourceField": "Name",
+          "targetField": "Name"
+        }
+      ]
+    },
+    {
+      "sObjectType": "Scontrol",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "Document",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "Folder",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "EmailTemplate",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "EmailTemplateChangeEvent",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "BrandTemplate",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ContentWorkspace",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "Report",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "Dashboard",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ProcessDefinition",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ProcessNode",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "Territory",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "Group",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "AuthProvider",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "EmailServicesAddress",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ListView",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "EntityDefinition",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "FieldDefinition",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "EntityParticle",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "DataType",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "CorsWhitelistEntry",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "CampaignInfluenceModel",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ContentAsset",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ActionLinkGroupTemplate",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "PermissionSetLicense",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "CustomPermission",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "Skill",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "LiveChatUserConfig",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "LiveChatDeployment",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "LiveChatButton",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "LiveChatBlockingRule",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "LiveChatSensitiveDataRule",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ServicePresenceStatus",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ServiceChannel",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "QueueRoutingConfig",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "PresenceUserConfig",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "PresenceDeclineReason",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "AuraDefinitionBundle",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "AuraDefinitionBundleInfo",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "AuraDefinitionInfo",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "CspTrustedSite",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "AppDefinition",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ExternalSocialAccount",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "AuthConfig",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "SamlSsoConfig",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "MobileApplicationDetail",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "CustomNotificationType",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ListViewChart",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ListViewChartInstance",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "DuplicateRule",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "MatchingRule",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "SecureAgentsCluster",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ExternalDataSource",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "NamedCredential",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "PlatformCachePartition",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "SecurityCustomBaseline",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "UiFormulaRule",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "BrandingSet",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "ChatterExtension",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "CaseSubjectParticle",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "PermissionSetGroup",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "DuplicateJobDefinition",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "LightningExperienceTheme",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "CustomHelpMenuSection",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "MyDomainDiscoverableLogin",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "MutingPermissionSet",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "OauthCustomScope",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "Prompt",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "AppleDomainVerification",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "LightningOnboardingConfig",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "RedirectWhitelistUrl",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "UserSetupEntityAccess",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "PermissionSet",
+      "fieldMappings": [
+        {
+          "sourceField": "DeveloperName",
+          "targetField": "DeveloperName"
+        }
+      ]
+    },
+    {
+      "sObjectType": "PermissionSetAssignment",
+      "fieldMappings": [
+        {
+          "sourceField": "PermissionSetId",
+          "targetField": "PermissionSetId"
+        },
+        {
+          "sourceField": "AssigneeId",
+          "targetField": "AssigneeId"
+        }
+      ]
+    },
+    {
+      "sObjectType": "Pricebook2",
+      "fieldMappings": [
+        {
+          "sourceField": "Name",
+          "targetField": "Name"
+        },
+        {
+          "sourceField": "IsStandard",
+          "targetField": "IsStandard"
+        }
+      ]
+    },
+    {
+      "sObjectType": "PricebookEntry",
+      "fieldMappings": [
+        {
+          "sourceField": "Pricebook2Id",
+          "targetField": "Pricebook2Id"
+        },
+        {
+          "sourceField": "Product2Id",
+          "targetField": "Product2Id"
+        }
+      ]
+    },
+    {
+      "sObjectType": "Product2",
+      "fieldMappings": [
+        {
+          "sourceField": "Name",
+          "targetField": "Name"
         }
       ]
     }
