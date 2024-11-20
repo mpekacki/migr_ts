@@ -119,7 +119,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
             const selector = connA.sobject(sObjectName).select('*');
             if (relationships) {
                 for (const relationship of relationships) {
-                    selector.include(relationship.name);
+                    selector.include(relationship.name).select('Id').end();
                 }
             }
             selector.where(`Id = '${recordId}'`);
