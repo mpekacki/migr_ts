@@ -178,6 +178,15 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
         return;
     }
 
+    const saveAndExit = () => {
+        fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
+        const outputData = {
+            ...old2new,
+            errors
+        };
+        output({ category: 'output', message: 'Finished', data: JSON.stringify(outputData), type: 'info' });
+    }
+
     const toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
     while (Object.keys(fetchedRecordsByIds).length > 0) {
         let anyRecordProcessed = false;
@@ -269,6 +278,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                             }
                             if (!errorFixed) {
                                 // no solver found, ask user what to do
+                                output({ category: 'output', message: `error: ${JSON.stringify(e)}`, type: 'info' });
                                 const userInput = await input({ category: 'input', message: `no solver found for error: ${e.message}`, type: 'insert_error' });
                                 if (userInput === 'f') {
                                     const fieldsJson = await input({ category: 'input', message: 'Enter the fields to update in JSON format:', type: 'insert_error' });
@@ -294,6 +304,9 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                     retryRecord = true;
                                 } else if (userInput === 'm') {
                                     migratedRecordId = await input({ category: 'input', message: `Enter the ID of the record to match:`, type: 'insert_error' });
+                                } else if (userInput === 'h') {
+                                    saveAndExit();
+                                    return;
                                 }
                             }
                             if (!(recordId in errors)) {
@@ -364,12 +377,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
         await connB.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
     }
 
-    fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
-    const outputData = {
-        ...old2new,
-        errors
-    };
-    output({ category: 'output', message: 'Finished', data: JSON.stringify(outputData), type: 'info' });
+    saveAndExit();
 }
 
 export { main, Options, IOEvent };

@@ -653,6 +653,71 @@ test('migrate record with error - manually retry insert', async () => {
     expect(newCustObjC.External_Id__c).toEqual(externalId);
 });
 
+test('migrate record with error - quit and save results so far', async () => {
+    console.log('starting test: migrate record with error - quit and save results so far');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const externalId = `ext-${Math.random()}`;
+
+    const custObjC = await conn1.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    console.log(custObjC);
+    expect(custObjC.id).toBeDefined();
+
+    const custObjB = await conn1.sobject('Custom_Object_B__c').create({ Lookup_to_C__c: custObjC.id! });
+    console.log(custObjB);
+    expect(custObjB.id).toBeDefined();
+
+    const custObjA = await conn1.sobject('Custom_Object_A__c').create({ Lookup_to_B__c: custObjB.id! });
+    console.log(custObjA);
+    expect(custObjA.id).toBeDefined();
+
+    // create circular dependency
+    await conn1.sobject('Custom_Object_C__c').update({ Id: custObjC.id!, Lookup_to_A__c: custObjA.id! });
+
+    const custObjCorgB = await conn2.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    console.log(custObjCorgB);
+    expect(custObjCorgB.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [custObjC.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config, ['y', 'h']);
+
+    // Custom Object C should not be migrated
+    expect(parsedOutput).not.toHaveProperty(custObjC.id!);
+
+    // Custom Object B should be migrated
+    expect(parsedOutput).toHaveProperty(custObjB.id!);
+    const newCustObjBId = parsedOutput[custObjB.id!];
+    expect(newCustObjBId).toBeTruthy();
+    expect(newCustObjBId).not.toEqual(custObjB.id);
+
+    // Custom Object A should be migrated
+    expect(parsedOutput).toHaveProperty(custObjA.id!);
+    const newCustObjAId = parsedOutput[custObjA.id!];
+    expect(newCustObjAId).toBeTruthy();
+    expect(newCustObjAId).not.toEqual(custObjA.id);
+    
+    // fix the error and try again
+    await conn2.sobject('Custom_Object_C__c').delete(custObjCorgB.id!);
+    const { parsedOutput: parsedOutput2 } = await runMigration(config, ['y']);
+
+    // Custom Object C should be migrated
+    expect(parsedOutput2).toHaveProperty(custObjC.id!);
+    const newCustObjCId2 = parsedOutput2[custObjC.id!];
+    expect(newCustObjCId2).toBeTruthy();
+    expect(newCustObjCId2).not.toEqual(custObjC.id);
+
+    // Custom Objects B and A should not be created again
+    expect(parsedOutput2).not.toHaveProperty(custObjB.id!);
+    expect(parsedOutput2).not.toHaveProperty(custObjA.id!);
+});
+
 test('match not found, create new record', async () => {
     console.log('starting test: match not found, create new record');
 
