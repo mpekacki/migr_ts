@@ -125,7 +125,32 @@ const defaultMatchers = [
     }
 ];
 
-test('migrate record', async () => {
+test('migrate record - single', async () => {
+    console.log('starting test: migrate record - single');
+
+    const { conn1 } = await setupTestConnections();
+
+    console.log('creating records');
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    console.log(account);
+    expect(account.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [account.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(account.id!);
+    const newAccountId = parsedOutput[account.id!];
+    expect(newAccountId).toBeTruthy();
+    expect(newAccountId).not.toEqual(account.id);
+});
+
+test('migrate record - complex', async () => {
     console.log('starting test: migrate record');
 
     const { conn1, conn2 } = await setupTestConnections();
