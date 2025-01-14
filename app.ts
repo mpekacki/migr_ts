@@ -201,7 +201,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                     if (lookupValue) {
                         if (!(lookupValue in old2new) && lookupValue in fetchedRecordsByIds) {
                             recordReady = false;
-                            output({ category: 'output', message: `record ${recordId} is not ready because lookup field ${lookupField.name} (${lookupValue}) is not migrated`, type: 'info' });
+                            // output({ category: 'output', message: `record ${recordId} is not ready because lookup field ${lookupField.name} (${lookupValue}) is not migrated`, type: 'info' });
                         } else if (lookupValue in old2new) {
                             output({ category: 'output', message: `mapping ${lookupField.name} to ${lookupValue} for record ${recordId} of type ${sObjectName} - new value: ${old2new[lookupValue]}`, type: 'info' });
                             record[lookupField.name] = old2new[lookupValue];
@@ -237,7 +237,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                 if (!migratedRecordId && !skipRecord) {
                     const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
                     if (isObjectCreatable) {
-                        output({ category: 'output', message: `creating record ${recordId} of type ${sObjectName}`, type: 'info' });
+                        output({ category: 'output', message: `creating record ${recordId} of type ${sObjectName} with fields ${JSON.stringify(record)}`, type: 'info' });
                         try {
                             const savedRecord: SaveResult = await connB.sobject(sObjectName).create(record);
                             migratedRecordId = savedRecord.id!;
@@ -256,8 +256,12 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                             } as SObjectRecord<Schema, string>;
                                         }
                                         for (const changeField of solver.changeFields) {
-                                            toUpdateLater[recordId][changeField.field] = record[changeField.field];
-                                            record[changeField.field] = changeField.value;
+                                            if (changeField.value === null) {
+                                                delete record[changeField.field];
+                                            } else {
+                                                toUpdateLater[recordId][changeField.field] = record[changeField.field];
+                                                record[changeField.field] = changeField.value;
+                                            }
                                         }
                                         output({ category: 'output', message: `fixing using solver: ${solver.message}`, type: 'info' });
                                         output({ category: 'output', message: `saved old fields in toUpdateLater: ${JSON.stringify(toUpdateLater[recordId])}`, type: 'info' });

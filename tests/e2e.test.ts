@@ -454,6 +454,45 @@ test('migrate record with error - fixed manually', async () => {
     expect(parsedOutput.errors[contract.id!][0].solver.changeFields).toEqual([{ field: 'Status', value: 'Draft' }]);
 });
 
+test('migrate record with error - fixed automatically, remove field if new value is null', async () => {
+    console.log('starting test: migrate record with error');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const externalId = `ext-${Math.random()}`;
+    const custObj = await conn1.sobject('Custom_Object_C__c').create({ Org_A_Only_Field__c: 'Org A Only Value', External_Id__c: externalId });
+    console.log(custObj);
+    expect(custObj.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [custObj.id!],
+        matchers: defaultMatchers,
+        solvers: [
+            {
+                action: 'fix',
+                message: 'No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_C__c',
+                changeFields: [
+                    { field: 'Org_A_Only_Field__c', value: null }
+                ]
+            }
+        ]
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(custObj.id!);
+    const newCustObjId = parsedOutput[custObj.id!];
+    expect(newCustObjId).toBeTruthy();
+    expect(newCustObjId).not.toEqual(custObj.id);
+
+    const newCustObj: any = await conn2.sobject('Custom_Object_C__c').retrieve(newCustObjId);
+    expect(newCustObj).toBeDefined();
+    expect(newCustObj.External_Id__c).toEqual(externalId);
+});
+
 test('migrate record with error - automatically skip record', async () => {
     console.log('starting test: migrate record with error - automatically skip record');
 
