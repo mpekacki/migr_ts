@@ -6,7 +6,7 @@
         <field>Custom_Object_C__c.Lookup_to_A__c</field>
         <readable>true</readable>
     </fieldPermissions>
-    <layoutAssignments>
+        <layoutAssignments>
         <layout>Custom_Object_A__c-Custom Object A Layout</layout>
     </layoutAssignments>
     <layoutAssignments>
@@ -14,6 +14,9 @@
     </layoutAssignments>
     <layoutAssignments>
         <layout>Custom_Object_C__c-Custom Object C Layout</layout>
+    </layoutAssignments>
+        <layoutAssignments>
+        <layout>Custom_Object_D__c-Custom Object D Layout</layout>
     </layoutAssignments>
     <objectPermissions>
         <allowCreate>true</allowCreate>
@@ -40,6 +43,15 @@
         <allowRead>true</allowRead>
         <modifyAllRecords>true</modifyAllRecords>
         <object>Custom_Object_C__c</object>
+        <viewAllRecords>true</viewAllRecords>
+    </objectPermissions>
+    <objectPermissions>
+        <allowCreate>true</allowCreate>
+        <allowDelete>true</allowDelete>
+        <allowEdit>true</allowEdit>
+        <allowRead>true</allowRead>
+        <modifyAllRecords>true</modifyAllRecords>
+        <object>Custom_Object_D__c</object>
         <viewAllRecords>true</viewAllRecords>
     </objectPermissions>
     <userLicense>Salesforce</userLicense>
@@ -450,6 +462,10 @@
     <userPermissions>
         <enabled>true</enabled>
         <name>ManageExchangeConfig</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>ManageFilesAndAttachments</name>
     </userPermissions>
     <userPermissions>
         <enabled>true</enabled>
