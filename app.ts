@@ -298,8 +298,12 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                                 attributes: record.attributes
                                             } as SObjectRecord<Schema, string>;
                                         }
-                                        toUpdateLater[recordId][field] = record[field];
-                                        record[field] = fieldsToUpdate[field];
+                                        if (fieldsToUpdate[field] === null) {
+                                            delete record[field];
+                                        } else {
+                                            toUpdateLater[recordId][field] = record[field];
+                                            record[field] = fieldsToUpdate[field];
+                                        }
                                         solver.changeFields.push({ field, value: fieldsToUpdate[field] });
                                     }
                                     retryRecord = true;
