@@ -527,6 +527,62 @@ test('migrate record with error - fixed manually, remove field if new value is n
     expect(capturedOutput.map(e => e.message)).toContain('no solver found for error: No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c');
 });
 
+test('migrate record with error - manually add new solver', async () => {
+    console.log('starting test: migrate record with error');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const name1 = `ext-${Math.random()}`;
+    const custObj1 = await conn1.sobject('Custom_Object_D__c').create({ Org_A_Only_Field__c: 'Org A Only Value', Name: name1 });
+    console.log(custObj1);
+    expect(custObj1.id).toBeDefined();
+
+    const name2 = `ext-${Math.random()}`;
+    const custObj2 = await conn1.sobject('Custom_Object_D__c').create({ Org_A_Only_Field__c: 'Org A Only Value', Name: name2 });
+    console.log(custObj2);
+    expect(custObj2.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [custObj1.id!, custObj2.id!],
+        matchers: defaultMatchers
+    };
+
+    // manually add new solver:
+    /*
+            {
+                action: 'fix',
+                message: 'No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c',
+                changeFields: [
+                    { field: 'Org_A_Only_Field__c', value: null }
+                ]
+            }
+    */
+    const { parsedOutput, capturedOutput } = await runMigration(config, ['y', 'a', '{"action": "fix", "message": "No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c", "changeFields": [{"field": "Org_A_Only_Field__c", "value": null}]}']);
+
+    expect(parsedOutput).toHaveProperty(custObj1.id!);
+    const newCustObjId1 = parsedOutput[custObj1.id!];
+    expect(newCustObjId1).toBeTruthy();
+    expect(newCustObjId1).not.toEqual(custObj1.id);
+
+    expect(parsedOutput).toHaveProperty(custObj2.id!);
+    const newCustObjId2 = parsedOutput[custObj2.id!];
+    expect(newCustObjId2).toBeTruthy();
+    expect(newCustObjId2).not.toEqual(custObj2.id);
+
+    const newCustObj1: any = await conn2.sobject('Custom_Object_D__c').retrieve(newCustObjId1);
+    expect(newCustObj1).toBeDefined();
+    expect(newCustObj1.Name).toEqual(name1);
+
+    const newCustObj2: any = await conn2.sobject('Custom_Object_D__c').retrieve(newCustObjId2);
+    expect(newCustObj2).toBeDefined();
+    expect(newCustObj2.Name).toEqual(name2);
+
+    expect(capturedOutput.map(e => e.message)).toContain('fixing using solver: No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c');
+});
+
 test('migrate record with error - automatically skip record', async () => {
     console.log('starting test: migrate record with error - automatically skip record');
 

@@ -315,6 +315,15 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                 } else if (userInput === 'h') {
                                     saveAndExit();
                                     return;
+                                } else if (userInput === 'a') {
+                                    const solverJson = await input({ category: 'input', message: 'Enter the solver in JSON format:', type: 'insert_error' });
+                                    const newSolver = JSON.parse(solverJson);
+                                    if (!options.solvers) {
+                                        options.solvers = [];
+                                    }
+                                    options.solvers.push(newSolver);
+                                    anyRecordProcessed = true;
+                                    break;
                                 }
                             }
                             if (!(recordId in errors)) {
