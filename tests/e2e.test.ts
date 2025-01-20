@@ -454,6 +454,58 @@ test('migrate record with error - fixed manually', async () => {
     expect(parsedOutput.errors[contract.id!][0].solver.changeFields).toEqual([{ field: 'Status', value: 'Draft' }]);
 });
 
+test('migrate record with error - fixed manually, invalid JSON', async () => {
+    console.log('starting test: migrate record with error fixed manually, invalid JSON');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    console.log(account);
+    expect(account.id).toBeDefined();
+
+    const contract = await conn1.sobject('Contract').create({ 
+        AccountId: account.id!, 
+        Status: 'Draft', 
+        StartDate: new Date().toISOString(), 
+        ContractTerm: 12 
+    });
+    console.log(contract);
+    expect(contract.id).toBeDefined();
+
+    await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [contract.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config, ['y', 'f', '{"Status": Draft"}', 'asdasfd', '{"Status": "Draft"}']);
+
+    // Check if contract was migrated
+    expect(parsedOutput).toHaveProperty(contract.id!);
+    const newContractId = parsedOutput[contract.id!];
+    expect(newContractId).toBeTruthy();
+    expect(newContractId).not.toEqual(contract.id);
+
+    // should be able to query the new contract record
+    const newContract: any = await conn2.sobject('Contract').retrieve(newContractId);
+    expect(newContract).toBeDefined();
+    expect(newContract.Status).toEqual('Activated');
+
+    // output should contain the error message
+    expect(parsedOutput).toHaveProperty('errors');
+    expect(parsedOutput.errors).toHaveProperty(contract.id!);
+    expect(parsedOutput.errors[contract.id!]).toHaveLength(1);
+    expect(parsedOutput.errors[contract.id!][0].message).toEqual('Choose a valid contract status and save your changes. Ask your admin for details.');
+    expect(parsedOutput.errors[contract.id!][0].fixed).toBeTruthy();
+    expect(parsedOutput.errors[contract.id!][0].solver).toBeDefined();
+    expect(parsedOutput.errors[contract.id!][0].solver.action).toEqual('fix');
+    expect(parsedOutput.errors[contract.id!][0].solver.changeFields).toEqual([{ field: 'Status', value: 'Draft' }]);
+});
+
 test('migrate record with error - fixed automatically, remove field if new value is null', async () => {
     console.log('starting test: migrate record with error');
 
@@ -561,6 +613,53 @@ test('migrate record with error - manually add new solver', async () => {
             }
     */
     const { parsedOutput, capturedOutput } = await runMigration(config, ['y', 'a', '{"action": "fix", "message": "No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c", "changeFields": [{"field": "Org_A_Only_Field__c", "value": null}]}']);
+
+    expect(parsedOutput).toHaveProperty(custObj1.id!);
+    const newCustObjId1 = parsedOutput[custObj1.id!];
+    expect(newCustObjId1).toBeTruthy();
+    expect(newCustObjId1).not.toEqual(custObj1.id);
+
+    expect(parsedOutput).toHaveProperty(custObj2.id!);
+    const newCustObjId2 = parsedOutput[custObj2.id!];
+    expect(newCustObjId2).toBeTruthy();
+    expect(newCustObjId2).not.toEqual(custObj2.id);
+
+    const newCustObj1: any = await conn2.sobject('Custom_Object_D__c').retrieve(newCustObjId1);
+    expect(newCustObj1).toBeDefined();
+    expect(newCustObj1.Name).toEqual(name1);
+
+    const newCustObj2: any = await conn2.sobject('Custom_Object_D__c').retrieve(newCustObjId2);
+    expect(newCustObj2).toBeDefined();
+    expect(newCustObj2.Name).toEqual(name2);
+
+    expect(capturedOutput.map(e => e.message)).toContain('fixing using solver: No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c');
+});
+
+test('migrate record with error - manually add new solver, invalid JSON', async () => {
+    console.log('starting test: migrate record with error - manually add new solver, invalid JSON');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const name1 = `ext-${Math.random()}`;
+    const custObj1 = await conn1.sobject('Custom_Object_D__c').create({ Org_A_Only_Field__c: 'Org A Only Value', Name: name1 });
+    console.log(custObj1);
+    expect(custObj1.id).toBeDefined();
+
+    const name2 = `ext-${Math.random()}`;
+    const custObj2 = await conn1.sobject('Custom_Object_D__c').create({ Org_A_Only_Field__c: 'Org A Only Value', Name: name2 });
+    console.log(custObj2);
+    expect(custObj2.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [custObj1.id!, custObj2.id!],
+        matchers: defaultMatchers
+    };
+
+
+    const { parsedOutput, capturedOutput } = await runMigration(config, ['y', 'a', 'asdasd', '{zzz}', '{"action": "fix", "message": "No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c", "changeFields": [{"field": "Org_A_Only_Field__c", "value": null}]}']);
 
     expect(parsedOutput).toHaveProperty(custObj1.id!);
     const newCustObjId1 = parsedOutput[custObj1.id!];

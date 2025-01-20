@@ -285,8 +285,15 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                 output({ category: 'output', message: `error: ${JSON.stringify(e)}`, type: 'info' });
                                 const userInput = await input({ category: 'input', message: `no solver found for error: ${e.message}`, type: 'insert_error' });
                                 if (userInput === 'f') {
-                                    const fieldsJson = await input({ category: 'input', message: 'Enter the fields to update in JSON format:', type: 'insert_error' });
-                                    const fieldsToUpdate = JSON.parse(fieldsJson);
+                                    let fieldsToUpdate;
+                                    while (!fieldsToUpdate) {
+                                        const fieldsJson = await input({ category: 'input', message: 'Enter the fields to update in JSON format:', type: 'insert_error' });
+                                        try {
+                                            fieldsToUpdate = JSON.parse(fieldsJson);
+                                        } catch (e) {
+                                            output({ category: 'output', message: `invalid JSON, please try again`, type: 'info' });
+                                        }
+                                    }
                                     solver = {
                                         action: 'fix',
                                         message: e.message,
@@ -316,8 +323,15 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                     saveAndExit();
                                     return;
                                 } else if (userInput === 'a') {
-                                    const solverJson = await input({ category: 'input', message: 'Enter the solver in JSON format:', type: 'insert_error' });
-                                    const newSolver = JSON.parse(solverJson);
+                                    let newSolver;
+                                    while (!newSolver) {
+                                        const solverJson = await input({ category: 'input', message: 'Enter the solver in JSON format:', type: 'insert_error' });
+                                        try {
+                                            newSolver = JSON.parse(solverJson);
+                                        } catch (e) {
+                                            output({ category: 'output', message: `invalid JSON, please try again`, type: 'info' });
+                                        }
+                                    }
                                     if (!options.solvers) {
                                         options.solvers = [];
                                     }
