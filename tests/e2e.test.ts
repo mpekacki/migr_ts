@@ -107,8 +107,7 @@ const defaultMatchers = [
     {
         sObjectType: 'User',
         fieldMappings: [
-            { sourceField: 'FirstName', targetField: 'FirstName' },
-            { sourceField: 'LastName', targetField: 'LastName' }
+            { sourceField: 'Name', targetField: 'Name' }
         ]
     },
     {

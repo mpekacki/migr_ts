@@ -100,6 +100,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
     };
 
     let recordIdsToFetch = options.recordIds;
+    const recordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     const fetchedRecordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     const lookupFieldsBySObjectType: Record<string, Field[]> = {};
     const old2new: Record<string, string> = {};
@@ -126,20 +127,21 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
             output({ category: 'output', message: `fetching record ${recordId} of type ${sObjectName}`, type: 'info' });
             const records = await selector.execute();
             const fetchedRecord = records[0];
+            fetchedRecordsByIds[recordId] = fetchedRecord;
             const creatableFields = (await getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
             const record: SObjectRecord<Schema, string> = {};
             for (const field of creatableFields) {
                 record[field.name] = fetchedRecord[field.name];
             }
             record.attributes = fetchedRecord.attributes;
-            fetchedRecordsByIds[recordId] = record;
+            recordsByIds[recordId] = record;
             const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
             if (lookupFields.length > 0) {
                 lookupFieldsBySObjectType[sObjectName] = lookupFields;
             }
             for (const lookupField of lookupFields) {
                 const lookupValue = record[lookupField.name];
-                if (lookupValue && !(lookupValue in fetchedRecordsByIds) && !newRecordIdsToFetch.includes(lookupValue)) {
+                if (lookupValue && !(lookupValue in recordsByIds) && !newRecordIdsToFetch.includes(lookupValue)) {
                     newRecordIdsToFetch.push(lookupValue);
                 }
             }
@@ -149,7 +151,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                     output({ category: 'output', message: `related records of ${relationship.name}: ${relatedRecords?.length}`, type: 'info' });
                     if (relatedRecords) {
                         for (const relatedRecord of relatedRecords) {
-                            if (!(relatedRecord.Id in fetchedRecordsByIds) && !newRecordIdsToFetch.includes(relatedRecord.Id!)) {
+                            if (!(relatedRecord.Id in recordsByIds) && !newRecordIdsToFetch.includes(relatedRecord.Id!)) {
                                 newRecordIdsToFetch.push(relatedRecord.Id!);
                             }
                         }
@@ -160,10 +162,10 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
         recordIdsToFetch = newRecordIdsToFetch;
     }
 
-    output({ category: 'output', message: `fetched ${Object.keys(fetchedRecordsByIds).length} records`, type: 'info' });
+    output({ category: 'output', message: `fetched ${Object.keys(recordsByIds).length} records`, type: 'info' });
     // build map of record counts by sobject type
     const recordCountsBySObjectType: Record<string, number> = {};
-    for (const record of Object.values(fetchedRecordsByIds)) {
+    for (const record of Object.values(recordsByIds)) {
         if (!(record.attributes!.type in recordCountsBySObjectType)) {
             recordCountsBySObjectType[record.attributes!.type] = 0;
         }
@@ -188,10 +190,10 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
     }
 
     const toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
-    while (Object.keys(fetchedRecordsByIds).length > 0) {
+    while (Object.keys(recordsByIds).length > 0) {
         let anyRecordProcessed = false;
-        for (const recordId of Object.keys(fetchedRecordsByIds)) {
-            const record = fetchedRecordsByIds[recordId];
+        for (const recordId of Object.keys(recordsByIds)) {
+            const record = recordsByIds[recordId];
             const sObjectName = await getSObjectType(recordId);
             let recordReady = true;
             const lookupFields = lookupFieldsBySObjectType[sObjectName];
@@ -199,7 +201,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                 for (const lookupField of lookupFields) {
                     const lookupValue = record[lookupField.name];
                     if (lookupValue) {
-                        if (!(lookupValue in old2new) && lookupValue in fetchedRecordsByIds) {
+                        if (!(lookupValue in old2new) && lookupValue in recordsByIds) {
                             recordReady = false;
                             // output({ category: 'output', message: `record ${recordId} is not ready because lookup field ${lookupField.name} (${lookupValue}) is not migrated`, type: 'info' });
                         } else if (lookupValue in old2new) {
@@ -221,7 +223,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                 if (matcher) {
                     const conditions: Record<string, string> = {};
                     for (const fieldMapping of matcher.fieldMappings) {
-                        conditions[fieldMapping.targetField] = record[fieldMapping.sourceField];
+                        conditions[fieldMapping.targetField] = fetchedRecordsByIds[recordId][fieldMapping.sourceField];
                     }
                     const selector = connB.sobject(sObjectName).find(conditions).select('Id');
                     output({ category: 'output', message: `querying for existing record: ${await selector.toSOQL()}`, type: 'info' });
@@ -353,14 +355,14 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                     continue;
                 }
                 old2new[recordId] = migratedRecordId!;
-                delete fetchedRecordsByIds[recordId];
+                delete recordsByIds[recordId];
             }
         }
         if (!anyRecordProcessed) {
             // build lookupFieldsBySObjectType from object describes
             const requiredLookupFieldsBySObjectType: Record<string, string[]> = {};
             const allLookupFieldsBySObjectType: Record<string, string[]> = {};
-            const uniqueSObjectTypes = [...new Set(Object.values(fetchedRecordsByIds).map(record => record.attributes!.type))];
+            const uniqueSObjectTypes = [...new Set(Object.values(recordsByIds).map(record => record.attributes!.type))];
             for (const sObjectName of uniqueSObjectTypes) {
                 requiredLookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
                     .filter(field => field.type === 'reference' && !field.nillable && field.createable)
@@ -369,10 +371,10 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                     .filter(field => field.type === 'reference' && field.createable)
                     .map(field => field.name);
             }
-            const records = Object.values(fetchedRecordsByIds).map(record => ({
+            const records = Object.values(recordsByIds).map(record => ({
                 attributes: record.attributes,
                 ...Object.fromEntries(Object.entries(record).filter(([key]) => key === 'attributes' || allLookupFieldsBySObjectType[record.attributes!.type]?.includes(key))),
-                Id: Object.keys(fetchedRecordsByIds).find(key => fetchedRecordsByIds[key] === record)
+                Id: Object.keys(recordsByIds).find(key => recordsByIds[key] === record)
             }));
             output({ category: 'output', message: `looking for circular dependencies with ${JSON.stringify(requiredLookupFieldsBySObjectType)} for records ${JSON.stringify(records)}`, type: 'info' });
             const toClear = scanForCircularDependency(records, requiredLookupFieldsBySObjectType);
@@ -382,11 +384,11 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                 for (const clear of toClear) {
                     if (!(clear.recordId in toUpdateLater)) {
                         toUpdateLater[clear.recordId] = {
-                            attributes: fetchedRecordsByIds[clear.recordId].attributes
+                            attributes: recordsByIds[clear.recordId].attributes
                         } as SObjectRecord<Schema, string>;
                     }
-                    toUpdateLater[clear.recordId][clear.field] = fetchedRecordsByIds[clear.recordId][clear.field];
-                    fetchedRecordsByIds[clear.recordId][clear.field] = '';
+                    toUpdateLater[clear.recordId][clear.field] = recordsByIds[clear.recordId][clear.field];
+                    recordsByIds[clear.recordId][clear.field] = '';
 
                 }
             } else {
