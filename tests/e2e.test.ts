@@ -544,6 +544,7 @@ test('migrate record with error - fixed automatically, remove field if new value
     expect(newCustObj.Name).toEqual(name);
 
     expect(capturedOutput.map(e => e.message)).toContain('fixing using solver: No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c');
+    expect(capturedOutput.map(e => e.message).filter(e => e.includes('updating record'))).toHaveLength(0);
 });
 
 test('migrate record with error - fixed manually, remove field if new value is null', async () => {
@@ -576,6 +577,7 @@ test('migrate record with error - fixed manually, remove field if new value is n
     expect(newCustObj.Name).toEqual(name);
 
     expect(capturedOutput.map(e => e.message)).toContain('no solver found for error: No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c');
+    expect(capturedOutput.map(e => e.message).filter(e => e.includes('updating record'))).toHaveLength(0);
 });
 
 test('migrate record with error - manually add new solver', async () => {

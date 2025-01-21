@@ -252,15 +252,15 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                 solver = options.solvers.find(solver => new RegExp(solver.message).test(e.message));
                                 if (solver) {
                                     if (solver.action === 'fix') {
-                                        if (!(recordId in toUpdateLater)) {
-                                            toUpdateLater[recordId] = {
-                                                attributes: record.attributes
-                                            } as SObjectRecord<Schema, string>;
-                                        }
                                         for (const changeField of solver.changeFields) {
                                             if (changeField.value === null) {
                                                 delete record[changeField.field];
                                             } else {
+                                                if (!(recordId in toUpdateLater)) {
+                                                    toUpdateLater[recordId] = {
+                                                        attributes: record.attributes
+                                                    } as SObjectRecord<Schema, string>;
+                                                }
                                                 toUpdateLater[recordId][changeField.field] = record[changeField.field];
                                                 record[changeField.field] = changeField.value;
                                             }
@@ -302,14 +302,14 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                         changeFields: []
                                     }
                                     for (const field of Object.keys(fieldsToUpdate)) {
-                                        if (!(recordId in toUpdateLater)) {
-                                            toUpdateLater[recordId] = {
-                                                attributes: record.attributes
-                                            } as SObjectRecord<Schema, string>;
-                                        }
                                         if (fieldsToUpdate[field] === null) {
                                             delete record[field];
                                         } else {
+                                            if (!(recordId in toUpdateLater)) {
+                                                toUpdateLater[recordId] = {
+                                                    attributes: record.attributes
+                                                } as SObjectRecord<Schema, string>;
+                                            }
                                             toUpdateLater[recordId][field] = record[field];
                                             record[field] = fieldsToUpdate[field];
                                         }
