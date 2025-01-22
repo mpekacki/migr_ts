@@ -337,6 +337,57 @@ test('migrate record - complex', async () => {
     expect(newContact2.AccountId).toEqual(newAccountId);
 });
 
+test('match record by id field', async () => {
+    console.log('starting test: match record by id field');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const externalId = `ext-${Math.random()}`;
+    const custObjC = await conn1.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    console.log(custObjC);
+    expect(custObjC.id).toBeDefined();
+
+    const custObjC2 = await conn2.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    console.log(custObjC2);
+    expect(custObjC2.id).toBeDefined();
+
+    const custObjB = await conn1.sobject('Custom_Object_B__c').create({ Lookup_to_C__c: custObjC.id! });
+    console.log(custObjB);
+    expect(custObjB.id).toBeDefined();
+    
+    const custObjB2 = await conn2.sobject('Custom_Object_B__c').create({ Lookup_to_C__c: custObjC2.id! });
+    console.log(custObjB2);
+    expect(custObjB2.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [custObjB.id!],
+        matchers: [
+            ...defaultMatchers,
+            {
+                sObjectType: 'Custom_Object_B__c',
+                fieldMappings: [
+                    { sourceField: 'Lookup_to_C__c', targetField: 'Lookup_to_C__c' }
+                ]
+            },
+            {
+                sObjectType: 'Custom_Object_C__c',
+                fieldMappings: [
+                    { sourceField: 'External_Id__c', targetField: 'External_Id__c' }
+                ]
+            }
+        ]
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(custObjB.id!);
+    const newCustObjBId = parsedOutput[custObjB.id!];
+    expect(newCustObjBId).toBeTruthy();
+    expect(newCustObjBId).toEqual(custObjB2.id);
+});
+
 test('migrate record with error - fixed automatically', async () => {
     console.log('starting test: migrate record with error');
 

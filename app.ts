@@ -224,6 +224,9 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                     const conditions: Record<string, string> = {};
                     for (const fieldMapping of matcher.fieldMappings) {
                         conditions[fieldMapping.targetField] = fetchedRecordsByIds[recordId][fieldMapping.sourceField];
+                        if (conditions[fieldMapping.targetField] in old2new) {
+                            conditions[fieldMapping.targetField] = old2new[conditions[fieldMapping.targetField]];
+                        }
                     }
                     const selector = connB.sobject(sObjectName).find(conditions).select('Id');
                     output({ category: 'output', message: `querying for existing record: ${await selector.toSOQL()}`, type: 'info' });
