@@ -117,23 +117,23 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
             const sObjectName = await getSObjectType(recordId);
             const sobjectDescribe = await getSObjectDescribe(sObjectName);
             const relationships = options.relationships?.[sObjectName];
-            const selector = connA.sobject(sObjectName).select('*');
+            const recordFields = await connA.sobject(sObjectName).retrieve(recordId);
+            const selector = connA.sobject(sObjectName).select('Id');
             if (relationships) {
                 for (const relationship of relationships) {
                     selector.include(relationship.name).select('Id').end();
                 }
             }
             selector.where(`Id = '${recordId}'`);
-            output({ category: 'output', message: `fetching record ${recordId} of type ${sObjectName}`, type: 'info' });
-            const records = await selector.execute();
-            const fetchedRecord = records[0];
-            fetchedRecordsByIds[recordId] = fetchedRecord;
+            const relsResults = await selector.execute();
+            const recordRelationships = relsResults[0];
+            fetchedRecordsByIds[recordId] = recordFields;
             const creatableFields = (await getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
             const record: SObjectRecord<Schema, string> = {};
             for (const field of creatableFields) {
-                record[field.name] = fetchedRecord[field.name];
+                record[field.name] = recordFields[field.name];
             }
-            record.attributes = fetchedRecord.attributes;
+            record.attributes = recordRelationships.attributes;
             recordsByIds[recordId] = record;
             const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
             if (lookupFields.length > 0) {
@@ -147,7 +147,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
             }
             if (relationships) {
                 for (const relationship of relationships) {
-                    const relatedRecords = fetchedRecord[relationship.name]?.records;
+                    const relatedRecords = recordRelationships[relationship.name]?.records;
                     output({ category: 'output', message: `related records of ${relationship.name}: ${relatedRecords?.length}`, type: 'info' });
                     if (relatedRecords) {
                         for (const relatedRecord of relatedRecords) {
