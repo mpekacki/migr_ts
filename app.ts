@@ -116,24 +116,15 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
         for (const recordId of recordIdsToFetch) {
             const sObjectName = await getSObjectType(recordId);
             const sobjectDescribe = await getSObjectDescribe(sObjectName);
-            const relationships = options.relationships?.[sObjectName];
+            output({ category: 'output', message: `fetching record ${recordId} of type ${sObjectName}`, type: 'info' });
             const recordFields = await connA.sobject(sObjectName).retrieve(recordId);
-            const selector = connA.sobject(sObjectName).select('Id');
-            if (relationships) {
-                for (const relationship of relationships) {
-                    selector.include(relationship.name).select('Id').end();
-                }
-            }
-            selector.where(`Id = '${recordId}'`);
-            const relsResults = await selector.execute();
-            const recordRelationships = relsResults[0];
             fetchedRecordsByIds[recordId] = recordFields;
             const creatableFields = (await getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
             const record: SObjectRecord<Schema, string> = {};
             for (const field of creatableFields) {
                 record[field.name] = recordFields[field.name];
             }
-            record.attributes = recordRelationships.attributes;
+            record.attributes = recordFields.attributes;
             recordsByIds[recordId] = record;
             const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
             if (lookupFields.length > 0) {
@@ -145,9 +136,17 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                     newRecordIdsToFetch.push(lookupValue);
                 }
             }
+            const relationships = options.relationships?.[sObjectName];
             if (relationships) {
+                const selector = connA.sobject(sObjectName).select('Id');
                 for (const relationship of relationships) {
-                    const relatedRecords = recordRelationships[relationship.name]?.records;
+                    selector.include(relationship.name).select('Id').end();
+                }
+                selector.where(`Id = '${recordId}'`);
+                const relsResults = await selector.execute();
+                const recordRelationships = relsResults[0];
+                for (const relationship of relationships) {
+                    const relatedRecords = recordRelationships![relationship.name]?.records;
                     output({ category: 'output', message: `related records of ${relationship.name}: ${relatedRecords?.length}`, type: 'info' });
                     if (relatedRecords) {
                         for (const relatedRecord of relatedRecords) {
