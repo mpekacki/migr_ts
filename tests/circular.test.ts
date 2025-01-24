@@ -5,7 +5,36 @@ describe('scanForCircularDependency', () => {
         expect(scanForCircularDependency([], {})).toEqual([]);
     });
 
-    it('should indicate a field to clear if circular dependency is found', () => {
+    it('should indicate a field to clear if circular dependency is found in 2 records', () => {
+        expect(scanForCircularDependency([
+            {
+                "Lookup_to_B__c": "a01KO000000ZOGxYAO",
+                "attributes":
+                {
+                    "type": "Custom_Object_A__c",
+                    "url": "/services/data/v62.0/sobjects/Custom_Object_A__c/a00KO0000016wtaYAA"
+                },
+                "Id": "a00KO0000016wtaYAA",
+                "OwnerId": "005KH000001TsIiYAK"
+            },
+            {
+                "Lookup_to_A__c": "a00KO0000016wtaYAA",
+                "attributes":
+                {
+                    "type": "Custom_Object_B__c",
+                    "url": "/services/data/v62.0/sobjects/Custom_Object_B__c/a01KO000000ZOGxYAO"
+                },
+                "Id": "a01KO000000ZOGxYAO"
+            }
+        ], {
+            "Custom_Object_A__c": ["OwnerId"],
+            "Custom_Object_B__c": ["Lookup_to_A__c"]
+        })).toEqual([
+            { recordId: 'a00KO0000016wtaYAA', field: 'Lookup_to_B__c' }
+        ]);
+    });
+
+    it('should indicate a field to clear if circular dependency is found in 3 records', () => {
         expect(scanForCircularDependency([
                 {
                     "Lookup_to_B__c": "a01KO000000ZOGxYAO",
@@ -54,6 +83,35 @@ describe('scanForCircularDependency', () => {
             }
         )).toEqual([
             { recordId: 'a02KO0000014XX8YAM', field: 'Lookup_to_A__c' }
+        ]);
+    });
+
+    it('should indicate only one field to clear if circular dependency is found in 2 records when no fields are required', () => {
+        expect(scanForCircularDependency([
+            {
+                "Lookup_to_B__c": "a01KO000000ZOGxYAO",
+                "attributes":
+                {
+                    "type": "Custom_Object_A__c",
+                    "url": "/services/data/v62.0/sobjects/Custom_Object_A__c/a00KO0000016wtaYAA"
+                },
+                "Id": "a00KO0000016wtaYAA",
+                "OwnerId": "005KH000001TsIiYAK"
+            },
+            {
+                "Lookup_to_A__c": "a00KO0000016wtaYAA",
+                "attributes":
+                {
+                    "type": "Custom_Object_B__c",
+                    "url": "/services/data/v62.0/sobjects/Custom_Object_B__c/a01KO000000ZOGxYAO"
+                },
+                "Id": "a01KO000000ZOGxYAO"
+            }
+        ], {
+            "Custom_Object_A__c": ["OwnerId"],
+            "Custom_Object_B__c": ["OwnerId"]
+        })).toEqual([
+            { recordId: 'a00KO0000016wtaYAA', field: 'Lookup_to_B__c' }
         ]);
     });
 });

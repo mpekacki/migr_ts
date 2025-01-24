@@ -30,6 +30,7 @@ export const scanForCircularDependency = (records: SfRecord[], requiredLookupsBy
                             const field = newPath[i];
                             if (!requiredLookups.includes(field)) {
                                 toClear.push({ recordId: newPath[i - 1], field });
+                                recordsById[newPath[i - 1]][field as string] = null;
                             }
                             return;
                         }

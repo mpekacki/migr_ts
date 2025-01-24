@@ -143,6 +143,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                     selector.include(relationship.name).select('Id').end();
                 }
                 selector.where(`Id = '${recordId}'`);
+                output({ category: 'output', message: `querying for related records: ${await selector.toSOQL()}`, type: 'info' });
                 const relsResults = await selector.execute();
                 const recordRelationships = relsResults[0];
                 for (const relationship of relationships) {
