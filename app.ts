@@ -251,8 +251,13 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                             let errorFixed = false;
                             let solver: (FixSolver | SkipSolver | MatchSolver) | undefined;
                             if (options.solvers) {
+                                // get previously used solvers
+                                const usedSolvers = errors[recordId]?.map(error => error.solver);
+                                if (usedSolvers?.length > 0) {
+                                    output({ category: 'output', message: `skipping previously used solvers: ${JSON.stringify(usedSolvers)}`, type: 'info' });
+                                }
                                 // find solver that matches the error message
-                                solver = options.solvers.find(solver => new RegExp(solver.message).test(e.message));
+                                solver = options.solvers.find(solver => new RegExp(solver.message).test(e.message) && !usedSolvers?.includes(solver));
                                 if (solver) {
                                     if (solver.action === 'fix') {
                                         for (const changeField of solver.changeFields) {

@@ -452,6 +452,75 @@ test('migrate record with error - fixed automatically', async () => {
     expect(parsedOutput.errors[contract.id!][0].solver.changeFields).toEqual([{ field: 'Status', value: 'Draft' }]);
 });
 
+test('migrate record with error - fixed automatically, solver does not work', async () => {
+    console.log('starting test: migrate record with error');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    console.log(account);
+    expect(account.id).toBeDefined();
+
+    const contract = await conn1.sobject('Contract').create({ 
+        AccountId: account.id!, 
+        Status: 'Draft', 
+        StartDate: new Date().toISOString(), 
+        ContractTerm: 12 
+    });
+    console.log(contract);
+    expect(contract.id).toBeDefined();
+
+    await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [contract.id!],
+        matchers: defaultMatchers,
+        solvers: [
+            {
+                action: 'fix',
+                message: 'Choose a valid contract status and save your changes. Ask your admin for details.',
+                changeFields: [
+                    {
+                        field: 'ContractTerm',
+                        value: 11
+                    }
+                ]
+            }
+        ]
+    };
+
+    const { parsedOutput } = await runMigration(config, ['y', 'f', '{"Status": "Draft"}']);
+
+    // Check if contract was migrated
+    expect(parsedOutput).toHaveProperty(contract.id!);
+    const newContractId = parsedOutput[contract.id!];
+    expect(newContractId).toBeTruthy();
+    expect(newContractId).not.toEqual(contract.id);
+
+    // should be able to query the new contract record
+    const newContract: any = await conn2.sobject('Contract').retrieve(newContractId);
+    expect(newContract).toBeDefined();
+    expect(newContract.Status).toEqual('Activated');
+
+    // output should contain the error message
+    expect(parsedOutput).toHaveProperty('errors');
+    expect(parsedOutput.errors).toHaveProperty(contract.id!);
+    expect(parsedOutput.errors[contract.id!]).toHaveLength(2);
+    expect(parsedOutput.errors[contract.id!][0].message).toEqual('Choose a valid contract status and save your changes. Ask your admin for details.');
+    expect(parsedOutput.errors[contract.id!][0].fixed).toBeTruthy();
+    expect(parsedOutput.errors[contract.id!][0].solver).toBeDefined();
+    expect(parsedOutput.errors[contract.id!][0].solver.action).toEqual('fix');
+    expect(parsedOutput.errors[contract.id!][0].solver.changeFields).toEqual([{ field: 'ContractTerm', value: 11 }]);
+    expect(parsedOutput.errors[contract.id!][1].message).toEqual('Choose a valid contract status and save your changes. Ask your admin for details.');
+    expect(parsedOutput.errors[contract.id!][1].fixed).toBeTruthy();
+    expect(parsedOutput.errors[contract.id!][1].solver).toBeDefined();
+    expect(parsedOutput.errors[contract.id!][1].solver.action).toEqual('fix');
+    expect(parsedOutput.errors[contract.id!][1].solver.changeFields).toEqual([{ field: 'Status', value: 'Draft' }]);
+});
+
 test('migrate record with error - fixed manually', async () => {
     console.log('starting test: migrate record with error fixed manually');
 
