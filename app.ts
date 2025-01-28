@@ -296,6 +296,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                 // no solver found, ask user what to do
                                 output({ category: 'output', message: `error: ${JSON.stringify(e)}`, type: 'info' });
                                 let inputOk;
+                                let solverAdded = false;
                                 do {
                                     inputOk = true;
                                     const userInput = await input({ category: 'input', message: `no solver found for error: ${e.message}`, type: 'insert_error' });
@@ -352,7 +353,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                         }
                                         options.solvers.push(newSolver);
                                         anyRecordProcessed = true;
-                                        break;
+                                        solverAdded = true;
                                     } else if (userInput == 's') {
                                         // skip record, don't do anything
                                     } else {
@@ -360,6 +361,9 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                         inputOk = false;
                                     }
                                 } while (!inputOk);
+                                if (solverAdded) {
+                                    break;
+                                }
                             }
                             if (!(recordId in errors)) {
                                 errors[recordId] = [];
