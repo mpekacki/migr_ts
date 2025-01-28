@@ -295,62 +295,71 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                             if (!errorFixed) {
                                 // no solver found, ask user what to do
                                 output({ category: 'output', message: `error: ${JSON.stringify(e)}`, type: 'info' });
-                                const userInput = await input({ category: 'input', message: `no solver found for error: ${e.message}`, type: 'insert_error' });
-                                if (userInput === 'f') {
-                                    let fieldsToUpdate;
-                                    while (!fieldsToUpdate) {
-                                        const fieldsJson = await input({ category: 'input', message: 'Enter the fields to update in JSON format:', type: 'insert_error' });
-                                        try {
-                                            fieldsToUpdate = JSON.parse(fieldsJson);
-                                        } catch (e) {
-                                            output({ category: 'output', message: `invalid JSON, please try again`, type: 'info' });
-                                        }
-                                    }
-                                    solver = {
-                                        action: 'fix',
-                                        message: e.message,
-                                        changeFields: []
-                                    }
-                                    for (const field of Object.keys(fieldsToUpdate)) {
-                                        if (fieldsToUpdate[field] === null) {
-                                            delete record[field];
-                                        } else {
-                                            if (!(recordId in toUpdateLater)) {
-                                                toUpdateLater[recordId] = {
-                                                    attributes: record.attributes
-                                                } as SObjectRecord<Schema, string>;
+                                let inputOk;
+                                do {
+                                    inputOk = true;
+                                    const userInput = await input({ category: 'input', message: `no solver found for error: ${e.message}`, type: 'insert_error' });
+                                    if (userInput === 'f') {
+                                        let fieldsToUpdate;
+                                        while (!fieldsToUpdate) {
+                                            const fieldsJson = await input({ category: 'input', message: 'Enter the fields to update in JSON format:', type: 'insert_error' });
+                                            try {
+                                                fieldsToUpdate = JSON.parse(fieldsJson);
+                                            } catch (e) {
+                                                output({ category: 'output', message: `invalid JSON, please try again`, type: 'info' });
                                             }
-                                            toUpdateLater[recordId][field] = record[field];
-                                            record[field] = fieldsToUpdate[field];
                                         }
-                                        solver.changeFields.push({ field, value: fieldsToUpdate[field] });
-                                    }
-                                    retryRecord = true;
-                                    errorFixed = true;
-                                } else if (userInput === 'r') {
-                                    retryRecord = true;
-                                } else if (userInput === 'm') {
-                                    migratedRecordId = await input({ category: 'input', message: `Enter the ID of the record to match:`, type: 'insert_error' });
-                                } else if (userInput === 'h') {
-                                    saveAndExit();
-                                    return;
-                                } else if (userInput === 'a') {
-                                    let newSolver;
-                                    while (!newSolver) {
-                                        const solverJson = await input({ category: 'input', message: 'Enter the solver in JSON format:', type: 'insert_error' });
-                                        try {
-                                            newSolver = JSON.parse(solverJson);
-                                        } catch (e) {
-                                            output({ category: 'output', message: `invalid JSON, please try again`, type: 'info' });
+                                        solver = {
+                                            action: 'fix',
+                                            message: e.message,
+                                            changeFields: []
                                         }
+                                        for (const field of Object.keys(fieldsToUpdate)) {
+                                            if (fieldsToUpdate[field] === null) {
+                                                delete record[field];
+                                            } else {
+                                                if (!(recordId in toUpdateLater)) {
+                                                    toUpdateLater[recordId] = {
+                                                        attributes: record.attributes
+                                                    } as SObjectRecord<Schema, string>;
+                                                }
+                                                toUpdateLater[recordId][field] = record[field];
+                                                record[field] = fieldsToUpdate[field];
+                                            }
+                                            solver.changeFields.push({ field, value: fieldsToUpdate[field] });
+                                        }
+                                        retryRecord = true;
+                                        errorFixed = true;
+                                    } else if (userInput === 'r') {
+                                        retryRecord = true;
+                                    } else if (userInput === 'm') {
+                                        migratedRecordId = await input({ category: 'input', message: `Enter the ID of the record to match:`, type: 'insert_error' });
+                                    } else if (userInput === 'h') {
+                                        saveAndExit();
+                                        return;
+                                    } else if (userInput === 'a') {
+                                        let newSolver;
+                                        while (!newSolver) {
+                                            const solverJson = await input({ category: 'input', message: 'Enter the solver in JSON format:', type: 'insert_error' });
+                                            try {
+                                                newSolver = JSON.parse(solverJson);
+                                            } catch {
+                                                output({ category: 'output', message: `invalid JSON, please try again`, type: 'info' });
+                                            }
+                                        }
+                                        if (!options.solvers) {
+                                            options.solvers = [];
+                                        }
+                                        options.solvers.push(newSolver);
+                                        anyRecordProcessed = true;
+                                        break;
+                                    } else if (userInput == 's') {
+                                        // skip record, don't do anything
+                                    } else {
+                                        output({ category: 'output', message: `invalid input: ${userInput}`, type: 'info' });
+                                        inputOk = false;
                                     }
-                                    if (!options.solvers) {
-                                        options.solvers = [];
-                                    }
-                                    options.solvers.push(newSolver);
-                                    anyRecordProcessed = true;
-                                    break;
-                                }
+                                } while (!inputOk);
                             }
                             if (!(recordId in errors)) {
                                 errors[recordId] = [];
