@@ -159,6 +159,8 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                 }
             }
         }
+        // remove records that are already fetched
+        recordIdsToFetch = recordIdsToFetch.filter(id => !(id in fetchedRecordsByIds));
         recordIdsToFetch = newRecordIdsToFetch;
     }
 
