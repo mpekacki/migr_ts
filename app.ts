@@ -21,7 +21,7 @@ interface Options {
             name: string;
         }[];
     };
-    solvers: (FixSolver | SkipSolver | MatchSolver)[];
+    solvers: (FixSolver | SkipSolver | MatchSolver | ExtractSolver)[];
 }
 
 interface Solver {
@@ -42,6 +42,11 @@ interface SkipSolver extends Solver {
 
 interface MatchSolver extends Solver {
     action: 'match';
+}
+
+interface ExtractSolver extends Solver {
+    action: 'extract_column';
+    replaceWith: string | null;
 }
 
 interface IOEvent {
@@ -104,7 +109,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
     const fetchedRecordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     const lookupFieldsBySObjectType: Record<string, Field[]> = {};
     const old2new: Record<string, string> = {};
-    const errors: Record<string, { message: string, fixed: boolean, solver?: (FixSolver | SkipSolver | MatchSolver) }[]> = {};
+    const errors: Record<string, { message: string, fixed: boolean, solver?: (FixSolver | SkipSolver | MatchSolver | ExtractSolver) }[]> = {};
 
     for (const recordId of Object.keys(history)) {
         old2new[recordId] = history[recordId];
@@ -251,7 +256,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                             output({ category: 'output', message: `created record ${migratedRecordId} of type ${sObjectName}`, type: 'info' });
                         } catch (e) {
                             let errorFixed = false;
-                            let solver: (FixSolver | SkipSolver | MatchSolver) | undefined;
+                            let solver: (FixSolver | SkipSolver | MatchSolver | ExtractSolver) | undefined;
                             if (options.solvers) {
                                 // get previously used solvers
                                 const usedSolvers = errors[recordId]?.map(error => error.solver);
@@ -288,6 +293,18 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                         if (matchId) {
                                             migratedRecordId = matchId;
                                             errorFixed = true;
+                                        }
+                                    } else if (solver.action === 'extract_column') {
+                                        output({ category: 'output', message: `extracting column name from error: ${e.message}`, type: 'info' });
+                                        const columnName = new RegExp(solver.message).exec(e.message)?.[1];
+                                        if (columnName) {
+                                            if (solver.replaceWith === null) {
+                                                delete record[columnName];
+                                            } else {
+                                                record[columnName] = solver.replaceWith;
+                                            }
+                                            errorFixed = true;
+                                            retryRecord = true;
                                         }
                                     }
                                 }

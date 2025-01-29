@@ -752,6 +752,45 @@ test('migrate record with error - fixed manually, remove field if new value is n
     expect(capturedOutput.map(e => e.message).filter(e => e.includes('updating record'))).toHaveLength(0);
 });
 
+test('migrate record with error - automatically extract column name to update', async () => {
+    console.log('starting test: migrate record with error - automatically extract column name to update');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const name = `ext-${Math.random()}`;
+    const custObj = await conn1.sobject('Custom_Object_D__c').create({ Org_A_Only_Field__c: 'Org A Only Value', Name: name });
+    console.log(custObj);
+    expect(custObj.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [custObj.id!],
+        matchers: defaultMatchers,
+        solvers: [
+            {
+                action: 'extract_column',
+                message: 'No such column \'(\\w+)\' on sobject of type',
+                replaceWith: null
+            }
+        ]
+    };
+
+    const { parsedOutput, capturedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(custObj.id!);
+    const newCustObjId = parsedOutput[custObj.id!];
+    expect(newCustObjId).toBeTruthy();
+    expect(newCustObjId).not.toEqual(custObj.id);
+
+    const newCustObj: any = await conn2.sobject('Custom_Object_D__c').retrieve(newCustObjId);
+    expect(newCustObj).toBeDefined();
+    expect(newCustObj.Name).toEqual(name);
+
+    expect(capturedOutput.map(e => e.message).filter(e => e.includes('updating record'))).toHaveLength(0);
+});
+
 test('migrate record with error - manually add new solver', async () => {
     console.log('starting test: migrate record with error');
 
