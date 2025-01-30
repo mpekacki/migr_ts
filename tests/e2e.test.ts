@@ -53,7 +53,7 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
     const capturedOutput: IOEvent[] = [];
     let capturedError = '';
 
-    const child = exec(`npx ts-node ./main.ts --config-json ./config_test.json`);
+    const child = exec(`npx ts-node ./main.ts --config-json ./config_test.json --debug`);
     child.stdout?.on('data', (data) => {
         console.log(data);
         const lines = data.toString().split('\n');

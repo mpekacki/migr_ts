@@ -10,21 +10,34 @@ const rl = readline.createInterface({
 });
 
 program
-    .option('-c, --config-json <config-json>', 'The path to the config file');
+    .requiredOption('-c, --config-json <config-json>', 'The path to the config file')
+    .option('-o, --output-file <output-file>', 'The path to save output logs')
+    .option('-d, --debug', 'Enable debug mode');
 
 program.parse();
 
 const options: Options = JSON.parse(fs.readFileSync(program.opts().configJson, 'utf8')) as Options;
 
-if (!program.opts().configJson) {
-    throw new Error('Config file is required');
+let outputStream: fs.WriteStream | undefined;
+if (program.opts().outputFile) {
+    outputStream = fs.createWriteStream(program.opts().outputFile, { flags: 'a' });
 }
 
 main(options, (output: IOEvent) => {
-    terminal(JSON.stringify(output));
+    // Print to terminal
+    const message = program.opts().debug ? JSON.stringify(output) : output.message;
+    terminal(message);
     terminal('\n');
+    
+    // Save to file if output file was specified
+    if (outputStream) {
+        outputStream.write(message + '\n');
+    }
 }, async (question: IOEvent) => {
-    return new Promise((resolve) => rl.question(JSON.stringify(question), resolve));
+    return new Promise((resolve) => rl.question(program.opts().debug ? JSON.stringify(question) : question.message, resolve));
 }).finally(() => {
+    if (outputStream) {
+        outputStream.end();
+    }
     rl.close();
 });
