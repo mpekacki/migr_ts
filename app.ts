@@ -446,6 +446,10 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
             }
         }
         record.Id = old2new[recordId];
+        if (!record.Id) {
+            output({ category: 'output', message: `record ${recordId} has no ID, skipping update`, type: 'info' });
+            continue;
+        }
         output({ category: 'output', message: `updating record ${recordId} of type ${record.attributes!.type} to ${JSON.stringify(record)}`, type: 'info' });
         await connB.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
     }

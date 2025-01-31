@@ -388,6 +388,42 @@ test('match record by id field', async () => {
     expect(newCustObjBId).toEqual(custObjB2.id);
 });
 
+test('record is skipped, any field updates are cancelled', async () => {
+    console.log('starting test: record is skipped, any field updates are cancelled');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const externalId = `ext-${Math.random()}`;
+    const custObjC = await conn1.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    console.log(custObjC);
+    expect(custObjC.id).toBeDefined();
+
+    const custObjC2 = await conn2.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    console.log(custObjC2);
+    expect(custObjC2.id).toBeDefined();
+
+    const custObjB = await conn1.sobject('Custom_Object_B__c').create({ Lookup_to_C__c: custObjC.id! });
+    console.log(custObjB);
+    expect(custObjB.id).toBeDefined();
+    
+    const custObjA = await conn1.sobject('Custom_Object_A__c').create({ Lookup_to_B__c: custObjB.id! });
+    console.log(custObjA);
+    expect(custObjA.id).toBeDefined();
+
+    await conn1.sobject('Custom_Object_C__c').update({ Id: custObjC.id!, Lookup_to_A__c: custObjA.id! });
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [custObjB.id!],
+        matchers: defaultMatchers
+    };
+
+    await runMigration(config, ['y', 's', 's', 's']);
+
+    // does not throw error
+});
+
 test('migrate record with error - fixed automatically', async () => {
     console.log('starting test: migrate record with error');
 
