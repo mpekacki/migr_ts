@@ -6,16 +6,17 @@
         <field>Custom_Object_C__c.Lookup_to_A__c</field>
         <readable>true</readable>
     </fieldPermissions>
-        <layoutAssignments>
-        <layout>Custom_Object_A__c-Custom Object A Layout</layout>
-    </layoutAssignments>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>Custom_Object_D__c.Fussy_Field_1__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>Custom_Object_D__c.Fussy_Field_2__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
     <layoutAssignments>
-        <layout>Custom_Object_B__c-Custom Object B Layout</layout>
-    </layoutAssignments>
-    <layoutAssignments>
-        <layout>Custom_Object_C__c-Custom Object C Layout</layout>
-    </layoutAssignments>
-        <layoutAssignments>
         <layout>Custom_Object_D__c-Custom Object D Layout</layout>
     </layoutAssignments>
     <objectPermissions>

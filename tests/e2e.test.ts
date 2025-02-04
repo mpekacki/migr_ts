@@ -11,11 +11,9 @@ const targetOrgAlias = 'testMigrationOrgB';
 jest.setTimeout(120000);
 
 afterEach(async () => {
-    try {
-        fs.unlinkSync('./config_test.json');
+    fs.unlinkSync('./config_test.json');
+    if (fs.existsSync(`${targetOrgAlias}__history.json`)) {
         fs.unlinkSync(`${targetOrgAlias}__history.json`);
-    } catch (error) {
-        console.log('Error deleting files:', error);
     }
 });
 
@@ -72,13 +70,14 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
                     });
                 } else {
                     const input = inputHandler.shift();
-                    if (input) {
-                        console.log(`sending input: ${input}`);
-                        child.stdin?.write(input);
-                        child.stdin?.write('\n');
-                    } else {
-                        throw new Error('No input provided');
+                    expect(input).toBeDefined();
+                    if (!input) {
+                        child.stdin?.end();
+                        return;
                     }
+                    console.log(`sending input: ${input}`);
+                    child.stdin?.write(input);
+                    child.stdin?.write('\n');
                 }
             }
         }
@@ -425,7 +424,7 @@ test('record is skipped, any field updates are cancelled', async () => {
 });
 
 test('migrate record with error - fixed automatically', async () => {
-    console.log('starting test: migrate record with error');
+    console.log('starting test: migrate record with error - fixed automatically');
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -489,7 +488,7 @@ test('migrate record with error - fixed automatically', async () => {
 });
 
 test('migrate record with error - fixed automatically, solver does not work', async () => {
-    console.log('starting test: migrate record with error');
+    console.log('starting test: migrate record with error - fixed automatically, solver does not work');
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -714,7 +713,7 @@ test('migrate record with error - fixed manually, invalid JSON', async () => {
 });
 
 test('migrate record with error - fixed automatically, remove field if new value is null', async () => {
-    console.log('starting test: migrate record with error');
+    console.log('starting test: migrate record with error - fixed automatically, remove field if new value is null');
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -756,7 +755,7 @@ test('migrate record with error - fixed automatically, remove field if new value
 });
 
 test('migrate record with error - fixed manually, remove field if new value is null', async () => {
-    console.log('starting test: migrate record with error');
+    console.log('starting test: migrate record with error - fixed manually, remove field if new value is null');
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -827,8 +826,57 @@ test('migrate record with error - automatically extract column name to update', 
     expect(capturedOutput.map(e => e.message).filter(e => e.includes('updating record'))).toHaveLength(0);
 });
 
+test('skip solver only if messages were the same', async () => {
+    console.log('starting test: skip solver only if messages were the same');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+
+    console.log('creating records');
+    const name = `ext-${Math.random()}`;
+    const custObj = await conn1.sobject('Custom_Object_D__c').create({ Name: name });
+    console.log(custObj);
+    expect(custObj.id).toBeDefined();
+
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj.id!, Fussy_Field_1__c: 'dupa', Fussy_Field_2__c: 'dupa' });
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [custObj.id!],
+        matchers: defaultMatchers,
+        solvers: [
+            {
+                action: 'extract_column',
+                message: 'Field \'(\\w+)\'  can\'t be',
+                replaceWith: "asdf"
+            },
+            {
+                action: 'extract_column',
+                message: 'No such column \'(\\w+)\' on sobject of type',
+                replaceWith: null
+            }
+        ]
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(custObj.id!);
+    const newCustObjId = parsedOutput[custObj.id!];
+    expect(newCustObjId).toBeTruthy();
+    expect(newCustObjId).not.toEqual(custObj.id);
+
+    const newCustObj: any = await conn2.sobject('Custom_Object_D__c').retrieve(newCustObjId);
+    expect(newCustObj).toBeDefined();
+    expect(newCustObj.Name).toEqual(name);
+
+    expect(parsedOutput).toHaveProperty('errors');
+    expect(parsedOutput.errors).toHaveProperty(custObj.id!);
+    expect(parsedOutput.errors[custObj.id!]).toHaveLength(3);
+});
+
 test('migrate record with error - manually add new solver', async () => {
-    console.log('starting test: migrate record with error');
+    console.log('starting test: migrate record with error - manually add new solver');
 
     const { conn1, conn2 } = await setupTestConnections();
 
