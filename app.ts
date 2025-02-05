@@ -117,6 +117,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
     }
 
     while (recordIdsToFetch.length > 0) {
+        output({ category: 'output', message: `records so far: ${Object.keys(recordsByIds).length}`, type: 'info' });
         const newRecordIdsToFetch: string[] = [];
         for (const recordId of recordIdsToFetch) {
             const sObjectName = await getSObjectType(recordId);
@@ -198,6 +199,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
 
     const toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
     while (Object.keys(recordsByIds).length > 0) {
+        output({ category: 'output', message: `remaining records: ${Object.keys(recordsByIds).length}`, type: 'info' });
         let anyRecordProcessed = false;
         recordLoop: for (const recordId of Object.keys(recordsByIds)) {
             const record = recordsByIds[recordId];
