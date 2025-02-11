@@ -178,6 +178,13 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
         recordIdsToFetch = newRecordIdsToFetch;
     }
 
+    // remove records that are already migrated
+    for (const recordId of Object.keys(old2new)) {
+        if (recordId in recordsByIds) {
+            delete recordsByIds[recordId];
+        }
+    }
+
     output({ category: 'output', message: `fetched ${Object.keys(recordsByIds).length} records`, type: 'info' });
     // build map of record counts by sobject type
     const recordCountsBySObjectType: Record<string, number> = {};

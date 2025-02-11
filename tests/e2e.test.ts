@@ -1350,3 +1350,69 @@ test('match not found, skip record', async () => {
     const newAccount2: any = await conn2.sobject('Account').select('Id').where(`Name = '${account2Name}'`).execute();
     expect(newAccount2.length).toBe(0);
 });
+
+test('use history for both primary and secondary records', async () => {
+    console.log('starting test: use history for both primary and secondary records');
+
+    const { conn1, conn2 } = await setupTestConnections();
+    
+    const account1Name = `Ebola Cola ${Math.random()}`;
+    const contactName = `John Doe ${Math.random()}`;
+
+    console.log('creating records');
+    const account = await conn1.sobject('Account').create({ Name: account1Name });
+    console.log(account);
+    expect(account.id).toBeDefined();
+
+    const contact = await conn1.sobject('Contact').create({ AccountId: account.id!, LastName: contactName });
+    console.log(contact);
+    expect(contact.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [contact.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(contact.id!);
+    const newContactId = parsedOutput[contact.id!];
+    expect(newContactId).toBeTruthy();
+    expect(newContactId).not.toEqual(contact.id);
+
+    // should be able to query the new contact record
+    const newContact: any = await conn2.sobject('Contact').retrieve(newContactId);
+    expect(newContact).toBeDefined();
+    expect(newContact.LastName).toEqual(contactName);
+    
+    expect(parsedOutput).toHaveProperty(account.id!);
+    const newAccountId = parsedOutput[account.id!];
+    expect(newAccountId).toBeTruthy();
+    expect(newAccountId).not.toEqual(account.id);
+
+    // should be able to query the new account record
+    const newAccount: any = await conn2.sobject('Account').retrieve(newAccountId);
+    expect(newAccount).toBeDefined();
+    expect(newAccount.Name).toEqual(account1Name);
+
+    // run migration again with new contact
+    const contact2 = await conn1.sobject('Contact').create({ AccountId: account.id!, LastName: contactName });
+    console.log(contact2);
+    expect(contact2.id).toBeDefined();
+
+    config.recordIds = [contact2.id!];
+
+    const { parsedOutput: parsedOutput2 } = await runMigration(config);
+
+    expect(parsedOutput2).toHaveProperty(contact2.id!);
+    const newContactId2 = parsedOutput2[contact2.id!];
+    expect(newContactId2).toBeTruthy();
+    expect(newContactId2).not.toEqual(contact2.id);
+
+    expect(parsedOutput2).toHaveProperty(account.id!);
+    const newAccountId2 = parsedOutput2[account.id!];
+    expect(newAccountId2).toBeTruthy();
+    expect(newAccountId2).toEqual(newAccountId);
+});
