@@ -118,8 +118,8 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
 
     while (recordIdsToFetch.length > 0) {
         output({ category: 'output', message: `records so far: ${Object.keys(recordsByIds).length}`, type: 'info' });
-        const newRecordIdsToFetch: string[] = [];
-        for (const recordId of recordIdsToFetch) {
+        // Create parallel fetch promises for all records
+        const fetchPromises = recordIdsToFetch.map(async (recordId) => {
             const sObjectName = await getSObjectType(recordId);
             const sobjectDescribe = await getSObjectDescribe(sObjectName);
             output({ category: 'output', message: `fetching record ${recordId} of type ${sObjectName}`, type: 'info' });
@@ -136,10 +136,11 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
             if (lookupFields.length > 0) {
                 lookupFieldsBySObjectType[sObjectName] = lookupFields;
             }
+            const newIds: string[] = [];
             for (const lookupField of lookupFields) {
                 const lookupValue = record[lookupField.name];
-                if (lookupValue && !(lookupValue in recordsByIds) && !newRecordIdsToFetch.includes(lookupValue)) {
-                    newRecordIdsToFetch.push(lookupValue);
+                if (lookupValue && !(lookupValue in recordsByIds) && !newIds.includes(lookupValue)) {
+                    newIds.push(lookupValue);
                 }
             }
             const relationships = options.relationships?.[sObjectName];
@@ -157,14 +158,21 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                     output({ category: 'output', message: `related records of ${relationship.name}: ${relatedRecords?.length}`, type: 'info' });
                     if (relatedRecords) {
                         for (const relatedRecord of relatedRecords) {
-                            if (!(relatedRecord.Id in recordsByIds) && !newRecordIdsToFetch.includes(relatedRecord.Id!)) {
-                                newRecordIdsToFetch.push(relatedRecord.Id!);
+                            if (!(relatedRecord.Id in recordsByIds) && !newIds.includes(relatedRecord.Id!)) {
+                                newIds.push(relatedRecord.Id!);
                             }
                         }
                     }
                 }
             }
-        }
+            return newIds;
+        });
+
+        // Wait for all fetches to complete
+        const newIdsArrays = await Promise.all(fetchPromises);
+        
+        // Flatten array of arrays into single array of new IDs to fetch
+        const newRecordIdsToFetch = newIdsArrays.flat();
         // remove records that are already fetched
         recordIdsToFetch = recordIdsToFetch.filter(id => !(id in fetchedRecordsByIds));
         recordIdsToFetch = newRecordIdsToFetch;
