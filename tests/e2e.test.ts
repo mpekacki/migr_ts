@@ -73,7 +73,7 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
                     expect(input).toBeDefined();
                     if (!input) {
                         child.stdin?.end();
-                        return;
+                        throw new Error('No input provided');
                     }
                     console.log(`sending input: ${input}`);
                     child.stdin?.write(input);
@@ -1415,4 +1415,46 @@ test('use history for both primary and secondary records', async () => {
     const newAccountId2 = parsedOutput2[account.id!];
     expect(newAccountId2).toBeTruthy();
     expect(newAccountId2).toEqual(newAccountId);
+});
+
+test('fix column automatically with modifying current value', async () => {
+    console.log('starting test: fix column automatically with modifying current value');
+
+    const { conn1, conn2 } = await setupTestConnections();
+    
+    // query pre-existing Chatter Test user
+    const chatterTestUser = await conn1.sobject('User').select('Id').where('Name = \'Chatter Test\'').execute();
+    expect(chatterTestUser.length).toBe(1);
+
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [chatterTestUser[0].Id!],
+        matchers: defaultMatchers,
+        solvers: [
+            {
+                action: 'append_random',
+                message: 'Duplicate Username',
+                changeFields: [
+                    {
+                        field: 'Username',
+                        length: 4
+                    }
+                ]
+            }
+        ]
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(chatterTestUser[0].Id!);
+    const newChatterTestUserId = parsedOutput[chatterTestUser[0].Id!];
+    expect(newChatterTestUserId).toBeTruthy();
+    expect(newChatterTestUserId).not.toEqual(chatterTestUser[0].Id);
+
+    // should be able to query the new user record
+    const newChatterTestUser: any = await conn2.sobject('User').retrieve(newChatterTestUserId);
+    expect(newChatterTestUser).toBeDefined();
+    expect(newChatterTestUser.Name).toEqual('Chatter Test');
 });

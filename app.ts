@@ -21,7 +21,7 @@ interface Options {
             name: string;
         }[];
     };
-    solvers: (FixSolver | SkipSolver | MatchSolver | ExtractSolver)[];
+    solvers: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver)[];
 }
 
 interface Solver {
@@ -47,6 +47,14 @@ interface MatchSolver extends Solver {
 interface ExtractSolver extends Solver {
     action: 'extract_column';
     replaceWith: string | null;
+}
+
+interface AppendRandomSolver extends Solver {
+    action: 'append_random';
+    changeFields: {
+        field: string;
+        length: number;
+    }[];
 }
 
 interface IOEvent {
@@ -109,7 +117,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
     const fetchedRecordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     const lookupFieldsBySObjectType: Record<string, Field[]> = {};
     const old2new: Record<string, string> = {};
-    const errors: Record<string, { message: string, fixed: boolean, solver?: (FixSolver | SkipSolver | MatchSolver | ExtractSolver) }[]> = {};
+    const errors: Record<string, { message: string, fixed: boolean, solver?: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver) }[]> = {};
 
     for (const recordId of Object.keys(history)) {
         old2new[recordId] = history[recordId];
@@ -275,7 +283,7 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                             const errs = err.errorCode === 'MULTIPLE_API_ERRORS' ? err.data : [err];
                             for (const e of errs) {
                                 let errorFixed = false;
-                                let solver: (FixSolver | SkipSolver | MatchSolver | ExtractSolver) | undefined;
+                                let solver: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver) | undefined;
                                 if (options.solvers) {
                                     // get previously used solvers
                                     const usedSolvers = errors[recordId]?.filter(error => error.message === e.message).map(error => error.solver);
@@ -325,6 +333,13 @@ async function main(options: Options, output: (output: IOEvent) => void, input: 
                                                 errorFixed = true;
                                                 retryRecord = true;
                                             }
+                                        } else if (solver.action === 'append_random') {
+                                            output({ category: 'output', message: `appending random to record ${recordId} of type ${sObjectName} using solver: ${solver.message}`, type: 'info' });
+                                            for (const changeField of solver.changeFields) {
+                                                record[changeField.field] = record[changeField.field] + '.' + Math.random().toString(36).substring(2, 2 + changeField.length);
+                                            }
+                                            errorFixed = true;
+                                            retryRecord = true;
                                         }
                                     }
                                 }
