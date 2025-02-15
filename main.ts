@@ -23,9 +23,15 @@ if (program.opts().outputFile) {
     outputStream = fs.createWriteStream(program.opts().outputFile, { flags: 'a' });
 }
 
+const formatMessage = (event: IOEvent) => {
+    return program.opts().debug ? 
+        JSON.stringify(event) : 
+        ((event.data ? `${event.data}\n` : '') + event.message);
+};
+
 main(options, (output: IOEvent) => {
     // Print to terminal
-    const message = program.opts().debug ? JSON.stringify(output) : output.message;
+    const message = formatMessage(output);
     terminal(message);
     terminal('\n');
     
@@ -34,7 +40,7 @@ main(options, (output: IOEvent) => {
         outputStream.write(message + '\n');
     }
 }, async (question: IOEvent) => {
-    return new Promise((resolve) => rl.question(program.opts().debug ? JSON.stringify(question) : question.message, resolve));
+    return new Promise((resolve) => rl.question(formatMessage(question), resolve));
 }).finally(() => {
     if (outputStream) {
         outputStream.end();
