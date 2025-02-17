@@ -3,6 +3,7 @@ import { DescribeSObjectResult, Field, SaveResult, Schema, SObjectRecord, SObjec
 import fs from 'fs';
 import path from 'path';
 import { scanForCircularDependency } from './circular';
+import IOEvent from './ioevent';
 
 interface Options {
     sourceOrg: string;
@@ -57,14 +58,14 @@ interface AppendRandomSolver extends Solver {
     }[];
 }
 
-interface IOEvent {
-    category: 'output' | 'input';
-    message: string;
-    type: 'confirm_migration' | 'info' | 'insert_error';
-    data?: string;
-}
+async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>) {
+    const output = (event: IOEvent) => {
+        onOutput(new IOEvent(event.category, event.message, event.type, event.data));
+    };
+    const input = (question: IOEvent) => {
+        return onInput(new IOEvent(question.category, question.message, question.type, question.data));
+    };
 
-async function main(options: Options, output: (output: IOEvent) => void, input: (question: IOEvent) => Promise<string>) {
     output({ category: 'output', message: `starting migration: ${JSON.stringify(options)}`, type: 'info' });
     
     const allAuths = await AuthInfo.listAllAuthorizations();

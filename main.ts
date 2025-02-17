@@ -26,7 +26,7 @@ if (program.opts().outputFile) {
 const formatMessage = (event: IOEvent) => {
     return program.opts().debug ? 
         JSON.stringify(event) : 
-        ((event.data ? `${event.data}\n` : '') + event.message);
+        event.toString();
 };
 
 main(options, (output: IOEvent) => {
