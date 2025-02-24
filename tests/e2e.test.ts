@@ -931,7 +931,7 @@ test('migrate record with error - manually add new solver', async () => {
     expect(capturedOutput.map(e => e.message)).toContain('fixing using solver: No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c');
 });
 
-test('migrate record with error - manually add new solver, invalid JSON', async () => {
+test('migrate record with error - manually add new solver, invalid solver', async () => {
     console.log('starting test: migrate record with error - manually add new solver, invalid JSON');
 
     const { conn1, conn2 } = await setupTestConnections();
@@ -955,7 +955,7 @@ test('migrate record with error - manually add new solver, invalid JSON', async 
     };
 
 
-    const { parsedOutput, capturedOutput } = await runMigration(config, ['y', 'a', 'asdasd', '{zzz}', '{"action": "fix", "message": "No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c", "changeFields": [{"field": "Org_A_Only_Field__c", "value": null}]}']);
+    const { parsedOutput, capturedOutput } = await runMigration(config, ['y', 'a', 'asdasd', '{zzz}', '{"action": "fix", "message": "((", "changeFields": [{"field": "Org_A_Only_Field__c", "value": null}]}', '{"action": "fix", "message": "No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c", "changeFields": [{"field": "Org_A_Only_Field__c", "value": null}]}']);
 
     expect(parsedOutput).toHaveProperty(custObj1.id!);
     const newCustObjId1 = parsedOutput[custObj1.id!];

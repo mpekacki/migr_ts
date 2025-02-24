@@ -288,7 +288,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
         }
         if (Object.keys(toInsert).length > 0) {
-            output({ category: 'output', message: `saving records: ${JSON.stringify(Object.values(toInsert))}`, type: 'info' });
+            output({ category: 'output', message: `saving ${Object.keys(toInsert).length} records: ${JSON.stringify(Object.values(toInsert))}`, type: 'info' });
             const savedRecords = (await connB.request({
                 method: 'POST',
                 url: '/services/data/v62.0/composite/sobjects',
@@ -378,7 +378,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 let solverAdded = false;
                                 do {
                                     inputOk = true;
-                                    const userInput = await input({ category: 'input', message: `no solver found for error: ${e.message}`, type: 'insert_error' });
+                                    const userInput = await input({ category: 'input', message: `recordId: ${recordId}, no solver found for error: ${e.message}`, type: 'insert_error' });
                                     if (userInput === 'f') {
                                         let fieldsToUpdate;
                                         while (!fieldsToUpdate) {
@@ -423,8 +423,10 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             const solverJson = await input({ category: 'input', message: 'Enter the solver in JSON format:', type: 'insert_error' });
                                             try {
                                                 newSolver = JSON.parse(solverJson);
+                                                new RegExp(newSolver.message);
                                             } catch {
-                                                output({ category: 'output', message: `invalid JSON, please try again`, type: 'info' });
+                                                newSolver = null;
+                                                output({ category: 'output', message: `invalid JSON or regex, please try again`, type: 'info' });
                                             }
                                         }
                                         if (!options.solvers) {
