@@ -783,7 +783,7 @@ test('migrate record with error - fixed manually, remove field if new value is n
     expect(newCustObj).toBeDefined();
     expect(newCustObj.Name).toEqual(name);
 
-    expect(capturedOutput.map(e => e.message)).toContain('no solver found for error: No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c');
+    expect(capturedOutput.map(e => e.message)).toContain('recordId: ' + custObj.id + ', no solver found for error: No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c');
     expect(capturedOutput.map(e => e.message).filter(e => e.includes('updating record'))).toHaveLength(0);
 });
 
