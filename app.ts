@@ -100,7 +100,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const sObjectDescribes: Record<string, DescribeSObjectResult> = {};
     const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
         if (!(sObjectName in sObjectDescribes)) {
-            sObjectDescribes[sObjectName] = await connA.sobject(sObjectName).describe();
+            sObjectDescribes[sObjectName] = await connB.sobject(sObjectName).describe();
         }
         return sObjectDescribes[sObjectName];
     };
@@ -250,6 +250,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
             if (recordReady) {
                 anyRecordProcessed = true;
+                output({ category: 'output', message: `anyRecordProcessed true for record ${recordId} of type ${sObjectName} because record is ready`, type: 'info' });
                 let migratedRecordId = '';
                 let skipRecord = false;
                 const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
@@ -280,6 +281,9 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                             ...record
                         } as SObjectRecord<Schema, string>;
                         output({ category: 'output', message: `creating record ${recordId} of type ${sObjectName} with fields ${JSON.stringify(record)}`, type: 'info' });
+                    } else {
+                        output({ category: 'output', message: `skipping record ${recordId} of type ${sObjectName} because it is not creatable (describe: ${JSON.stringify(describeGlobal.sobjects.find(sobject => sobject.name === sObjectName))})`, type: 'info' });
+                        throw new Error(`record ${recordId} of type ${sObjectName} is not creatable (not implemented yet)`);
                     }
                 } else {
                     old2new[recordId] = migratedRecordId!;
@@ -434,6 +438,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                         }
                                         options.solvers.push(newSolver);
                                         anyRecordProcessed = true;
+                                        output({ category: 'output', message: `anyRecordProcessed true for record ${recordId} because solver was added`, type: 'info' });
                                         solverAdded = true;
                                         retryRecord = true;
                                     } else if (userInput == 's') {
@@ -497,6 +502,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 throw new Error('Cannot find record ready to migrate. Circular dependency?');
             }
         }
+        output({ category: 'output', message: `anyRecordProcessed: ${anyRecordProcessed}`, type: 'info' });
     }
 
     // update the fields that were cleared

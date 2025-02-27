@@ -7,7 +7,13 @@ class IOEvent {
     ) {}
 
     toString(): string {
-        return this.data ? `${this.data}\n${this.message}` : this.message;
+        let data;
+        try {
+            data = JSON.stringify(JSON.parse(this.data!), null, 2);
+        } catch {
+            data = this.data;
+        }
+        return data ? `${data}\n${this.message}` : this.message;
     }
 }
 
