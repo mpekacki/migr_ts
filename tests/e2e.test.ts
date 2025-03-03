@@ -760,7 +760,8 @@ test('migrate record with error - fixed manually, remove field if new value is n
 
     console.log('creating records');
     const name = `ext-${Math.random()}`;
-    const custObj = await conn1.sobject('Custom_Object_D__c').create({ Org_A_Only_Field__c: 'Org A Only Value', Name: name });
+    const custObj = await conn1.sobject('Custom_Object_D__c').create({ Name: name });
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj.id!, Fussy_Field_1__c: 'dupa' });
     console.log(custObj);
     expect(custObj.id).toBeDefined();
 
@@ -771,7 +772,7 @@ test('migrate record with error - fixed manually, remove field if new value is n
         matchers: defaultMatchers
     };
 
-    const { parsedOutput, capturedOutput } = await runMigration(config, ['y', 'f', '{"Org_A_Only_Field__c": null}']);
+    const { parsedOutput, capturedOutput } = await runMigration(config, ['y', 'f', '{"Fussy_Field_1__c": null}']);
 
     expect(parsedOutput).toHaveProperty(custObj.id!);
     const newCustObjId = parsedOutput[custObj.id!];
@@ -782,7 +783,7 @@ test('migrate record with error - fixed manually, remove field if new value is n
     expect(newCustObj).toBeDefined();
     expect(newCustObj.Name).toEqual(name);
 
-    expect(capturedOutput.map(e => e.message)).toContain('recordId: ' + custObj.id + ', no solver found for error: No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c');
+    expect(capturedOutput.find(e => e.message.includes('recordId: ' + custObj.id + ', no solver found for error: Field \'Fussy_Field_1__c\'  can\'t be'))).toBeDefined();
     expect(capturedOutput.map(e => e.message).filter(e => e.includes('updating record'))).toHaveLength(0);
 });
 
