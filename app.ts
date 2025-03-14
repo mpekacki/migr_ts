@@ -360,6 +360,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             if (solver.replaceWith === null) {
                                                 delete record[columnName];
                                             } else {
+                                                if (!(recordId in toUpdateLater)) {
+                                                    toUpdateLater[recordId] = {
+                                                        attributes: record.attributes
+                                                    } as SObjectRecord<Schema, string>;
+                                                }
+                                                toUpdateLater[recordId][columnName] = record[columnName];
                                                 record[columnName] = solver.replaceWith;
                                             }
                                             errorFixed = true;

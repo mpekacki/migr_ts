@@ -939,12 +939,14 @@ test('migrate record with error - manually add new solver, invalid solver', asyn
 
     console.log('creating records');
     const name1 = `ext-${Math.random()}`;
-    const custObj1 = await conn1.sobject('Custom_Object_D__c').create({ Org_A_Only_Field__c: 'Org A Only Value', Name: name1 });
+    const custObj1 = await conn1.sobject('Custom_Object_D__c').create({ Name: name1 });
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj1.id!, Fussy_Field_1__c: 'dupa' });
     console.log(custObj1);
     expect(custObj1.id).toBeDefined();
 
     const name2 = `ext-${Math.random()}`;
-    const custObj2 = await conn1.sobject('Custom_Object_D__c').create({ Org_A_Only_Field__c: 'Org A Only Value', Name: name2 });
+    const custObj2 = await conn1.sobject('Custom_Object_D__c').create({ Name: name2 });
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj2.id!, Fussy_Field_1__c: 'dupa' });
     console.log(custObj2);
     expect(custObj2.id).toBeDefined();
 
@@ -956,7 +958,7 @@ test('migrate record with error - manually add new solver, invalid solver', asyn
     };
 
 
-    const { parsedOutput, capturedOutput } = await runMigration(config, ['y', 'a', 'asdasd', '{zzz}', '{"action": "fix", "message": "((", "changeFields": [{"field": "Org_A_Only_Field__c", "value": null}]}', '{"action": "fix", "message": "No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c", "changeFields": [{"field": "Org_A_Only_Field__c", "value": null}]}']);
+    const { parsedOutput, capturedOutput } = await runMigration(config, ['y', 'a', 'asdasd', '{zzz}', '{"action": "fix", "message": "((", "changeFields": [{"field": "Fussy_Field_1__c", "value": null}]}', '{"action": "fix", "message": "Field \'Fussy_Field_1__c\'  can\'t be", "changeFields": [{"field": "Fussy_Field_1__c", "value": null}]}']);
 
     expect(parsedOutput).toHaveProperty(custObj1.id!);
     const newCustObjId1 = parsedOutput[custObj1.id!];
@@ -976,7 +978,7 @@ test('migrate record with error - manually add new solver, invalid solver', asyn
     expect(newCustObj2).toBeDefined();
     expect(newCustObj2.Name).toEqual(name2);
 
-    expect(capturedOutput.map(e => e.message)).toContain('fixing using solver: No such column \'Org_A_Only_Field__c\' on sobject of type Custom_Object_D__c');
+    expect(capturedOutput.map(e => e.message)).toContain('fixing using solver: Field \'Fussy_Field_1__c\'  can\'t be');
 });
 
 test('migrate record with error - automatically skip record', async () => {
