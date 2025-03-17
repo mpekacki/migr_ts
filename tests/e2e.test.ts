@@ -1425,23 +1425,27 @@ test('fix column automatically with modifying current value', async () => {
 
     const { conn1, conn2 } = await setupTestConnections();
     
-    // query pre-existing Chatter Test user
-    const chatterTestUser = await conn1.sobject('User').select('Id').where('Name = \'Chatter Test\'').execute();
-    expect(chatterTestUser.length).toBe(1);
+    // create record with duplicate External_Id__c
+    const externalId = `ext-${Math.random()}`;
+    const custObjC = await conn1.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    expect(custObjC.id).toBeDefined();
 
+    // create duplicate record in target org
+    const custObjC2 = await conn2.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+    expect(custObjC2.id).toBeDefined();
 
     const config = {
         sourceOrg: sourceOrgAlias,
         targetOrg: targetOrgAlias,
-        recordIds: [chatterTestUser[0].Id!],
+        recordIds: [custObjC.id!],
         matchers: defaultMatchers,
         solvers: [
             {
                 action: 'append_random',
-                message: 'Duplicate Username',
+                message: 'duplicate value found: External_Id__c duplicates value on record',
                 changeFields: [
                     {
-                        field: 'Username',
+                        field: 'External_Id__c',
                         length: 4
                     }
                 ]
@@ -1451,13 +1455,21 @@ test('fix column automatically with modifying current value', async () => {
 
     const { parsedOutput } = await runMigration(config);
 
-    expect(parsedOutput).toHaveProperty(chatterTestUser[0].Id!);
-    const newChatterTestUserId = parsedOutput[chatterTestUser[0].Id!];
-    expect(newChatterTestUserId).toBeTruthy();
-    expect(newChatterTestUserId).not.toEqual(chatterTestUser[0].Id);
+    expect(parsedOutput).toHaveProperty(custObjC.id!);
+    const newCustObjCId = parsedOutput[custObjC.id!];
+    expect(newCustObjCId).toBeTruthy();
+    expect(newCustObjCId).not.toEqual(custObjC.id);
 
-    // should be able to query the new user record
-    const newChatterTestUser: any = await conn2.sobject('User').retrieve(newChatterTestUserId);
-    expect(newChatterTestUser).toBeDefined();
-    expect(newChatterTestUser.Name).toEqual('Chatter Test');
+    // should be able to query the new record
+    const newCustObjC: any = await conn2.sobject('Custom_Object_C__c').retrieve(newCustObjCId);
+    expect(newCustObjC).toBeDefined();
+    expect(newCustObjC.External_Id__c).not.toEqual(externalId);
+    expect(newCustObjC.External_Id__c).toMatch(new RegExp(`^${externalId}\\.[a-z0-9]{4}$`));
+
+    // error should be logged
+    expect(parsedOutput).toHaveProperty('errors');
+    expect(parsedOutput.errors).toHaveProperty(custObjC.id!);
+    expect(parsedOutput.errors[custObjC.id!]).toHaveLength(1);
+    expect(parsedOutput.errors[custObjC.id!][0].message).toEqual(`duplicate value found: External_Id__c duplicates value on record with id: ${custObjC2.id}`);
+
 });
