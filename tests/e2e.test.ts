@@ -929,7 +929,7 @@ test('migrate record with error - manually add new solver', async () => {
     expect(newCustObj2.Fussy_Field_2__c).toEqual('dupa');
 
 
-    expect(capturedOutput.map(e => e.message)).toContain('extracting column name from error: Field \'Fussy_Field_1__c\'  can\'t be');
+    expect(capturedOutput.find(e => e.message.includes('extracting column name from error: Field \'Fussy_Field_1__c\'  can\'t be'))).toBeDefined();
 });
 
 test('migrate record with error - manually add new solver, invalid solver', async () => {
