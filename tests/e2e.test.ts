@@ -72,7 +72,6 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
                     const input = inputHandler.shift();
                     expect(input).toBeDefined();
                     if (!input) {
-                        child.stdin?.end();
                         throw new Error('No input provided');
                     }
                     console.log(`sending input: ${input}`);
@@ -1472,4 +1471,155 @@ test('fix column automatically with modifying current value', async () => {
     expect(parsedOutput.errors[custObjC.id!]).toHaveLength(1);
     expect(parsedOutput.errors[custObjC.id!][0].message).toEqual(`duplicate value found: External_Id__c duplicates value on record with id: ${custObjC2.id}`);
 
+});
+
+// can't get to trigger it for now
+// test('mixed DML test', async () => {
+//     console.log('starting test: mixed DML test');
+
+//     const { conn1, conn2 } = await setupTestConnections();
+    
+//     const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+//     expect(account.id).toBeDefined();
+
+//     const group = await conn1.sobject('Group').create({ Name: 'Ebola Cola Group' });
+//     expect(group.id).toBeDefined();
+
+//     const innerGroup = await conn1.sobject('Group').create({ Name: 'Ebola Cola Inner Group' });
+//     expect(innerGroup.id).toBeDefined();
+
+//     const groupMember = await conn1.sobject('GroupMember').create({ GroupId: group.id!, UserOrGroupId: innerGroup.id! });
+//     expect(groupMember.id).toBeDefined();
+
+//     const queue = await conn1.sobject('Group').create({ Name: 'Ebola Cola Queue', Type: 'Queue' });
+//     expect(queue.id).toBeDefined();
+
+//     const queueSobject = await conn1.sobject('QueueSobject').create({ QueueId: queue.id!, SobjectType: 'Task' });
+//     expect(queueSobject.id).toBeDefined();
+
+//     const task = await conn1.sobject('Task').create({ WhatId: account.id!, Subject: 'Ebola Cola Task', OwnerId: queue.id! });
+//     expect(task.id).toBeDefined();
+
+//     const config = {
+//         sourceOrg: sourceOrgAlias,
+//         targetOrg: targetOrgAlias,
+//         recordIds: [account.id!, groupMember.id!, task.id!, queueSobject.id!],
+//         matchers: defaultMatchers
+//     };
+
+//     const { parsedOutput } = await runMigration(config, ['y', 'r']);
+
+//     expect(parsedOutput).toHaveProperty(account.id!);
+//     const newAccountId = parsedOutput[account.id!];
+//     expect(newAccountId).toBeTruthy();
+//     expect(newAccountId).not.toEqual(account.id);
+
+//     expect(parsedOutput).toHaveProperty(groupMember.id!);
+//     const newGroupMemberId = parsedOutput[groupMember.id!];
+//     expect(newGroupMemberId).toBeTruthy();
+//     expect(newGroupMemberId).not.toEqual(groupMember.id);
+    
+// });
+
+test('more than 10 chunks', async () => {
+    console.log('starting test: more than 10 chunks');
+
+    const { conn1, conn2 } = await setupTestConnections();
+    
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    expect(account.id).toBeDefined();
+
+    const contact = await conn1.sobject('Contact').create({ FirstName: 'Spider', LastName: 'Jerusalem' });
+    expect(contact.id).toBeDefined();
+
+    const campaign = await conn1.sobject('Campaign').create({ Name: 'Ebola Cola Campaign' });   
+    expect(campaign.id).toBeDefined();
+
+    const case1 = await conn1.sobject('Case').create({ Subject: 'Ebola Cola Case 1' });
+    expect(case1.id).toBeDefined();
+
+    const lead = await conn1.sobject('Lead').create({ FirstName: 'Spider', LastName: 'Jerusalem', Company: 'Ebola Cola' });
+    expect(lead.id).toBeDefined();
+
+    const opportunity = await conn1.sobject('Opportunity').create({ Name: 'Ebola Cola Opportunity', StageName: 'Prospecting', CloseDate: new Date() });
+    expect(opportunity.id).toBeDefined();
+
+    const task = await conn1.sobject('Task').create({ Subject: 'Ebola Cola Task' });
+    expect(task.id).toBeDefined();
+
+    const event = await conn1.sobject('Event').create({ Subject: 'Ebola Cola Event', StartDateTime: new Date(), EndDateTime: new Date() });
+    expect(event.id).toBeDefined();
+
+    const customObjC = await conn1.sobject('Custom_Object_C__c').create({ Name: 'Ebola Cola Custom Object C' });
+    expect(customObjC.id).toBeDefined();
+
+    const customObjD = await conn1.sobject('Custom_Object_D__c').create({ Name: 'Ebola Cola Custom Object D' });
+    expect(customObjD.id).toBeDefined();
+
+    const workOrder = await conn1.sobject('WorkOrder').create({ });
+    expect(workOrder.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [account.id!, contact.id!, campaign.id!, case1.id!, lead.id!, opportunity.id!, task.id!, event.id!, customObjC.id!, customObjD.id!, workOrder.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config);
+    
+    expect(parsedOutput).toHaveProperty(account.id!);
+    const newAccountId = parsedOutput[account.id!];
+    expect(newAccountId).toBeTruthy();
+    expect(newAccountId).not.toEqual(account.id);
+    
+    expect(parsedOutput).toHaveProperty(contact.id!);
+    const newContactId = parsedOutput[contact.id!];
+    expect(newContactId).toBeTruthy();
+    expect(newContactId).not.toEqual(contact.id);
+    
+    expect(parsedOutput).toHaveProperty(campaign.id!);
+    const newCampaignId = parsedOutput[campaign.id!];
+    expect(newCampaignId).toBeTruthy();
+    expect(newCampaignId).not.toEqual(campaign.id);
+    
+    expect(parsedOutput).toHaveProperty(case1.id!);
+    const newCase1Id = parsedOutput[case1.id!];
+    expect(newCase1Id).toBeTruthy();
+    expect(newCase1Id).not.toEqual(case1.id);
+    
+    expect(parsedOutput).toHaveProperty(lead.id!);
+    const newLeadId = parsedOutput[lead.id!];
+    expect(newLeadId).toBeTruthy();
+    expect(newLeadId).not.toEqual(lead.id);
+    
+    expect(parsedOutput).toHaveProperty(opportunity.id!);
+    const newOpportunityId = parsedOutput[opportunity.id!];
+    expect(newOpportunityId).toBeTruthy();
+    expect(newOpportunityId).not.toEqual(opportunity.id);
+    
+    expect(parsedOutput).toHaveProperty(task.id!);
+    const newTaskId = parsedOutput[task.id!];
+    expect(newTaskId).toBeTruthy();
+    expect(newTaskId).not.toEqual(task.id);
+    
+    expect(parsedOutput).toHaveProperty(event.id!);
+    const newEventId = parsedOutput[event.id!];
+    expect(newEventId).toBeTruthy();
+    expect(newEventId).not.toEqual(event.id);
+    
+    expect(parsedOutput).toHaveProperty(customObjC.id!);
+    const newCustomObjCId = parsedOutput[customObjC.id!];
+    expect(newCustomObjCId).toBeTruthy();
+    expect(newCustomObjCId).not.toEqual(customObjC.id);
+
+    expect(parsedOutput).toHaveProperty(customObjD.id!);
+    const newCustomObjDId = parsedOutput[customObjD.id!];
+    expect(newCustomObjDId).toBeTruthy();
+    expect(newCustomObjDId).not.toEqual(customObjD.id);
+
+    expect(parsedOutput).toHaveProperty(workOrder.id!);
+    const newWorkOrderId = parsedOutput[workOrder.id!];
+    expect(newWorkOrderId).toBeTruthy();
+    expect(newWorkOrderId).not.toEqual(workOrder.id);
 });

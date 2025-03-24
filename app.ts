@@ -292,18 +292,28 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
         }
         if (Object.keys(toInsert).length > 0) {
-            output({ category: 'output', message: `saving ${Object.keys(toInsert).length} records: ${JSON.stringify(Object.values(toInsert))}`, type: 'info' });
-            const savedRecords = (await connB.request({
+            const chunks: Record<string, SObjectRecord<Schema, string>>[] = [];
+            for (const recordId of Object.keys(toInsert)) {
+                const record = toInsert[recordId];
+                const chunkIndex = Math.floor(Object.keys(toInsert).indexOf(recordId) / 10);
+                if (!chunks[chunkIndex]) {
+                    chunks[chunkIndex] = {};
+                }
+                chunks[chunkIndex][recordId] = record;
+            }
+            for (const chunk of chunks) {
+                output({ category: 'output', message: `saving ${Object.keys(chunk).length} records: ${JSON.stringify(Object.values(chunk))}`, type: 'info' });
+                const savedRecords = (await connB.request({
                 method: 'POST',
                 url: '/services/data/v62.0/composite/sobjects',
                 body: JSON.stringify({
                         allOrNone: false,
-                        records: Object.values(toInsert)
+                        records: Object.values(chunk)
                     })
                 })) as Array<{ id: string, success: boolean, errors: any[] }>;
                 output({ category: 'output', message: `saved records: ${JSON.stringify(savedRecords)}`, type: 'info' });
                 for (let i = 0; i < savedRecords.length; i++) {
-                    const recordId = Object.keys(toInsert)[i];
+                    const recordId = Object.keys(chunk)[i];
                     const record = recordsByIds[recordId];
                     const savedRecord = savedRecords[i];
                     let retryRecord = false;
@@ -471,6 +481,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                     delete recordsByIds[recordId];
                 }
             }
+        }
         if (!anyRecordProcessed) {
             // build lookupFieldsBySObjectType from object describes
             const requiredLookupFieldsBySObjectType: Record<string, string[]> = {};
