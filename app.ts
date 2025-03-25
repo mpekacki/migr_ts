@@ -3,6 +3,7 @@ import { DescribeSObjectResult, Field, SaveResult, Schema, SObjectRecord, SObjec
 import fs from 'fs';
 import path from 'path';
 import { scanForCircularDependency } from './circular';
+import Chunks from './chunks';
 import IOEvent from './ioevent';
 
 interface Options {
@@ -65,6 +66,8 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const input = (question: IOEvent) => {
         return onInput(new IOEvent(question.category, question.message, question.type, question.data));
     };
+
+    const chunking = new Chunks([], 10, 10);
 
     output({ category: 'output', message: `starting migration: ${JSON.stringify(options)}`, type: 'info' });
     
@@ -292,15 +295,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
         }
         if (Object.keys(toInsert).length > 0) {
-            const chunks: Record<string, SObjectRecord<Schema, string>>[] = [];
-            for (const recordId of Object.keys(toInsert)) {
-                const record = toInsert[recordId];
-                const chunkIndex = Math.floor(Object.keys(toInsert).indexOf(recordId) / 10);
-                if (!chunks[chunkIndex]) {
-                    chunks[chunkIndex] = {};
-                }
-                chunks[chunkIndex][recordId] = record;
-            }
+            const chunks: Record<string, SObjectRecord<Schema, string>>[] = chunking.getChunks(toInsert);
             for (const chunk of chunks) {
                 output({ category: 'output', message: `saving ${Object.keys(chunk).length} records: ${JSON.stringify(Object.values(chunk))}`, type: 'info' });
                 const savedRecords = (await connB.request({
