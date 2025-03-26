@@ -13,13 +13,33 @@ export default class Chunks {
 
     public getChunks(records: Record<string, SObjectRecord<Schema, string>>): Record<string, SObjectRecord<Schema, string>>[] {
         const chunks: Record<string, SObjectRecord<Schema, string>>[] = [];
-        for (const recordId of Object.keys(records)) {
-            const record = records[recordId];
-            const chunkIndex = Math.floor(Object.keys(records).indexOf(recordId) / this.maxChunkSize);
-            if (!chunks[chunkIndex]) {
-                chunks[chunkIndex] = {};
+        const idsSortedBySObjectType: string[] = Object.keys(records).sort((a, b) => {
+            const aSObjectType = records[a]!.attributes!.type;
+            const bSObjectType = records[b]!.attributes!.type;
+            if (aSObjectType === bSObjectType) {
+                return 0;
             }
-            chunks[chunkIndex][recordId] = record;
+            return aSObjectType.localeCompare(bSObjectType);
+        });
+
+        let currentChunk: Record<string, SObjectRecord<Schema, string>> = {};
+        let lastSObjectType: string | null = null;
+        let numSObjectTypeChunks = 0;
+        for (const recordId of idsSortedBySObjectType) {
+            const record = records[recordId];
+            if (record!.attributes!.type !== lastSObjectType) {
+                lastSObjectType = record!.attributes!.type;
+                numSObjectTypeChunks++;
+            }
+            if (numSObjectTypeChunks > this.maxSObjectTypeChunks) {
+                chunks.push(currentChunk);
+                currentChunk = {};
+                numSObjectTypeChunks = 0;
+            }
+            currentChunk[recordId] = record;
+        }
+        if (Object.keys(currentChunk).length > 0) {
+            chunks.push(currentChunk);
         }
         return chunks;
     }
