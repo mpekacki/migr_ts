@@ -96,4 +96,64 @@ describe('Chunks', () => {
             }
         ]);
     });
+
+    it('should separate system objects from other objects', () => {
+        const chunks = new Chunks(['User', 'Profile', 'Role', 'PermissionSet'], 5, 3);
+        const records = {
+            '1': { "Name": "1", "attributes": { "type": "Case" } as any },
+            '2': { "Name": "2", "attributes": { "type": "Account" } as any },
+            '3': { "Name": "3", "attributes": { "type": "User" } as any },
+            '4': { "Name": "4", "attributes": { "type": "Profile" } as any },
+            '5': { "Name": "5", "attributes": { "type": "Role" } as any },
+            '6': { "Name": "6", "attributes": { "type": "PermissionSet" } as any },
+            '7': { "Name": "7", "attributes": { "type": "User" } as any },
+            '8': { "Name": "8", "attributes": { "type": "Profile" } as any },
+            '9': { "Name": "9", "attributes": { "type": "User" } as any },
+            '10': { "Name": "10", "attributes": { "type": "User" } as any },
+            '11': { "Name": "11", "attributes": { "type": "Case" } as any },
+            '12': { "Name": "12", "attributes": { "type": "Account" } as any },
+            '13': { "Name": "13", "attributes": { "type": "User" } as any },
+            '14': { "Name": "14", "attributes": { "type": "User" } as any },
+            '15': { "Name": "15", "attributes": { "type": "User" } as any },
+            '16': { "Name": "16", "attributes": { "type": "Case" } as any },
+            '17': { "Name": "17", "attributes": { "type": "Case" } as any },
+            '18': { "Name": "18", "attributes": { "type": "Quote" } as any },
+            '19': { "Name": "19", "attributes": { "type": "Order" } as any },
+            '20': { "Name": "20", "attributes": { "type": "Opportunity" } as any },
+        };
+        expect(chunks.getChunks(records)).toEqual([
+            {
+                '6': { "Name": "6", "attributes": { "type": "PermissionSet" } as any },
+                '4': { "Name": "4", "attributes": { "type": "Profile" } as any },
+                '8': { "Name": "8", "attributes": { "type": "Profile" } as any },
+                '5': { "Name": "5", "attributes": { "type": "Role" } as any },
+            },
+            {
+                '3': { "Name": "3", "attributes": { "type": "User" } as any },
+                '7': { "Name": "7", "attributes": { "type": "User" } as any },
+                '9': { "Name": "9", "attributes": { "type": "User" } as any },
+                '10': { "Name": "10", "attributes": { "type": "User" } as any },
+                '13': { "Name": "13", "attributes": { "type": "User" } as any },
+            },
+            {
+                '14': { "Name": "14", "attributes": { "type": "User" } as any },
+                '15': { "Name": "15", "attributes": { "type": "User" } as any },
+            },
+            {
+                '2': { "Name": "2", "attributes": { "type": "Account" } as any },
+                '12': { "Name": "12", "attributes": { "type": "Account" } as any },
+                '1': { "Name": "1", "attributes": { "type": "Case" } as any },
+                '11': { "Name": "11", "attributes": { "type": "Case" } as any },
+                '16': { "Name": "16", "attributes": { "type": "Case" } as any },
+            },
+            {
+                '17': { "Name": "17", "attributes": { "type": "Case" } as any },
+                '20': { "Name": "20", "attributes": { "type": "Opportunity" } as any },
+                '19': { "Name": "19", "attributes": { "type": "Order" } as any },
+            },
+            {
+                '18': { "Name": "18", "attributes": { "type": "Quote" } as any },
+            }
+        ]);
+    });
 });
