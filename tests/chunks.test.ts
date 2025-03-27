@@ -12,7 +12,7 @@ describe('Chunks', () => {
     });
 
     it('should organize records by sobject type and respect the number of sobject chunks', () => {
-        const chunks = new Chunks([], 200, 3);
+        const chunks = new Chunks([], 6, 3);
         const records = {
             '1': { "Name": "1", "attributes": { "type": "Case" } as any },
             '2': { "Name": "2", "attributes": { "type": "Account" } as any },
@@ -24,6 +24,13 @@ describe('Chunks', () => {
             '8': { "Name": "8", "attributes": { "type": "Lead" } as any },
             '9': { "Name": "9", "attributes": { "type": "Account" } as any },
             '10': { "Name": "10", "attributes": { "type": "Opportunity" } as any },
+            '11': { "Name": "11", "attributes": { "type": "Task" } as any },
+            '12': { "Name": "12", "attributes": { "type": "Task" } as any },
+            '13': { "Name": "13", "attributes": { "type": "Task" } as any },
+            '14': { "Name": "14", "attributes": { "type": "Task" } as any },
+            '15': { "Name": "15", "attributes": { "type": "Task" } as any },
+            '16': { "Name": "16", "attributes": { "type": "Task" } as any },
+            '17': { "Name": "17", "attributes": { "type": "Task" } as any },
         };
         expect(chunks.getChunks(records)).toEqual([
             {
@@ -39,6 +46,53 @@ describe('Chunks', () => {
                 '10': { "Name": "10", "attributes": { "type": "Opportunity" } as any },
                 '5': { "Name": "5", "attributes": { "type": "Quote" } as any },
                 '7': { "Name": "7", "attributes": { "type": "Quote" } as any },
+            },
+            {
+                '11': { "Name": "11", "attributes": { "type": "Task" } as any },
+                '12': { "Name": "12", "attributes": { "type": "Task" } as any },
+                '13': { "Name": "13", "attributes": { "type": "Task" } as any },
+                '14': { "Name": "14", "attributes": { "type": "Task" } as any },
+                '15': { "Name": "15", "attributes": { "type": "Task" } as any },
+                '16': { "Name": "16", "attributes": { "type": "Task" } as any },
+            },
+            {
+                '17': { "Name": "17", "attributes": { "type": "Task" } as any },
+            }
+        ]);
+    });
+
+    it('should respect the chunk size', () => {
+        const chunks = new Chunks([], 3, 10);
+        const records = {
+            '1': { "Name": "1", "attributes": { "type": "Case" } as any },
+            '2': { "Name": "2", "attributes": { "type": "Case" } as any },
+            '3': { "Name": "3", "attributes": { "type": "Case" } as any },
+            '4': { "Name": "4", "attributes": { "type": "Case" } as any },
+            '5': { "Name": "5", "attributes": { "type": "Case" } as any },
+            '6': { "Name": "6", "attributes": { "type": "Case" } as any },
+            '7': { "Name": "7", "attributes": { "type": "Case" } as any },
+            '8': { "Name": "8", "attributes": { "type": "Case" } as any },
+            '9': { "Name": "9", "attributes": { "type": "Case" } as any },
+            '10': { "Name": "10", "attributes": { "type": "Case" } as any },
+        };
+        expect(chunks.getChunks(records)).toEqual([
+            {
+                '1': { "Name": "1", "attributes": { "type": "Case" } as any },
+                '2': { "Name": "2", "attributes": { "type": "Case" } as any },
+                '3': { "Name": "3", "attributes": { "type": "Case" } as any },
+            },
+            {
+                '4': { "Name": "4", "attributes": { "type": "Case" } as any },
+                '5': { "Name": "5", "attributes": { "type": "Case" } as any },
+                '6': { "Name": "6", "attributes": { "type": "Case" } as any },
+            },
+            {
+                '7': { "Name": "7", "attributes": { "type": "Case" } as any },
+                '8': { "Name": "8", "attributes": { "type": "Case" } as any },
+                '9': { "Name": "9", "attributes": { "type": "Case" } as any },
+            },
+            {
+                '10': { "Name": "10", "attributes": { "type": "Case" } as any },
             }
         ]);
     });

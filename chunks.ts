@@ -25,6 +25,7 @@ export default class Chunks {
         let currentChunk: Record<string, SObjectRecord<Schema, string>> = {};
         let lastSObjectType: string | null = null;
         let numSObjectTypeChunks = 0;
+        let currentChunkSize = 0;
         for (const recordId of idsSortedBySObjectType) {
             const record = records[recordId];
             if (record!.attributes!.type !== lastSObjectType) {
@@ -34,6 +35,14 @@ export default class Chunks {
             if (numSObjectTypeChunks > this.maxSObjectTypeChunks) {
                 chunks.push(currentChunk);
                 currentChunk = {};
+                numSObjectTypeChunks = 1;
+                currentChunkSize = 0;
+            }
+            currentChunkSize++;
+            if (currentChunkSize > this.maxChunkSize) {
+                chunks.push(currentChunk);
+                currentChunk = {};
+                currentChunkSize = 1;
                 numSObjectTypeChunks = 0;
             }
             currentChunk[recordId] = record;
