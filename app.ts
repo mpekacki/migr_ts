@@ -67,7 +67,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         return onInput(new IOEvent(question.category, question.message, question.type, question.data));
     };
 
-    const chunking = new Chunks([], 10, 10);
+    const chunking = new Chunks([], 200, 10);
 
     output({ category: 'output', message: `starting migration: ${JSON.stringify(options)}`, type: 'info' });
     

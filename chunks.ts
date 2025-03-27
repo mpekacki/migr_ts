@@ -32,18 +32,12 @@ export default class Chunks {
                 lastSObjectType = record!.attributes!.type;
                 numSObjectTypeChunks++;
             }
-            if (numSObjectTypeChunks > this.maxSObjectTypeChunks) {
-                chunks.push(currentChunk);
-                currentChunk = {};
-                numSObjectTypeChunks = 1;
-                currentChunkSize = 0;
-            }
             currentChunkSize++;
-            if (currentChunkSize > this.maxChunkSize) {
+            if (currentChunkSize > this.maxChunkSize || numSObjectTypeChunks > this.maxSObjectTypeChunks) {
                 chunks.push(currentChunk);
                 currentChunk = {};
                 currentChunkSize = 1;
-                numSObjectTypeChunks = 0;
+                numSObjectTypeChunks = 1;
             }
             currentChunk[recordId] = record;
         }
