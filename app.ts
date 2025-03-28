@@ -1,5 +1,5 @@
 import { Connection, AuthInfo } from '@salesforce/core';
-import { DescribeSObjectResult, Field, SaveResult, Schema, SObjectRecord, SObjectUpdateRecord } from 'jsforce';
+import { DescribeSObjectResult, Field, Schema, SObjectRecord, SObjectUpdateRecord } from 'jsforce';
 import fs from 'fs';
 import path from 'path';
 import { scanForCircularDependency } from './circular';
@@ -9,6 +9,10 @@ import IOEvent from './ioevent';
 interface Options {
     sourceOrg: string;
     targetOrg: string;
+    sourceOrgUrl: string;
+    sourceOrgToken: string;
+    targetOrgUrl: string;
+    targetOrgToken: string;
     recordIds: string[];
     matchers: {
         sObjectType: string;
@@ -59,6 +63,48 @@ interface AppendRandomSolver extends Solver {
     }[];
 }
 
+async function getConnections(options: Options): Promise<[Connection<Schema>, Connection<Schema>]> {
+    if (options.sourceOrg && options.targetOrg) {
+        const allAuths = await AuthInfo.listAllAuthorizations();
+        const getOrgUsername = (orgAlias: string) => allAuths.find(auth => auth.aliases?.includes(orgAlias))?.username;
+        const orgAUsername = getOrgUsername(options.sourceOrg);
+        const orgBUsername = getOrgUsername(options.targetOrg);
+        if (!orgAUsername || !orgBUsername) {
+            throw new Error('Unable to find username for source or target org');
+        }
+        const createAuthInfo = (username: string) => AuthInfo.create({ username });
+        const [authInfoA, authInfoB] = await Promise.all([
+            createAuthInfo(orgAUsername),
+            createAuthInfo(orgBUsername)
+        ]);
+        return await Promise.all([
+            Connection.create({ authInfo: authInfoA }),
+            Connection.create({ authInfo: authInfoB })
+        ]);
+    } else {
+        const authInfoA = await AuthInfo.create({
+            username: options.sourceOrgToken,
+            accessTokenOptions: {
+                instanceUrl: options.sourceOrgUrl,
+                serverUrl: options.sourceOrgUrl,
+                sessionId: options.sourceOrgToken
+            }
+        });
+        const authInfoB = await AuthInfo.create({
+            username: options.targetOrgToken,
+            accessTokenOptions: {
+                instanceUrl: options.targetOrgUrl,
+                serverUrl: options.targetOrgUrl,
+                sessionId: options.targetOrgToken
+            }
+        });
+        return await Promise.all([
+            Connection.create({ authInfo: authInfoA }),
+            Connection.create({ authInfo: authInfoB })
+        ]);
+    }
+}
+
 async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>) {
     const output = (event: IOEvent) => {
         onOutput(new IOEvent(event.category, event.message, event.type, event.data));
@@ -70,27 +116,8 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const chunking = new Chunks([], 200, 10);
 
     output({ category: 'output', message: `starting migration: ${JSON.stringify(options)}`, type: 'info' });
-    
-    const allAuths = await AuthInfo.listAllAuthorizations();
 
-    const getOrgUsername = (orgAlias: string) => allAuths.find(auth => auth.aliases?.includes(orgAlias))?.username;
-    const orgAUsername = getOrgUsername(options.sourceOrg);
-    const orgBUsername = getOrgUsername(options.targetOrg);
-
-    if (!orgAUsername || !orgBUsername) {
-        throw new Error('Unable to find username for source or target org');
-    }
-
-    const createAuthInfo = (username: string) => AuthInfo.create({ username });
-    const [authInfoA, authInfoB] = await Promise.all([
-        createAuthInfo(orgAUsername),
-        createAuthInfo(orgBUsername)
-    ]);
-
-    const [connA, connB] = await Promise.all([
-        Connection.create({ authInfo: authInfoA }),
-        Connection.create({ authInfo: authInfoB })
-    ]);
+    const [connA, connB] = await getConnections(options);
 
     // check if history file exists for target org
     const historyFilePath = path.join(process.cwd(), `${options.targetOrg}__history.json`);
