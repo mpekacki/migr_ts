@@ -64,25 +64,20 @@ interface AppendRandomSolver extends Solver {
 }
 
 async function getConnections(options: Options): Promise<[Connection<Schema>, Connection<Schema>]> {
-    if (options.sourceOrg && options.targetOrg) {
-        const allAuths = await AuthInfo.listAllAuthorizations();
+    const allAuths = await AuthInfo.listAllAuthorizations();
+    // Create source connection
+    let authInfoA: AuthInfo;
+    if (options.sourceOrg) {
+        // Use alias authentication for source
         const getOrgUsername = (orgAlias: string) => allAuths.find(auth => auth.aliases?.includes(orgAlias))?.username;
         const orgAUsername = getOrgUsername(options.sourceOrg);
-        const orgBUsername = getOrgUsername(options.targetOrg);
-        if (!orgAUsername || !orgBUsername) {
-            throw new Error('Unable to find username for source or target org');
+        if (!orgAUsername) {
+            throw new Error(`Unable to find username for source org alias: ${options.sourceOrg}`);
         }
-        const createAuthInfo = (username: string) => AuthInfo.create({ username });
-        const [authInfoA, authInfoB] = await Promise.all([
-            createAuthInfo(orgAUsername),
-            createAuthInfo(orgBUsername)
-        ]);
-        return await Promise.all([
-            Connection.create({ authInfo: authInfoA }),
-            Connection.create({ authInfo: authInfoB })
-        ]);
-    } else {
-        const authInfoA = await AuthInfo.create({
+        authInfoA = await AuthInfo.create({ username: orgAUsername });
+    } else if (options.sourceOrgUrl && options.sourceOrgToken) {
+        // Use token authentication for source
+        authInfoA = await AuthInfo.create({
             username: options.sourceOrgToken,
             accessTokenOptions: {
                 instanceUrl: options.sourceOrgUrl,
@@ -90,7 +85,23 @@ async function getConnections(options: Options): Promise<[Connection<Schema>, Co
                 sessionId: options.sourceOrgToken
             }
         });
-        const authInfoB = await AuthInfo.create({
+    } else {
+        throw new Error('Source org authentication missing: provide either sourceOrg alias or sourceOrgUrl + sourceOrgToken');
+    }
+
+    // Create target connection
+    let authInfoB: AuthInfo;
+    if (options.targetOrg) {
+        // Use alias authentication for target
+        const getOrgUsername = (orgAlias: string) => allAuths.find(auth => auth.aliases?.includes(orgAlias))?.username;
+        const orgBUsername = getOrgUsername(options.targetOrg);
+        if (!orgBUsername) {
+            throw new Error(`Unable to find username for target org alias: ${options.targetOrg}`);
+        }
+        authInfoB = await AuthInfo.create({ username: orgBUsername });
+    } else if (options.targetOrgUrl && options.targetOrgToken) {
+        // Use token authentication for target
+        authInfoB = await AuthInfo.create({
             username: options.targetOrgToken,
             accessTokenOptions: {
                 instanceUrl: options.targetOrgUrl,
@@ -98,11 +109,15 @@ async function getConnections(options: Options): Promise<[Connection<Schema>, Co
                 sessionId: options.targetOrgToken
             }
         });
-        return await Promise.all([
-            Connection.create({ authInfo: authInfoA }),
-            Connection.create({ authInfo: authInfoB })
-        ]);
+    } else {
+        throw new Error('Target org authentication missing: provide either targetOrg alias or targetOrgUrl + targetOrgToken');
     }
+
+    // Create and return connections
+    return await Promise.all([
+        Connection.create({ authInfo: authInfoA }),
+        Connection.create({ authInfo: authInfoB })
+    ]);
 }
 
 async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>) {

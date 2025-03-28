@@ -174,6 +174,58 @@ test('url and token auth', async () => {
     expect(newAccountId).not.toEqual(account.id);
 });
 
+test('source auth token, target auth alias', async () => {
+    console.log('starting test: source auth token, target auth alias');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    console.log(account);
+    expect(account.id).toBeDefined();
+    
+    const config = {
+        sourceOrgUrl: conn1.instanceUrl,
+        sourceOrgToken: conn1.accessToken,
+        targetOrg: targetOrgAlias,
+        recordIds: [account.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(account.id!);
+    const newAccountId = parsedOutput[account.id!];
+    expect(newAccountId).toBeTruthy();
+    expect(newAccountId).not.toEqual(account.id);
+});
+
+test('source auth alias, target auth token', async () => {
+    console.log('starting test: source auth alias, target auth token');
+
+    const { conn1, conn2 } = await setupTestConnections();
+    
+    console.log('creating records');
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    console.log(account);
+    expect(account.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrgUrl: conn2.instanceUrl,
+        targetOrgToken: conn2.accessToken,
+        recordIds: [account.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(account.id!);
+    const newAccountId = parsedOutput[account.id!];
+    expect(newAccountId).toBeTruthy();
+    expect(newAccountId).not.toEqual(account.id);
+});
+
 test('migrate record - complex', async () => {
     console.log('starting test: migrate record');
 
