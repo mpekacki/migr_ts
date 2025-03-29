@@ -12,30 +12,28 @@ class TestOrg {
 
     public static async create(alias: string) {
         const allAuths = await AuthInfo.listAllAuthorizations();
-
         const orgUsername = allAuths.find(auth => auth.aliases!.includes(alias))?.username;
-
         expect(orgUsername).toBeDefined();
-
         const authInfoOptions: AuthInfo.Options = { username: orgUsername! };
-        
         const authInfo = await AuthInfo.create(authInfoOptions);
-
         const conn = await Connection.create({ authInfo });
-
         return new TestOrg(alias, conn);
     }
 
     public async createAccount() {
         const account = await this.conn.sobject('Account').create({ Name: 'Ebola Cola' });
-
         return account;
+    }
+
+    public async verifyAccount(newId: string) {
+        const account = await this.conn.sobject('Account').retrieve(newId);
+        expect(account.Name).toBe('Ebola Cola');
     }
 }
 
-async function getOrgs() {
-    const sourceOrg = await TestOrg.create('testMigrationOrgA');
-    const targetOrg = await TestOrg.create('testMigrationOrgB');
+async function getOrgs(sourceOrgAlias: string, targetOrgAlias: string) {
+    const sourceOrg = await TestOrg.create(sourceOrgAlias);
+    const targetOrg = await TestOrg.create(targetOrgAlias);
 
     return { sourceOrg, targetOrg };
 }

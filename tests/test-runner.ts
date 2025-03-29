@@ -79,11 +79,12 @@ class ApplicationRunner {
         expect(this.capturedOutput.length).toBeGreaterThan(1);
     }
 
-    public showsRecordWasMigrated(recordId: string) {
+    public showsRecordWasMigrated(recordId: string): string {
         const parsedOutput = JSON.parse(this.capturedOutput[this.capturedOutput.length - 1].data!);
         expect(parsedOutput).toHaveProperty(recordId);
         expect(parsedOutput[recordId]).toBeTruthy();
         expect(parsedOutput[recordId]).not.toEqual(recordId);
+        return parsedOutput[recordId];
     }
 }
 

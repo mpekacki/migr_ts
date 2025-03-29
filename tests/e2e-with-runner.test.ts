@@ -10,11 +10,16 @@ beforeEach(async () => {
 });
 
 test('migrate single record', async () => {
-    const { sourceOrg, targetOrg } = await getOrgs();
+    const { sourceOrg, targetOrg } = await getTestOrgs();
 
     const account = await sourceOrg.createAccount();
 
     await application.runMigration(sourceOrg.alias, targetOrg.alias, account.id!);
 
-    application.showsRecordWasMigrated(account.id!);
+    const newId = application.showsRecordWasMigrated(account.id!);
+    await targetOrg.verifyAccount(newId);
 });
+
+const getTestOrgs = async () => {
+    return await getOrgs('testMigrationOrgA', 'testMigrationOrgB');
+}
