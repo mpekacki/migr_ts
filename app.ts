@@ -128,7 +128,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         return onInput(new IOEvent(question.category, question.message, question.type, question.data));
     };
 
-    const chunking = new Chunks([], 200, 10);
+    const chunking = new Chunks(['User', 'PermissionSetAssignment'], 200, 10);
 
     output({ category: 'output', message: `starting migration: ${JSON.stringify(options)}`, type: 'info' });
 
@@ -555,7 +555,6 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 throw new Error('Cannot find record ready to migrate. Circular dependency?');
             }
         }
-        output({ category: 'output', message: `anyRecordProcessed: ${anyRecordProcessed}`, type: 'info' });
     }
 
     // update the fields that were cleared
