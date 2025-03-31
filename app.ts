@@ -491,7 +491,6 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                         }
                                         options.solvers.push(newSolver);
                                         anyRecordProcessed = true;
-                                        output({ category: 'output', message: `anyRecordProcessed true for record ${recordId} because solver was added`, type: 'info' });
                                         solverAdded = true;
                                         retryRecord = true;
                                     } else if (userInput == 's') {
