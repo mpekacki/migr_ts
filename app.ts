@@ -267,6 +267,16 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
 
     const toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
+    const setFieldWithLaterUpdate = (recordId: string, record: SObjectRecord<Schema, string>, field: string, value: string) => {
+        if (!(recordId in toUpdateLater)) {
+            toUpdateLater[recordId] = {
+                attributes: record.attributes
+            } as SObjectRecord<Schema, string>;
+        }
+        toUpdateLater[recordId][field] = record[field];
+        record[field] = value;
+    }
+    
     while (Object.keys(recordsByIds).length > 0) {
         output({ category: 'output', message: `remaining records: ${Object.keys(recordsByIds).length}`, type: 'info' });
         let anyRecordProcessed = false;
@@ -377,13 +387,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             if (changeField.value === null) {
                                                 delete record[changeField.field];
                                             } else {
-                                                if (!(recordId in toUpdateLater)) {
-                                                    toUpdateLater[recordId] = {
-                                                        attributes: record.attributes
-                                                    } as SObjectRecord<Schema, string>;
-                                                }
-                                                toUpdateLater[recordId][changeField.field] = record[changeField.field];
-                                                record[changeField.field] = changeField.value;
+                                                setFieldWithLaterUpdate(recordId, record, changeField.field, changeField.value);
                                             }
                                         }
                                         output({ category: 'output', message: `fixing using solver: ${solver.message}`, type: 'info' });
@@ -407,13 +411,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             if (solver.replaceWith === null) {
                                                 delete record[columnName];
                                             } else {
-                                                if (!(recordId in toUpdateLater)) {
-                                                    toUpdateLater[recordId] = {
-                                                        attributes: record.attributes
-                                                    } as SObjectRecord<Schema, string>;
-                                                }
-                                                toUpdateLater[recordId][columnName] = record[columnName];
-                                                record[columnName] = solver.replaceWith;
+                                                setFieldWithLaterUpdate(recordId, record, columnName, solver.replaceWith);
                                             }
                                             errorFixed = true;
                                             retryRecord = true;
@@ -455,13 +453,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             if (fieldsToUpdate[field] === null) {
                                                 delete record[field];
                                             } else {
-                                                if (!(recordId in toUpdateLater)) {
-                                                    toUpdateLater[recordId] = {
-                                                        attributes: record.attributes
-                                                    } as SObjectRecord<Schema, string>;
-                                                }
-                                                toUpdateLater[recordId][field] = record[field];
-                                                record[field] = fieldsToUpdate[field];
+                                                setFieldWithLaterUpdate(recordId, record, field, fieldsToUpdate[field]);
                                             }
                                             solver.changeFields.push({ field, value: fieldsToUpdate[field] });
                                         }
@@ -542,14 +534,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 output({ category: 'output', message: `found circular dependency: ${JSON.stringify(toClear)}`, type: 'info' });
                 // clear the fields that are causing the circular dependency
                 for (const clear of toClear) {
-                    if (!(clear.recordId in toUpdateLater)) {
-                        toUpdateLater[clear.recordId] = {
-                            attributes: recordsByIds[clear.recordId].attributes
-                        } as SObjectRecord<Schema, string>;
-                    }
-                    toUpdateLater[clear.recordId][clear.field] = recordsByIds[clear.recordId][clear.field];
-                    recordsByIds[clear.recordId][clear.field] = '';
-
+                    setFieldWithLaterUpdate(clear.recordId, recordsByIds[clear.recordId], clear.field, '');
                 }
             } else {
                 throw new Error('Cannot find record ready to migrate. Circular dependency?');
