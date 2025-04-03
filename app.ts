@@ -556,7 +556,11 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             continue;
         }
         output({ category: 'output', message: `updating record ${recordId} of type ${record.attributes!.type} to ${JSON.stringify(record)}`, type: 'info' });
-        await connB.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
+        try {
+            await connB.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
+        } catch (e) {
+            output({ category: 'output', message: `error updating record ${recordId} of type ${record.attributes!.type}: ${e}`, type: 'info' });
+        }
     }
 
     saveAndExit();

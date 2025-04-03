@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>FussyValidation3</fullName>
+    <active>true</active>
+    <errorConditionFormula>NOT($Setup.Custom_Setting_1__c.Is_Org_A__c ) &amp;&amp; Fussy_Field_1__c == &apos;fail&apos;</errorConditionFormula>
+    <errorDisplayField>Fussy_Field_1__c</errorDisplayField>
+    <errorMessage>Always fails on org B</errorMessage>
+</ValidationRule>

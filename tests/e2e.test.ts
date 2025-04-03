@@ -1552,54 +1552,6 @@ test('fix column automatically with modifying current value', async () => {
 
 });
 
-// can't get to trigger it for now
-// test('mixed DML test', async () => {
-//     console.log('starting test: mixed DML test');
-
-//     const { conn1, conn2 } = await setupTestConnections();
-    
-//     const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
-//     expect(account.id).toBeDefined();
-
-//     const group = await conn1.sobject('Group').create({ Name: 'Ebola Cola Group' });
-//     expect(group.id).toBeDefined();
-
-//     const innerGroup = await conn1.sobject('Group').create({ Name: 'Ebola Cola Inner Group' });
-//     expect(innerGroup.id).toBeDefined();
-
-//     const groupMember = await conn1.sobject('GroupMember').create({ GroupId: group.id!, UserOrGroupId: innerGroup.id! });
-//     expect(groupMember.id).toBeDefined();
-
-//     const queue = await conn1.sobject('Group').create({ Name: 'Ebola Cola Queue', Type: 'Queue' });
-//     expect(queue.id).toBeDefined();
-
-//     const queueSobject = await conn1.sobject('QueueSobject').create({ QueueId: queue.id!, SobjectType: 'Task' });
-//     expect(queueSobject.id).toBeDefined();
-
-//     const task = await conn1.sobject('Task').create({ WhatId: account.id!, Subject: 'Ebola Cola Task', OwnerId: queue.id! });
-//     expect(task.id).toBeDefined();
-
-//     const config = {
-//         sourceOrg: sourceOrgAlias,
-//         targetOrg: targetOrgAlias,
-//         recordIds: [account.id!, groupMember.id!, task.id!, queueSobject.id!],
-//         matchers: defaultMatchers
-//     };
-
-//     const { parsedOutput } = await runMigration(config, ['y', 'r']);
-
-//     expect(parsedOutput).toHaveProperty(account.id!);
-//     const newAccountId = parsedOutput[account.id!];
-//     expect(newAccountId).toBeTruthy();
-//     expect(newAccountId).not.toEqual(account.id);
-
-//     expect(parsedOutput).toHaveProperty(groupMember.id!);
-//     const newGroupMemberId = parsedOutput[groupMember.id!];
-//     expect(newGroupMemberId).toBeTruthy();
-//     expect(newGroupMemberId).not.toEqual(groupMember.id);
-    
-// });
-
 test('more than 10 chunks', async () => {
     console.log('starting test: more than 10 chunks');
 
@@ -1701,4 +1653,44 @@ test('more than 10 chunks', async () => {
     const newWorkOrderId = parsedOutput[workOrder.id!];
     expect(newWorkOrderId).toBeTruthy();
     expect(newWorkOrderId).not.toEqual(workOrder.id);
+});
+
+test('failed later update', async () => {
+    console.log('starting test: failed later update');
+
+    const { conn1, conn2 } = await setupTestConnections();
+    
+    const custObjD = await conn1.sobject('Custom_Object_D__c').create({ Fussy_Field_1__c: 'fail' });
+    expect(custObjD.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [custObjD.id!],
+        matchers: defaultMatchers,
+        solvers: [
+            {
+                action: 'fix',
+                message: 'Always fails on org B',
+                changeFields: [
+                    {
+                        field: 'Fussy_Field_1__c',
+                        value: 'ok'
+                    }
+                ]
+            }
+        ]
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(custObjD.id!);
+    const newCustObjDId = parsedOutput[custObjD.id!];
+    expect(newCustObjDId).toBeTruthy();
+    expect(newCustObjDId).not.toEqual(custObjD.id);
+
+    // should be able to query the new record
+    const newCustObjD: any = await conn2.sobject('Custom_Object_D__c').retrieve(newCustObjDId);
+    expect(newCustObjD).toBeDefined();
+    expect(newCustObjD.Fussy_Field_1__c).toEqual('ok');
 });
