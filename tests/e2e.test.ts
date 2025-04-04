@@ -1694,3 +1694,35 @@ test('failed later update', async () => {
     expect(newCustObjD).toBeDefined();
     expect(newCustObjD.Fussy_Field_1__c).toEqual('ok');
 });
+
+test('match by wrong field', async () => {
+    console.log('starting test: match by wrong field');
+
+    const { conn1, conn2 } = await setupTestConnections();
+    
+    const accountName = `Ebola Cola ${Math.random()}`;
+    const account1 = await conn1.sobject('Account').create({ Name: accountName });
+    expect(account1.id).toBeDefined();
+
+    const account2 = await conn2.sobject('Account').create({ Name: accountName });
+    expect(account2.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [account1.id!],
+        matchers: [...defaultMatchers, {
+            sObjectType: 'Account',
+            fieldMappings: [
+                { sourceField: 'Ugabuga', targetField: 'Ugabuga' }
+            ]
+        }]
+    };
+
+    try {
+        await runMigration(config);
+        fail('Migration should have failed');S
+    } catch (error) {
+        console.log(error);
+    }
+});
