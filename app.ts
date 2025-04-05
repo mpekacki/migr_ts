@@ -145,6 +145,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const sObjectDescribes: Record<string, DescribeSObjectResult> = {};
     const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
         if (!(sObjectName in sObjectDescribes)) {
+            output({ category: 'output', message: `describing SObject ${sObjectName}`, type: 'info' });
             sObjectDescribes[sObjectName] = await connB.sobject(sObjectName).describe();
         }
         return sObjectDescribes[sObjectName];
@@ -157,6 +158,16 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         }
         return sobject.name;
     };
+
+    // check if all matchers are valid
+    for (const matcher of options.matchers) {
+        const sobjectDescribe = await getSObjectDescribe(matcher.sObjectType);
+        for (const fieldMapping of matcher.fieldMappings) {
+            if (!sobjectDescribe.fields.some(field => field.name === fieldMapping.sourceField)) {
+                throw new Error(`Field ${fieldMapping.sourceField} not found in SObject ${matcher.sObjectType}`);
+            }
+        }
+    }
 
     let recordIdsToFetch = options.recordIds;
     const recordsByIds: Record<string, SObjectRecord<Schema, string>> = {};

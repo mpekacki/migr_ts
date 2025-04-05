@@ -1721,7 +1721,7 @@ test('match by wrong field', async () => {
 
     try {
         await runMigration(config);
-        fail('Migration should have failed');S
+        fail('Migration should have failed');
     } catch (error) {
         console.log(error);
     }
