@@ -1726,3 +1726,48 @@ test('match by wrong field', async () => {
         console.log(error);
     }
 });
+
+test('find ids inside text', async () => {
+    console.log('starting test: find ids inside text');
+
+    const { conn1, conn2 } = await setupTestConnections();
+    
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    expect(account.id).toBeDefined();
+
+    const custObjD = await conn1.sobject('Custom_Object_D__c').create({ });
+    expect(custObjD.id).toBeDefined();
+
+    const case1 = await conn1.sobject('Case').create({
+        Description: `Here's an Id for you: ${account.id} and here's another one: ${custObjD.id}, what are you gonna do?`
+    });
+    expect(case1.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [case1.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config);
+    
+    expect(parsedOutput).toHaveProperty(case1.id!);
+    const newCase1Id = parsedOutput[case1.id!];
+    expect(newCase1Id).toBeTruthy();
+    expect(newCase1Id).not.toEqual(case1.id);
+
+    expect(parsedOutput).toHaveProperty(account.id!);
+    const newAccountId = parsedOutput[account.id!];
+    expect(newAccountId).toBeTruthy();
+    expect(newAccountId).not.toEqual(account.id);
+
+    expect(parsedOutput).toHaveProperty(custObjD.id!);
+    const newCustObjDId = parsedOutput[custObjD.id!];
+    expect(newCustObjDId).toBeTruthy();
+    expect(newCustObjDId).not.toEqual(custObjD.id);
+
+    const newCase1: any = await conn2.sobject('Case').retrieve(newCase1Id);
+    expect(newCase1).toBeDefined();
+    expect(newCase1.Description).toBe(`Here's an Id for you: ${newAccountId} and here's another one: ${newCustObjDId}, what are you gonna do?`);
+});
