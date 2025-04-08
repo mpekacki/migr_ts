@@ -1800,3 +1800,35 @@ test('invalid record id in field', async () => {
     expect(newCase1).toBeDefined();
     expect(newCase1.Description).toBe(`This record does not exist: 001J6000002UKyHIAW`);
 });
+
+test('record references self', async () => {
+    console.log('starting test: record references self');
+
+    const { conn1, conn2 } = await setupTestConnections();
+    
+    const case1 = await conn1.sobject('Case').create({});
+    expect(case1.id).toBeDefined();
+
+    await conn1.sobject('Case').update({
+        Id: case1.id!,
+        Description: `This is my id: ${case1.id}`
+    });
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [case1.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config);
+    
+    expect(parsedOutput).toHaveProperty(case1.id!);
+    const newCase1Id = parsedOutput[case1.id!];
+    expect(newCase1Id).toBeTruthy();
+    expect(newCase1Id).not.toEqual(case1.id);
+
+    // const newCase1: any = await conn2.sobject('Case').retrieve(newCase1Id);
+    // expect(newCase1).toBeDefined();
+    // expect(newCase1.Description).toBe(`This is my id: ${newCase1Id}`);
+});

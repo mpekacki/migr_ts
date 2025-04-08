@@ -331,7 +331,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 output({ category: 'output', message: `string ${match} is not a valid record Id`, type: 'info' });
                                 continue;
                             }
-                            if (!(match in old2new) && match in recordsByIds) {
+                            if (!(match in old2new) && match in recordsByIds && match !== recordId) {
                                 recordReady = false;
                                 output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not ready because lookup field ${field} (${match}) is not migrated`, type: 'info' });
                             } else if (match in old2new) {
