@@ -188,7 +188,17 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             const sObjectName = await getSObjectType(recordId);
             const sobjectDescribe = await getSObjectDescribe(sObjectName);
             output({ category: 'output', message: `fetching record ${recordId} of type ${sObjectName}`, type: 'info' });
-            const recordFields = await connA.sobject(sObjectName).retrieve(recordId);
+            let recordFields;
+            try {
+                recordFields = await connA.sobject(sObjectName).retrieve(recordId);
+            } catch (error) {
+                if (error.errorCode === 'NOT_FOUND' || error.message?.includes('resource does not exist')) {
+                    output({ category: 'output', message: `record ${recordId} of type ${sObjectName} does not exist in the source org`, type: 'info' });
+                    return [];
+                } else {
+                    throw error;
+                }
+            }
             fetchedRecordsByIds[recordId] = recordFields;
             const creatableFields = (await getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
             const record: SObjectRecord<Schema, string> = {};

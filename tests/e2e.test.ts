@@ -1771,3 +1771,32 @@ test('find ids inside text', async () => {
     expect(newCase1).toBeDefined();
     expect(newCase1.Description).toBe(`Here's an Id for you: ${newAccountId} and here's another one: ${newCustObjDId}, what are you gonna do? Also: interinstitutional counterculturalism psychoanalytically constitutionalizes neuropsychological overclassification, counterquestioning lumpenproletariats.`);
 });
+
+test('invalid record id in field', async () => {
+    console.log('starting test: invalid record id in field');
+
+    const { conn1, conn2 } = await setupTestConnections();
+    
+    const case1 = await conn1.sobject('Case').create({
+        Description: `This record does not exist: 001J6000002UKyHIAW`
+    });
+    expect(case1.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [case1.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config);
+    
+    expect(parsedOutput).toHaveProperty(case1.id!);
+    const newCase1Id = parsedOutput[case1.id!];
+    expect(newCase1Id).toBeTruthy();
+    expect(newCase1Id).not.toEqual(case1.id);
+
+    const newCase1: any = await conn2.sobject('Case').retrieve(newCase1Id);
+    expect(newCase1).toBeDefined();
+    expect(newCase1.Description).toBe(`This record does not exist: 001J6000002UKyHIAW`);
+});
