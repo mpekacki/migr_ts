@@ -1739,7 +1739,7 @@ test('find ids inside text', async () => {
     expect(custObjD.id).toBeDefined();
 
     const case1 = await conn1.sobject('Case').create({
-        Description: `Here's an Id for you: ${account.id} and here's another one: ${custObjD.id}, what are you gonna do?`
+        Description: `Here's an Id for you: ${account.id} and here's another one: ${custObjD.id}, what are you gonna do? Also: interinstitutional counterculturalism psychoanalytically constitutionalizes neuropsychological overclassification, counterquestioning lumpenproletariats.`
     });
     expect(case1.id).toBeDefined();
 
@@ -1769,5 +1769,5 @@ test('find ids inside text', async () => {
 
     const newCase1: any = await conn2.sobject('Case').retrieve(newCase1Id);
     expect(newCase1).toBeDefined();
-    expect(newCase1.Description).toBe(`Here's an Id for you: ${newAccountId} and here's another one: ${newCustObjDId}, what are you gonna do?`);
+    expect(newCase1.Description).toBe(`Here's an Id for you: ${newAccountId} and here's another one: ${newCustObjDId}, what are you gonna do? Also: interinstitutional counterculturalism psychoanalytically constitutionalizes neuropsychological overclassification, counterquestioning lumpenproletariats.`);
 });

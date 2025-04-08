@@ -202,10 +202,23 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 lookupFieldsBySObjectType[sObjectName] = lookupFields;
             }
             const newIds: string[] = [];
-            for (const lookupField of lookupFields) {
-                const lookupValue = record[lookupField.name];
-                if (lookupValue && !(lookupValue in recordsByIds) && !newIds.includes(lookupValue)) {
-                    newIds.push(lookupValue);
+            for (const field of creatableFields) {
+                // check if field contains some record Ids
+                if (record[field.name]) {
+                    const regex = /[a-zA-Z0-9]{18}/g;
+                    const matches = String(record[field.name])?.match(regex);
+                    if (matches) {
+                        for (const match of matches) {
+                            if (!(match in recordsByIds) && !newIds.includes(match)) {
+                                try {
+                                    await getSObjectType(match);
+                                    newIds.push(match);
+                                } catch {
+                                    output({ category: 'output', message: `string ${match} is not a valid record Id`, type: 'info' });
+                                }
+                            }
+                        }
+                    }
                 }
             }
             const relationships = options.relationships?.[sObjectName];
@@ -296,19 +309,27 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             const record = recordsByIds[recordId];
             const sObjectName = await getSObjectType(recordId);
             let recordReady = true;
-            const lookupFields = lookupFieldsBySObjectType[sObjectName];
-            if (lookupFields) {
-                for (const lookupField of lookupFields) {
-                    const lookupValue = record[lookupField.name];
-                    if (lookupValue) {
-                        if (!(lookupValue in old2new) && lookupValue in recordsByIds) {
-                            recordReady = false;
-                            // output({ category: 'output', message: `record ${recordId} is not ready because lookup field ${lookupField.name} (${lookupValue}) is not migrated`, type: 'info' });
-                        } else if (lookupValue in old2new) {
-                            output({ category: 'output', message: `mapping ${lookupField.name} to ${lookupValue} for record ${recordId} of type ${sObjectName} - new value: ${old2new[lookupValue]}`, type: 'info' });
-                            record[lookupField.name] = old2new[lookupValue];
-                            if (record[lookupField.name] === '') {
-                                delete record[lookupField.name];
+            for (const field of Object.keys(record)) {
+                if (record[field]) {
+                    const regex = /[a-zA-Z0-9]{18}/g;
+                    const matches = String(record[field])?.match(regex);
+                    if (matches) {
+                        for (const match of matches) {
+                            try {
+                                await getSObjectType(match);
+                            } catch {
+                                output({ category: 'output', message: `string ${match} is not a valid record Id`, type: 'info' });
+                                continue;
+                            }
+                            if (!(match in old2new) && match in recordsByIds) {
+                                recordReady = false;
+                                output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not ready because lookup field ${field} (${match}) is not migrated`, type: 'info' });
+                            } else if (match in old2new) {
+                                output({ category: 'output', message: `mapping ${field} to ${match} for record ${recordId} of type ${sObjectName} - new value: ${old2new[match]}`, type: 'info' });
+                                record[field] = record[field].replace(match, old2new[match]);
+                                if (record[field] === '') {
+                                    delete record[field];
+                                }
                             }
                         }
                     }
