@@ -1832,3 +1832,63 @@ test('record references self', async () => {
     // expect(newCase1).toBeDefined();
     // expect(newCase1.Description).toBe(`This is my id: ${newCase1Id}`);
 });
+
+test('circular relationship in text fields', async () => {
+    console.log('starting test: circular relationship in text fields');
+
+    const { conn1, conn2 } = await setupTestConnections();
+    
+    const caseA = await conn1.sobject('Case').create({});
+    expect(caseA.id).toBeDefined();
+
+    const caseB = await conn1.sobject('Case').create({
+        Description: `I like ${caseA.id}`
+    });
+    expect(caseB.id).toBeDefined();
+
+    const caseC = await conn1.sobject('Case').create({
+        Description: `And I like ${caseB.id}`
+    });
+    expect(caseC.id).toBeDefined();
+
+    await conn1.sobject('Case').update({
+        Id: caseA.id!,
+        Description: `But I like ${caseC.id} better`
+    });
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [caseA.id!, caseB.id!, caseC.id!],
+        matchers: defaultMatchers
+    };
+    
+    const { parsedOutput } = await runMigration(config);
+    
+    expect(parsedOutput).toHaveProperty(caseA.id!);
+    const newCaseAId = parsedOutput[caseA.id!];
+    expect(newCaseAId).toBeTruthy();
+    expect(newCaseAId).not.toEqual(caseA.id);
+
+    expect(parsedOutput).toHaveProperty(caseB.id!);
+    const newCaseBId = parsedOutput[caseB.id!];
+    expect(newCaseBId).toBeTruthy();
+    expect(newCaseBId).not.toEqual(caseB.id);
+
+    expect(parsedOutput).toHaveProperty(caseC.id!);
+    const newCaseCId = parsedOutput[caseC.id!];
+    expect(newCaseCId).toBeTruthy();
+    expect(newCaseCId).not.toEqual(caseC.id);
+
+    const newCaseA: any = await conn2.sobject('Case').retrieve(newCaseAId);
+    expect(newCaseA).toBeDefined();
+    expect(newCaseA.Description).toBe(`But I like ${newCaseCId} better`);
+
+    const newCaseB: any = await conn2.sobject('Case').retrieve(newCaseBId);
+    expect(newCaseB).toBeDefined();
+    expect(newCaseB.Description).toBe(`I like ${newCaseAId}`);
+
+    const newCaseC: any = await conn2.sobject('Case').retrieve(newCaseCId);
+    expect(newCaseC).toBeDefined();
+    expect(newCaseC.Description).toBe(`And I like ${newCaseBId}`);
+});
