@@ -17,26 +17,29 @@ export const scanForCircularDependency = (records: SfRecord[], requiredLookupsBy
         const record = recordsById[recordId];
         for (const field of Object.keys(record)) {
             if (field !== 'Id' && field !== 'attributes') {
-                const lookup = record[field as string] as string;
-                if (!(lookup in recordsById)) {
+                const val = String(record[field as string]);
+                const idsInVal = Object.keys(recordsById).filter(id => val?.includes(id));
+                if (idsInVal.length === 0) {
                     continue;
                 }
-                const newPath = [...path, field, lookup];
-                for (let j = 0; j < newPath.length; j += 2) {
-                    if (lookup === newPath[j]) {
-                        for (let i = j + 1; i < newPath.length - 1; i += 2) {
-                            const objectType = recordsById[newPath[i - 1]].attributes?.type;
-                            const requiredLookups = requiredLookupsBySObjectType[objectType || ''] || [];
-                            const field = newPath[i];
-                            if (!requiredLookups.includes(field)) {
-                                toClear.push({ recordId: newPath[i - 1], field });
-                                recordsById[newPath[i - 1]][field as string] = null;
+                for (const lookup of idsInVal) {
+                    const newPath = [...path, field, lookup];
+                    for (let j = 0; j < newPath.length; j += 2) {
+                        if (lookup === newPath[j]) {
+                            for (let i = j + 1; i < newPath.length - 1; i += 2) {
+                                const objectType = recordsById[newPath[i - 1]].attributes?.type;
+                                const requiredLookups = requiredLookupsBySObjectType[objectType || ''] || [];
+                                const field = newPath[i];
+                                if (!requiredLookups.includes(field)) {
+                                    toClear.push({ recordId: newPath[i - 1], field });
+                                    recordsById[newPath[i - 1]][field as string] = null;
+                                }
+                                return;
                             }
-                            return;
                         }
                     }
+                    search(lookup, newPath);
                 }
-                search(lookup, newPath);
             }
         }
     }

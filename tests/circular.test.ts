@@ -15,7 +15,9 @@ describe('scanForCircularDependency', () => {
                     "url": "/services/data/v62.0/sobjects/Custom_Object_A__c/a00KO0000016wtaYAA"
                 },
                 "Id": "a00KO0000016wtaYAA",
-                "OwnerId": "005KH000001TsIiYAK"
+                "OwnerId": "005KH000001TsIiYAK",
+                "Null__c": null,
+                "Num__c": 123
             },
             {
                 "Lookup_to_A__c": "a00KO0000016wtaYAA",
@@ -114,4 +116,32 @@ describe('scanForCircularDependency', () => {
             { recordId: 'a00KO0000016wtaYAA', field: 'Lookup_to_B__c' }
         ]);
     });
+
+    it('should find circular dependency when ids are inside text fields', () => {
+        expect(scanForCircularDependency([
+            {
+                "Id": "a00KO0000016wtaYAA",
+                "Description__c": "Here is some other id: a01KO000000ZOGxYAO",
+                "attributes":
+                {
+                    "type": "Custom_Object_A__c",
+                    "url": "/services/data/v62.0/sobjects/Custom_Object_A__c/a00KO0000016wtaYAA"
+                }
+            },
+            {
+                "Id": "a01KO000000ZOGxYAO",
+                "Description__c": "Here is some other id: a00KO0000016wtaYAA",
+                "attributes":
+                {
+                    "type": "Custom_Object_B__c",
+                    "url": "/services/data/v62.0/sobjects/Custom_Object_B__c/a01KO000000ZOGxYAO"
+                }
+            }
+        ], {
+            "Custom_Object_A__c": [],
+            "Custom_Object_B__c": ["Description__c"]
+        })).toEqual([
+            { recordId: 'a00KO0000016wtaYAA', field: 'Description__c' }
+        ]);
+    })
 });

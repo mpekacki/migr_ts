@@ -567,7 +567,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
             const records = Object.values(recordsByIds).map(record => ({
                 attributes: record.attributes,
-                ...Object.fromEntries(Object.entries(record).filter(([key]) => key === 'attributes' || allLookupFieldsBySObjectType[record.attributes!.type]?.includes(key))),
+                ...Object.fromEntries(Object.entries(record)),
                 Id: Object.keys(recordsByIds).find(key => recordsByIds[key] === record)
             }));
             output({ category: 'output', message: `looking for circular dependencies with ${JSON.stringify(requiredLookupFieldsBySObjectType)} for records ${JSON.stringify(records)}`, type: 'info' });
@@ -588,8 +588,17 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     for (const recordId of Object.keys(toUpdateLater)) {
         const record = toUpdateLater[recordId];
         for (const field of Object.keys(record)) {
-            if (field !== 'attributes' && record[field] in old2new) {
-                record[field] = old2new[record[field]];
+            if (field !== 'attributes') {
+                const value = String(record[field]);
+                const regex = /[a-zA-Z0-9]{18}/g;
+                const matches = value.match(regex);
+                if (matches) {
+                    for (const match of matches) {
+                        if (match in old2new) {
+                            record[field] = value.replace(match, old2new[match]);
+                        }
+                    }
+                }
             }
         }
         record.Id = old2new[recordId];
