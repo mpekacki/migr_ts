@@ -224,7 +224,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                     await getSObjectType(match);
                                     newIds.push(match);
                                 } catch {
-                                    output({ category: 'output', message: `string ${match} is not a valid record Id`, type: 'info' });
+                                    // do nothing, it was some random string
                                 }
                             }
                         }
@@ -328,7 +328,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                             try {
                                 await getSObjectType(match);
                             } catch {
-                                output({ category: 'output', message: `string ${match} is not a valid record Id`, type: 'info' });
+                                // do nothing, it was some random string
                                 continue;
                             }
                             if (!(match in old2new) && match in recordsByIds && match !== recordId) {
