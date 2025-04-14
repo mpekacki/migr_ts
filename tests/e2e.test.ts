@@ -11,7 +11,9 @@ const targetOrgAlias = 'testMigrationOrgB';
 jest.setTimeout(120000);
 
 afterEach(async () => {
-    fs.unlinkSync('./config_test.json');
+    if (fs.existsSync('./config_test.json')) {
+        fs.unlinkSync('./config_test.json');
+    }
     if (fs.existsSync(`${targetOrgAlias}__history.json`)) {
         fs.unlinkSync(`${targetOrgAlias}__history.json`);
     }
@@ -1891,4 +1893,33 @@ test('circular relationship in text fields', async () => {
     const newCaseC: any = await conn2.sobject('Case').retrieve(newCaseCId);
     expect(newCaseC).toBeDefined();
     expect(newCaseC.Description).toBe(`And I like ${newCaseBId}`);
+});
+
+test('non-queryable object', async () => {
+    console.log('starting test: non-queryable object');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    expect(true).toBe(true);
+    
+    const contentVersion = await conn1.sobject('ContentVersion').create({
+        Title: 'Test Document', // Required field
+        PathOnClient: 'test.txt', // Required field
+        VersionData: 'Hello World'
+    });
+    expect(contentVersion.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [contentVersion.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config);
+    
+    expect(parsedOutput).toHaveProperty(contentVersion.id!);
+    const newContentVersionId = parsedOutput[contentVersion.id!];
+    expect(newContentVersionId).toBeTruthy();
+    expect(newContentVersionId).not.toEqual(contentVersion.id);    
 });
