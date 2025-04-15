@@ -58,7 +58,7 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
         console.log(data);
         const lines = data.toString().split('\n');
         for (const line of lines) {
-            if (line.trim() === '') {
+            if (line.trim() === '' || !line.trim().startsWith('{')) {
                 continue;
             }
             const event = JSON.parse(line) as IOEvent;
@@ -1895,8 +1895,8 @@ test('circular relationship in text fields', async () => {
     expect(newCaseC.Description).toBe(`And I like ${newCaseBId}`);
 });
 
-test('non-queryable object', async () => {
-    console.log('starting test: non-queryable object');
+test('non-queryable and non-creatable object', async () => {
+    console.log('starting test: non-queryable and non-creatable object');
 
     const { conn1, conn2 } = await setupTestConnections();
 
@@ -1921,5 +1921,5 @@ test('non-queryable object', async () => {
     expect(parsedOutput).toHaveProperty(contentVersion.id!);
     const newContentVersionId = parsedOutput[contentVersion.id!];
     expect(newContentVersionId).toBeTruthy();
-    expect(newContentVersionId).not.toEqual(contentVersion.id);    
+    expect(newContentVersionId).not.toEqual(contentVersion.id);
 });

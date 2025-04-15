@@ -1,3 +1,4 @@
+console.log('importing dependencies');
 import { Connection, AuthInfo } from '@salesforce/core';
 import { DescribeSObjectResult, Field, Schema, SObjectRecord, SObjectUpdateRecord } from 'jsforce';
 import fs from 'fs';
@@ -5,6 +6,7 @@ import path from 'path';
 import { scanForCircularDependency } from './circular';
 import Chunks from './chunks';
 import IOEvent from './ioevent';
+console.log('importing dependencies done');
 
 interface Options {
     sourceOrg: string;
@@ -195,6 +197,10 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 if (error.errorCode === 'NOT_FOUND' || error.message?.includes('resource does not exist')) {
                     output({ category: 'output', message: `record ${recordId} of type ${sObjectName} does not exist in the source org`, type: 'info' });
                     return [];
+                } else if (error.errorCode === 'INVALID_TYPE_FOR_OPERATION') {
+                    output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not queryable`, type: 'info' });
+                    old2new[recordId] = '';
+                    return [];
                 } else {
                     throw error;
                 }
@@ -370,18 +376,13 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         skipRecord = true;
                     }
                 }
-                if (!migratedRecordId && !skipRecord) {
-                    const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
-                    if (isObjectCreatable) {
-                        toInsert[recordId] = {
-                            attributes: record.attributes,
+                const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
+                if (!migratedRecordId && !skipRecord && isObjectCreatable) {
+                    toInsert[recordId] = {
+                        attributes: record.attributes,
                             ...record
                         } as SObjectRecord<Schema, string>;
-                        output({ category: 'output', message: `creating record ${recordId} of type ${sObjectName} with fields ${JSON.stringify(record)}`, type: 'info' });
-                    } else {
-                        output({ category: 'output', message: `skipping record ${recordId} of type ${sObjectName} because it is not creatable (describe: ${JSON.stringify(describeGlobal.sobjects.find(sobject => sobject.name === sObjectName))})`, type: 'info' });
-                        throw new Error(`record ${recordId} of type ${sObjectName} is not creatable (not implemented yet)`);
-                    }
+                    output({ category: 'output', message: `creating record ${recordId} of type ${sObjectName} with fields ${JSON.stringify(record)}`, type: 'info' });
                 } else {
                     old2new[recordId] = migratedRecordId!;
                     delete recordsByIds[recordId];
