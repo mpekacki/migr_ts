@@ -49,7 +49,7 @@ class ApplicationRunner {
             console.log(data);
             const lines = data.toString().split('\n');
             for (const line of lines) {
-                if (line.trim() === '') {
+                if (line.trim() === '' || !line.startsWith('{')) {
                     continue;
                 }
                 const event = JSON.parse(line) as IOEvent;

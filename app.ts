@@ -130,7 +130,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         return onInput(new IOEvent(question.category, question.message, question.type, question.data));
     };
 
-    const chunking = new Chunks(['User', 'PermissionSetAssignment'], 200, 10);
+    const chunking = new Chunks(['User', 'UserRole', 'PermissionSetAssignment'], 200, 10);
 
     output({ category: 'output', message: `starting migration: ${JSON.stringify(options)}`, type: 'info' });
 
@@ -147,7 +147,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const sObjectDescribes: Record<string, DescribeSObjectResult> = {};
     const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
         if (!(sObjectName in sObjectDescribes)) {
-            output({ category: 'output', message: `describing SObject ${sObjectName}`, type: 'info' });
+            // output({ category: 'output', message: `describing SObject ${sObjectName}`, type: 'info' });
             sObjectDescribes[sObjectName] = await connB.sobject(sObjectName).describe();
         }
         return sObjectDescribes[sObjectName];
@@ -162,6 +162,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     };
 
     // check if all matchers are valid
+    output({ category: 'output', message: `checking matchers`, type: 'info' });
     for (const matcher of options.matchers) {
         const sobjectDescribe = await getSObjectDescribe(matcher.sObjectType);
         for (const fieldMapping of matcher.fieldMappings) {
