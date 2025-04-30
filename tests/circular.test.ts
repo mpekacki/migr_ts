@@ -144,4 +144,25 @@ describe('scanForCircularDependency', () => {
             { recordId: 'a00KO0000016wtaYAA', field: 'Description__c' }
         ]);
     })
+
+    it('should work for a large number of records and complete under 10 seconds', () => {
+        const records = [];
+        const num = 700;
+        for (let i = 0; i < num; i++) {
+            records.push({
+                "Id": `${i}`,
+                "Lookup__c": `${i+1}`
+            });
+        }
+        records[records.length - 1].Lookup__c = `0`;
+        
+        const startTime = performance.now();
+        const result = scanForCircularDependency(records, { });
+        const endTime = performance.now();
+        
+        const executionTime = (endTime - startTime) / 1000; // Convert to seconds
+        
+        expect(executionTime).toBeLessThan(10); // Should complete in under 10 seconds
+        expect(result.length).toBeGreaterThan(0); // Should find circular dependencies
+    })
 });
