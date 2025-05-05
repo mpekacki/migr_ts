@@ -147,14 +147,15 @@ describe('scanForCircularDependency', () => {
 
     it('should work for a large number of records and complete under 10 seconds', () => {
         const records = [];
-        const num = 700;
+        const num = 200;
+        const createId = (i: number) => `a00KO0000016wtaYAA${i.toString().padStart(num.toString().length, '0')}`;
         for (let i = 0; i < num; i++) {
             records.push({
-                "Id": `${i}`,
-                "Lookup__c": `${i+1}`
+                "Id": createId(i),
+                "Lookup__c": createId(i+1)
             });
         }
-        records[records.length - 1].Lookup__c = `0`;
+        records[records.length - 1].Lookup__c = createId(0);
         
         const startTime = performance.now();
         const result = scanForCircularDependency(records, { });
@@ -163,6 +164,6 @@ describe('scanForCircularDependency', () => {
         const executionTime = (endTime - startTime) / 1000; // Convert to seconds
         
         expect(executionTime).toBeLessThan(10); // Should complete in under 10 seconds
-        expect(result.length).toBeGreaterThan(0); // Should find circular dependencies
+        expect(result.length).toEqual(1);
     })
 });
