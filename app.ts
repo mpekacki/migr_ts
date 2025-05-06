@@ -130,7 +130,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         return onInput(new IOEvent(question.category, question.message, question.type, question.data));
     };
 
-    const chunking = new Chunks(['User', 'UserRole', 'PermissionSetAssignment'], 200, 10);
+    const chunking = new Chunks(['User', 'UserRole', 'PermissionSetAssignment', 'BusinessHours'], 200, 10);
 
     output({ category: 'output', message: `starting migration: ${JSON.stringify(options)}`, type: 'info' });
 
@@ -340,7 +340,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                             }
                             if (!(match in old2new) && match in recordsByIds && match !== recordId) {
                                 recordReady = false;
-                                output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not ready because lookup field ${field} (${match}) is not migrated`, type: 'info' });
+                                // output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not ready because lookup field ${field} (${match}) is not migrated`, type: 'info' });
                             } else if (match in old2new) {
                                 output({ category: 'output', message: `mapping ${field} to ${match} for record ${recordId} of type ${sObjectName} - new value: ${old2new[match]}`, type: 'info' });
                                 record[field] = record[field].replace(match, old2new[match]);
@@ -354,7 +354,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
             if (recordReady) {
                 anyRecordProcessed = true;
-                output({ category: 'output', message: `anyRecordProcessed true for record ${recordId} of type ${sObjectName} because record is ready`, type: 'info' });
+                // output({ category: 'output', message: `anyRecordProcessed true for record ${recordId} of type ${sObjectName} because record is ready`, type: 'info' });
                 let migratedRecordId = '';
                 let skipRecord = false;
                 const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
@@ -392,6 +392,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         }
         if (Object.keys(toInsert).length > 0) {
             const chunks: Record<string, SObjectRecord<Schema, string>>[] = chunking.getChunks(toInsert);
+            let retryAll = false;
             for (const chunk of chunks) {
                 output({ category: 'output', message: `saving ${Object.keys(chunk).length} records: ${JSON.stringify(Object.values(chunk))}`, type: 'info' });
                 const savedRecords = (await connB.request({
@@ -407,12 +408,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                     const recordId = Object.keys(chunk)[i];
                     const record = recordsByIds[recordId];
                     const savedRecord = savedRecords[i];
-                    let retryRecord = false;
+                    let retryRecord = retryAll;
                     let migratedRecordId = '';
                     if (savedRecord.success) {
                         migratedRecordId = savedRecord.id!;
                         output({ category: 'output', message: `created record ${migratedRecordId}`, type: 'info' });
-                    } else {    
+                    } else if (!retryRecord) {    
                         const errs = savedRecord.errors
                         for (const e of errs) {
                             let errorFixed = false;
@@ -504,6 +505,9 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                         retryRecord = true;
                                         errorFixed = true;
                                     } else if (userInput === 'r') {
+                                        retryRecord = true;
+                                    } else if (userInput === 'ra') {
+                                        retryAll = true;
                                         retryRecord = true;
                                     } else if (userInput === 'm') {
                                         migratedRecordId = await input({ category: 'input', message: `Enter the ID of the record to match:`, type: 'insert_error' });

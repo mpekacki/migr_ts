@@ -1285,6 +1285,65 @@ test('migrate record with error - manually retry insert', async () => {
     expect(newCustObjC.External_Id__c).toEqual(externalId);
 });
 
+test('manually retry all records', async () => {
+    console.log('starting test: manually retry all records');
+
+    const { conn1, conn2 } = await setupTestConnections();
+    
+    const count = 5;
+    const records1 = [];
+    for (let i = 0; i < count; i++) {
+        console.log(`creating record ${i}`);
+        const externalId = `ext-${Math.random()}`;
+        const record = await conn1.sobject('Custom_Object_C__c').create({ External_Id__c: externalId });
+        records1.push({
+            id: record.id,
+            externalId
+        });
+    }
+    const records2: any[] = [];
+    for (const record of records1) {
+        console.log(`creating record ${record.externalId} in target org`);
+        const record2 = await conn2.sobject('Custom_Object_C__c').create({ External_Id__c: record.externalId });
+        records2.push({
+            id: record2.id,
+            externalId: record.externalId
+        });
+    }
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: records1.map(r => r.id!),
+        matchers: defaultMatchers
+    };
+
+    let retryCount = 0;
+    const { parsedOutput } = await runMigration(config, async (ioEvent: IOEvent, sendInput: (input: string) => void) => {
+        if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
+            sendInput('y');
+        } else if (ioEvent.category === 'input' && ioEvent.type === 'insert_error') {
+            retryCount++;
+            expect(retryCount).toBe(1);
+            expect(ioEvent.message).toContain('duplicate value found: External_Id__c duplicates value on record with id:');
+            // delete records from Org B
+            for (const record of records2) {
+                await conn2.sobject('Custom_Object_C__c').delete(record.id!);
+            }
+            // retry insert for all records
+            sendInput('ra');
+        }
+    });
+
+    for (const record of records1) {
+        expect(parsedOutput).toHaveProperty(record.id!);
+        const newCustObjCId = parsedOutput[record.id!];
+        expect(newCustObjCId).toBeTruthy();
+        expect(newCustObjCId).not.toEqual(record.id);
+    }
+    
+});
+
 test('migrate record with error - quit and save results so far', async () => {
     console.log('starting test: migrate record with error - quit and save results so far');
 
