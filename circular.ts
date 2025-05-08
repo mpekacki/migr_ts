@@ -16,10 +16,6 @@ export const scanForCircularDependency = (records: SfRecord[], requiredLookupsBy
     const visited = new Set<string>();
 
     const search = (recordId: string, path: string[]) => {
-        if (visited.has(recordId)) {
-            // console.log('already visited', recordId);
-            return;
-        }
         // console.log('searching', recordId, path[0], path[path.length - 1], path.length);
         const record = recordsById[recordId];
         for (const field of Object.keys(record)) {
@@ -49,7 +45,9 @@ export const scanForCircularDependency = (records: SfRecord[], requiredLookupsBy
                             }
                         }
                     }
-                    search(lookup, newPath);
+                    if (!(visited.has(recordId) && visited.has(lookup))) {
+                        search(lookup, newPath);
+                    }
                 }
             }
         }

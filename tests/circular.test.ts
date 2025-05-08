@@ -145,6 +145,24 @@ describe('scanForCircularDependency', () => {
         ]);
     })
 
+    it('should detect 2 independent circular dependencies', () => {
+        expect(scanForCircularDependency([
+            {
+                "Id": "1",
+                "Lookup__c": "2"
+            },
+            {
+                "Id": "2",
+                "Lookup__c": "1",
+                "Lookup2__c": "3"
+            },
+            {
+                "Id": "3",
+                "Lookup2__c": "2"
+            }
+        ], {})).toHaveLength(2);
+    })
+
     it('should work for a large number of records and complete under 10 seconds', () => {
         const records = [];
         const num = 500;
