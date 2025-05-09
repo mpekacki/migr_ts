@@ -34,6 +34,7 @@ interface Options {
 
 interface Solver {
     message: string;
+    hideError?: boolean;
 }
 
 interface FixSolver extends Solver {
@@ -544,10 +545,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                     break;
                                 }
                             }
-                            if (!(recordId in errors)) {
-                                errors[recordId] = [];
+                            if (!solver?.hideError) {
+                                if (!(recordId in errors)) {
+                                    errors[recordId] = [];
+                                }
+                                errors[recordId].push({ message: e.message, fixed: errorFixed, solver });
                             }
-                            errors[recordId].push({ message: e.message, fixed: errorFixed, solver });
                         }
                     }
                     if (retryRecord) {
