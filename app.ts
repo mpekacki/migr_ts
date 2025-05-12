@@ -403,7 +403,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         allOrNone: false,
                         records: Object.values(chunk)
                     })
-                })) as Array<{ id: string, success: boolean, errors: any[] }>;
+                })) as Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>;
                 output({ category: 'output', message: `saved records: ${JSON.stringify(savedRecords)}`, type: 'info' });
                 for (let i = 0; i < savedRecords.length; i++) {
                     const recordId = Object.keys(chunk)[i];
