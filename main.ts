@@ -20,7 +20,7 @@ const options: Options = JSON.parse(fs.readFileSync(program.opts().configJson, '
 
 let outputStream: fs.WriteStream | undefined;
 if (program.opts().outputFile) {
-    outputStream = fs.createWriteStream(program.opts().outputFile, { flags: 'a' });
+    outputStream = fs.createWriteStream(program.opts().outputFile, { flags: 'w' });
 }
 
 const formatMessage = (event: IOEvent) => {

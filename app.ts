@@ -302,7 +302,9 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const saveAndExit = () => {
         fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
         const outputData = {
-            ...old2new,
+            ...Object.fromEntries(
+                Object.entries(old2new).filter(([key]) => !(key in history))
+            ),
             errors
         };
         output({ category: 'output', message: 'Finished', data: JSON.stringify(outputData), type: 'info' });

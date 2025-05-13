@@ -2074,4 +2074,28 @@ test('write output to log file', async () => {
     expect(logFile).toContain('Account');
     expect(logFile).toContain(account.id!);
     expect(logFile).toContain(newAccountId);
+
+    // run another migration to check that the log file is overwritten
+    const account2 = await conn1.sobject('Account').create({ Name: 'Ebola Cola 2' });
+    expect(account2.id).toBeDefined();
+
+    const config2 = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [account2.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput: parsedOutput2 } = await runMigration(config2, ['y'], 'test-output.log');
+    expect(parsedOutput2).toHaveProperty(account2.id!);
+    const newAccountId2 = parsedOutput2[account2.id!];
+    expect(newAccountId2).toBeTruthy();
+    expect(newAccountId2).not.toEqual(account2.id);
+
+    const logFile2 = fs.readFileSync('test-output.log', 'utf8');
+    expect(logFile2).toContain('Account');
+    expect(logFile2).toContain(account2.id!);
+    expect(logFile2).toContain(newAccountId2);
+    expect(logFile2).not.toContain(account.id!);
+    expect(logFile2).not.toContain(newAccountId);
 });
