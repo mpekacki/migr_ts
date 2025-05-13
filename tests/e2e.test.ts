@@ -48,12 +48,16 @@ async function setupTestConnections() {
     return { conn1, conn2 };
 }
 
-async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInput: (input: string) => void) => void) | string[] = ['y']) {
+async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInput: (input: string) => void) => void) | string[] = ['y'], outputFile: string | undefined = undefined) {
     fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
     const capturedOutput: IOEvent[] = [];
     let capturedError = '';
 
-    const child = exec(`npx ts-node ./main.ts --config-json ./config_test.json --debug`);
+    let command = `npx ts-node ./main.ts --config-json ./config_test.json --debug`;
+    if (outputFile) {
+        command += ` --output-file ${outputFile}`;
+    }
+    const child = exec(command);
     child.stdout?.on('data', (data) => {
         console.log(data);
         const lines = data.toString().split('\n');
@@ -2040,4 +2044,34 @@ test('non-queryable and non-creatable object', async () => {
     const newContentVersionId = parsedOutput[contentVersion.id!];
     expect(newContentVersionId).toBeTruthy();
     expect(newContentVersionId).not.toEqual(contentVersion.id);
+});
+
+test('write output to log file', async () => {
+    console.log('starting test: write output to log file');
+
+    const { conn1 } = await setupTestConnections();
+
+    console.log('creating records');
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    console.log(account);
+    expect(account.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [account.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config, ['y'], 'test-output.log');
+
+    expect(parsedOutput).toHaveProperty(account.id!);
+    const newAccountId = parsedOutput[account.id!];
+    expect(newAccountId).toBeTruthy();
+    expect(newAccountId).not.toEqual(account.id);
+
+    const logFile = fs.readFileSync('test-output.log', 'utf8');
+    expect(logFile).toContain('Account');
+    expect(logFile).toContain(account.id!);
+    expect(logFile).toContain(newAccountId);
 });
