@@ -179,7 +179,14 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const lookupFieldsBySObjectType: Record<string, Field[]> = {};
     const old2new: Record<string, string> = {};
     const errors: Record<string, { message: string, fixed: boolean, solver?: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver) }[]> = {};
-
+    const migratedRecords: Record<string, string> = {};
+    
+    const setNewRecordId = (recordId: string, newRecordId: string) => {
+        old2new[recordId] = newRecordId;
+        delete recordsByIds[recordId];
+        migratedRecords[recordId] = newRecordId;
+    }
+    
     for (const recordId of Object.keys(history)) {
         old2new[recordId] = history[recordId];
         recordIdsToFetch = recordIdsToFetch.filter(id => id !== recordId);
@@ -302,9 +309,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const saveAndExit = () => {
         fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
         const outputData = {
-            ...Object.fromEntries(
-                Object.entries(old2new).filter(([key]) => !(key in history))
-            ),
+            ...old2new,
             errors
         };
         output({ category: 'output', message: 'Finished', data: JSON.stringify(outputData), type: 'info' });
@@ -388,8 +393,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         } as SObjectRecord<Schema, string>;
                     output({ category: 'output', message: `creating record ${recordId} of type ${sObjectName} with fields ${JSON.stringify(record)}`, type: 'info' });
                 } else {
-                    old2new[recordId] = migratedRecordId!;
-                    delete recordsByIds[recordId];
+                    setNewRecordId(recordId, migratedRecordId!);
                 }
             }
         }
@@ -558,8 +562,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                     if (retryRecord) {
                         continue;
                     }
-                    old2new[recordId] = migratedRecordId!;
-                    delete recordsByIds[recordId];
+                    setNewRecordId(recordId, migratedRecordId!);
                 }
             }
         }
