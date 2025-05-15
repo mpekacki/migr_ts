@@ -123,6 +123,8 @@ async function getConnections(options: Options): Promise<[Connection<Schema>, Co
     ]);
 }
 
+const ID_REGEX = /[a-zA-Z0-9]{18}/g;
+
 async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>) {
     const output = (event: IOEvent) => {
         onOutput(new IOEvent(event.category, event.message, event.type, event.data));
@@ -230,8 +232,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             for (const field of creatableFields) {
                 // check if field contains some record Ids
                 if (record[field.name]) {
-                    const regex = /[a-zA-Z0-9]{18}/g;
-                    const matches = String(record[field.name])?.match(regex);
+                    const matches = String(record[field.name])?.match(ID_REGEX);
                     if (matches) {
                         for (const match of matches) {
                             if (!(match in recordsByIds) && !newIds.includes(match)) {
@@ -336,8 +337,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             let recordReady = true;
             for (const field of Object.keys(record)) {
                 if (record[field]) {
-                    const regex = /[a-zA-Z0-9]{18}/g;
-                    const matches = String(record[field])?.match(regex);
+                    const matches = String(record[field])?.match(ID_REGEX);
                     if (matches) {
                         for (const match of matches) {
                             try {
@@ -604,8 +604,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         for (const field of Object.keys(record)) {
             if (field !== 'attributes') {
                 const value = String(record[field]);
-                const regex = /[a-zA-Z0-9]{18}/g;
-                const matches = value.match(regex);
+                const matches = value.match(ID_REGEX);
                 if (matches) {
                     for (const match of matches) {
                         if (match in old2new) {
