@@ -404,7 +404,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 output({ category: 'output', message: `saving ${Object.keys(chunk).length} records: ${JSON.stringify(Object.values(chunk))}`, type: 'info' });
                 const savedRecords = (await connB.request({
                 method: 'POST',
-                url: '/services/data/v62.0/composite/sobjects',
+                url: `/services/data/v${connB.version}/composite/sobjects`,
                 body: JSON.stringify({
                         allOrNone: false,
                         records: Object.values(chunk)
