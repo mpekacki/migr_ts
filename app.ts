@@ -124,6 +124,15 @@ async function getConnections(options: Options): Promise<[Connection<Schema>, Co
 }
 
 const ID_REGEX = /[a-zA-Z0-9]{18}/g;
+const USER_INPUTS = {
+    fix: 'f',
+    retry: 'r',
+    retryAll: 'ra',
+    match: 'm',
+    saveAndExit: 'h',
+    addSolver: 'a',
+    skip: 's',
+};
 
 async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>) {
     const output = (event: IOEvent) => {
@@ -486,7 +495,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 do {
                                     inputOk = true;
                                     const userInput = await input({ category: 'input', message: `recordId: ${recordId}, no solver found for error: ${e.message}`, type: 'insert_error' });
-                                    if (userInput === 'f') {
+                                    if (userInput === USER_INPUTS.fix) {
                                         let fieldsToUpdate;
                                         while (!fieldsToUpdate) {
                                             const fieldsJson = await input({ category: 'input', message: 'Enter the fields to update in JSON format:', type: 'insert_error' });
@@ -511,17 +520,17 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                         }
                                         retryRecord = true;
                                         errorFixed = true;
-                                    } else if (userInput === 'r') {
+                                    } else if (userInput === USER_INPUTS.retry) {
                                         retryRecord = true;
-                                    } else if (userInput === 'ra') {
+                                    } else if (userInput === USER_INPUTS.retryAll) {
                                         retryAll = true;
                                         retryRecord = true;
-                                    } else if (userInput === 'm') {
+                                    } else if (userInput === USER_INPUTS.match) {
                                         migratedRecordId = await input({ category: 'input', message: `Enter the ID of the record to match:`, type: 'insert_error' });
-                                    } else if (userInput === 'h') {
+                                    } else if (userInput === USER_INPUTS.saveAndExit) {
                                         saveAndExit();
                                         return;
-                                    } else if (userInput === 'a') {
+                                    } else if (userInput === USER_INPUTS.addSolver) {
                                         let newSolver;
                                         while (!newSolver) {
                                             const solverJson = await input({ category: 'input', message: 'Enter the solver in JSON format:', type: 'insert_error' });
@@ -540,7 +549,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                         anyRecordProcessed = true;
                                         solverAdded = true;
                                         retryRecord = true;
-                                    } else if (userInput == 's') {
+                                    } else if (userInput === USER_INPUTS.skip) {
                                         // skip record, don't do anything
                                     } else {
                                         output({ category: 'output', message: `invalid input: ${userInput}`, type: 'info' });
