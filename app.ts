@@ -326,14 +326,18 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
 
     const toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
-    const setFieldWithLaterUpdate = (recordId: string, record: SObjectRecord<Schema, string>, field: string, value: string) => {
-        if (!(recordId in toUpdateLater)) {
-            toUpdateLater[recordId] = {
-                attributes: record.attributes
-            } as SObjectRecord<Schema, string>;
+    const setFieldWithLaterUpdate = (recordId: string, record: SObjectRecord<Schema, string>, field: string, value: string | null) => {
+        if (value === null) {
+            delete record[field];
+        } else {
+            if (!(recordId in toUpdateLater)) {
+                toUpdateLater[recordId] = {
+                    attributes: record.attributes
+                } as SObjectRecord<Schema, string>;
+            }
+            toUpdateLater[recordId][field] = record[field];
+            record[field] = value;
         }
-        toUpdateLater[recordId][field] = record[field];
-        record[field] = value;
     }
     
     while (Object.keys(recordsByIds).length > 0) {
@@ -445,11 +449,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 if (solver) {
                                     if (solver.action === 'fix') {
                                         for (const changeField of solver.changeFields) {
-                                            if (changeField.value === null) {
-                                                delete record[changeField.field];
-                                            } else {
-                                                setFieldWithLaterUpdate(recordId, record, changeField.field, changeField.value);
-                                            }
+                                            setFieldWithLaterUpdate(recordId, record, changeField.field, changeField.value);
                                         }
                                         output({ category: 'output', message: `fixing using solver: ${solver.message}`, type: 'info' });
                                         output({ category: 'output', message: `saved old fields in toUpdateLater: ${JSON.stringify(toUpdateLater[recordId])}`, type: 'info' });
@@ -469,11 +469,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                         output({ category: 'output', message: `extracting column name from error: ${e.message}`, type: 'info' });
                                         const columnName = new RegExp(solver.message).exec(e.message)?.[1];
                                         if (columnName) {
-                                            if (solver.replaceWith === null) {
-                                                delete record[columnName];
-                                            } else {
-                                                setFieldWithLaterUpdate(recordId, record, columnName, solver.replaceWith);
-                                            }
+                                            setFieldWithLaterUpdate(recordId, record, columnName, solver.replaceWith);
                                             errorFixed = true;
                                             retryRecord = true;
                                         }
@@ -511,11 +507,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             changeFields: []
                                         }
                                         for (const field of Object.keys(fieldsToUpdate)) {
-                                            if (fieldsToUpdate[field] === null) {
-                                                delete record[field];
-                                            } else {
-                                                setFieldWithLaterUpdate(recordId, record, field, fieldsToUpdate[field]);
-                                            }
+                                            setFieldWithLaterUpdate(recordId, record, field, fieldsToUpdate[field]);
                                             solver.changeFields.push({ field, value: fieldsToUpdate[field] });
                                         }
                                         retryRecord = true;
