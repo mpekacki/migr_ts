@@ -221,6 +221,10 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                     output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not queryable`, type: 'info' });
                     old2new[recordId] = '';
                     return [];
+                } else if (error.errorCode === 'MALFORMED_ID') {
+                    output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is malformed`, type: 'info' });
+                    old2new[recordId] = recordId;
+                    return [];
                 } else {
                     throw error;
                 }

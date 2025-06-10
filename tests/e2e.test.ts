@@ -1397,6 +1397,7 @@ test('manually retry all records', async () => {
             sendInput('ra');
         }
     });
+    expect(retryCount).toBe(1);
 
     for (const record of records1) {
         expect(parsedOutput).toHaveProperty(record.id!);
@@ -2093,4 +2094,32 @@ test('write output to log file', async () => {
     const logFile2 = fs.readFileSync('test-output.log', 'utf8');
     expect(logFile2).toContain(`creating record ${account2.id}`);
     expect(logFile2).not.toContain(`creating record ${account.id}`);
+});
+
+test('malformed id', async () => {
+    console.log('starting test: malformed id');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const case1 = await conn1.sobject('Case').create({
+        Description: 'Bad Id: 574300075a6OKB0000'
+    });
+    expect(case1.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [case1.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config);
+    expect(parsedOutput).toHaveProperty(case1.id!);
+    const newCase1Id = parsedOutput[case1.id!];
+    expect(newCase1Id).toBeTruthy();
+    expect(newCase1Id).not.toEqual(case1.id);
+
+    const newCase1: any = await conn2.sobject('Case').retrieve(newCase1Id);
+    expect(newCase1).toBeDefined();
+    expect(newCase1.Description).toBe('Bad Id: 574300075a6OKB0000');
 });
