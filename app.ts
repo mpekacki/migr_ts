@@ -159,7 +159,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const sObjectDescribes: Record<string, DescribeSObjectResult> = {};
     const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
         if (!(sObjectName in sObjectDescribes)) {
-            // output({ category: 'output', message: `describing SObject ${sObjectName}`, type: 'info' });
+            output({ category: 'output', message: `describing SObject ${sObjectName}`, type: 'info' });
             sObjectDescribes[sObjectName] = await connB.sobject(sObjectName).describe();
         }
         return sObjectDescribes[sObjectName];

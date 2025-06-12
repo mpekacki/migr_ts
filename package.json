@@ -1,10 +1,12 @@
 {
   "name": "migr_ts",
   "version": "1.0.0",
-  "main": "index.js",
+  "bin": "main.js",
+  "main": "main.js",
   "scripts": {
+    "build": "npx esbuild main.ts --bundle --outfile=bundle.js --platform=node --packages=external",
     "test": "jest",
-    "start": "ts-node main.ts --config-json config.json"
+    "start": "node bundle.js"
   },
   "keywords": [],
   "author": "",
@@ -13,6 +15,7 @@
   "devDependencies": {
     "@eslint/js": "^9.13.0",
     "@types/jest": "^29.5.13",
+    "esbuild": "0.25.5",
     "eslint": "^9.13.0",
     "globals": "^15.11.0",
     "jest": "^29.7.0",

@@ -19,7 +19,14 @@ afterEach(async () => {
     }
 });
 
+let cachedConn1: Connection | undefined;
+let cachedConn2: Connection | undefined;
+
 async function setupTestConnections() {
+    if (cachedConn1 && cachedConn2) {
+        return { conn1: cachedConn1, conn2: cachedConn2 };
+    }
+
     console.log('logging in to test orgs');
     const allAuths = await AuthInfo.listAllAuthorizations();
 
@@ -45,6 +52,9 @@ async function setupTestConnections() {
     expect(conn1).toBeDefined();
     expect(conn2).toBeDefined();
 
+    cachedConn1 = conn1;
+    cachedConn2 = conn2;
+
     return { conn1, conn2 };
 }
 
@@ -53,7 +63,7 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
     const capturedOutput: IOEvent[] = [];
     let capturedError = '';
 
-    let command = `npx ts-node ./main.ts --config-json ./config_test.json --debug`;
+    let command = `npm start -- --config-json ./config_test.json --debug`;
     if (outputFile) {
         command += ` --output-file ${outputFile}`;
     }
