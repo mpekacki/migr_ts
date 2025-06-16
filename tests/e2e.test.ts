@@ -2133,3 +2133,62 @@ test('malformed id', async () => {
     expect(newCase1).toBeDefined();
     expect(newCase1.Description).toBe('Bad Id: 574300075a6OKB0000');
 });
+
+test('limit level of depth for querying related records', async () => {
+    console.log('starting test: limit level of depth for querying related records');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const HIERARCHY_LEVEL = 4;
+
+    const accounts = [];
+    for (let i = 0; i < HIERARCHY_LEVEL; i++) {
+        const account: any = await conn1.sobject('Account').create({ Name: `Account ${i}`, ParentId: accounts[i - 1]?.id });
+        accounts.push(account);
+    }
+
+    const contact = await conn1.sobject('Contact').create({
+        FirstName: 'John',
+        LastName: 'Doe',
+        AccountId: accounts[0].id
+    });
+    expect(contact.id).toBeDefined();
+
+    const contact2 = await conn1.sobject('Contact').create({
+        FirstName: 'Jane',
+        LastName: 'Doe',
+        AccountId: accounts[1].id
+    });
+    expect(contact2.id).toBeDefined();
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [accounts[HIERARCHY_LEVEL - 1].id!],
+        matchers: defaultMatchers,
+        relationships: {
+            "Account": [
+                {
+                    "name": "Contacts"
+                }
+            ]
+        },
+        relatedRecordDepthLimit: HIERARCHY_LEVEL - 2
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    for (let i = 0; i < HIERARCHY_LEVEL; i++) {
+        expect(parsedOutput).toHaveProperty(accounts[i].id!);
+        const newAccountId = parsedOutput[accounts[i].id!];
+        expect(newAccountId).toBeTruthy();
+        expect(newAccountId).not.toEqual(accounts[i].id);
+    }
+
+    expect(parsedOutput).not.toHaveProperty(contact.id!);
+
+    expect(parsedOutput).toHaveProperty(contact2.id!);
+    const newContact2Id = parsedOutput[contact2.id!];
+    expect(newContact2Id).toBeTruthy();
+    expect(newContact2Id).not.toEqual(contact2.id);
+});
