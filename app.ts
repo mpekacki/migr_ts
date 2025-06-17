@@ -16,6 +16,7 @@ interface Options {
     targetOrgUrl: string;
     targetOrgToken: string;
     recordIds: string[];
+    relatedRecordDepthLimit: number;
     matchers: {
         sObjectType: string;
         fieldMappings: {
@@ -200,7 +201,6 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     
     for (const recordId of Object.keys(history)) {
         old2new[recordId] = history[recordId];
-        recordIdsToFetch = recordIdsToFetch.filter(id => id !== recordId);
     }
 
     while (recordIdsToFetch.length > 0) {

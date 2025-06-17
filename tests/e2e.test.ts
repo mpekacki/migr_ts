@@ -2192,3 +2192,61 @@ test('limit level of depth for querying related records', async () => {
     expect(newContact2Id).toBeTruthy();
     expect(newContact2Id).not.toEqual(contact2.id);
 });
+
+test('fetch related record for a record that is in history', async () => {
+    console.log('starting test: fetch related record for a record that is in history');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    expect(account.id).toBeDefined();
+    
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [account.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    expect(parsedOutput).toHaveProperty(account.id!);
+    const newAccountId = parsedOutput[account.id!];
+    expect(newAccountId).toBeTruthy();
+    expect(newAccountId).not.toEqual(account.id);
+
+    // create contact
+    const contact = await conn1.sobject('Contact').create({
+        FirstName: 'John',
+        LastName: 'Doe',
+        AccountId: account.id
+    });
+    expect(contact.id).toBeDefined();
+
+    // run migration with added relationship for Account
+    const config2 = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: [account.id!],
+        matchers: defaultMatchers,
+        relationships: {
+            "Account": [
+                {
+                    "name": "Contacts"
+                }
+            ]
+        }
+    };
+    
+    const { parsedOutput: parsedOutput2 } = await runMigration(config2);
+
+    expect(parsedOutput2).toHaveProperty(account.id!);
+    const newAccountId2 = parsedOutput2[account.id!];
+    expect(newAccountId2).toBeTruthy();
+    expect(newAccountId2).not.toEqual(account.id);
+
+    expect(parsedOutput2).toHaveProperty(contact.id!);
+    const newContactId2 = parsedOutput2[contact.id!];
+    expect(newContactId2).toBeTruthy();
+    expect(newContactId2).not.toEqual(contact.id);
+});
