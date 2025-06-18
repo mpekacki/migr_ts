@@ -2173,7 +2173,7 @@ test('limit level of depth for querying related records', async () => {
                 }
             ]
         },
-        relatedRecordDepthLimit: HIERARCHY_LEVEL - 2
+        relatedRecordDepthLimit: HIERARCHY_LEVEL
     };
 
     const { parsedOutput } = await runMigration(config);

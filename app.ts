@@ -203,7 +203,10 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         old2new[recordId] = history[recordId];
     }
 
+    let depth = 0;
     while (recordIdsToFetch.length > 0) {
+        console.log('depth', depth);
+        depth++;
         output({ category: 'output', message: `records so far: ${Object.keys(recordsByIds).length}`, type: 'info' });
         // Create parallel fetch promises for all records
         const fetchPromises = recordIdsToFetch.map(async (recordId) => {
@@ -261,7 +264,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 }
             }
             const relationships = options.relationships?.[sObjectName];
-            if (relationships) {
+            if (relationships && (!options.relatedRecordDepthLimit || depth < options.relatedRecordDepthLimit)) {
                 const selector = connA.sobject(sObjectName).select('Id');
                 for (const relationship of relationships) {
                     selector.include(relationship.name).select('Id').end();
