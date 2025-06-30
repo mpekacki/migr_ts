@@ -134,6 +134,7 @@ const USER_INPUTS = {
     addSolver: 'a',
     skip: 's',
 };
+const CHUNKING_OBJECTS = ['User', 'UserRole', 'PermissionSetAssignment', 'BusinessHours'];
 
 async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>) {
     const output = (event: IOEvent) => {
@@ -143,7 +144,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         return onInput(new IOEvent(question.category, question.message, question.type, question.data));
     };
 
-    const chunking = new Chunks(['User', 'UserRole', 'PermissionSetAssignment', 'BusinessHours'], 200, 10);
+    const chunking = new Chunks(CHUNKING_OBJECTS, 200, 10);
 
     output({ category: 'output', message: `starting migration: ${JSON.stringify(options)}`, type: 'info' });
 
