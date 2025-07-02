@@ -69,53 +69,35 @@ interface AppendRandomSolver extends Solver {
 
 async function getConnections(options: Options): Promise<[Connection<Schema>, Connection<Schema>]> {
     const allAuths = await AuthInfo.listAllAuthorizations();
-    // Create source connection
-    let authInfoA: AuthInfo;
-    if (options.sourceOrg) {
-        // Use alias authentication for source
-        const getOrgUsername = (orgAlias: string) => allAuths.find(auth => auth.aliases?.includes(orgAlias))?.username;
-        const orgAUsername = getOrgUsername(options.sourceOrg);
-        if (!orgAUsername) {
-            throw new Error(`Unable to find username for source org alias: ${options.sourceOrg}`);
-        }
-        authInfoA = await AuthInfo.create({ username: orgAUsername });
-    } else if (options.sourceOrgUrl && options.sourceOrgToken) {
-        // Use token authentication for source
-        authInfoA = await AuthInfo.create({
-            username: options.sourceOrgToken,
-            accessTokenOptions: {
-                instanceUrl: options.sourceOrgUrl,
-                serverUrl: options.sourceOrgUrl,
-                sessionId: options.sourceOrgToken
+    
+    const createAuthInfo = async (orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined, orgType: 'source' | 'target'): Promise<AuthInfo> => {
+        if (orgAlias) {
+            // Use alias authentication
+            const getOrgUsername = (alias: string) => allAuths.find(auth => auth.aliases?.includes(alias))?.username;
+            const username = getOrgUsername(orgAlias);
+            if (!username) {
+                throw new Error(`Unable to find username for ${orgType} org alias: ${orgAlias}`);
             }
-        });
-    } else {
-        throw new Error('Source org authentication missing: provide either sourceOrg alias or sourceOrgUrl + sourceOrgToken');
-    }
+            return await AuthInfo.create({ username });
+        } else if (orgUrl && orgToken) {
+            // Use token authentication
+            return await AuthInfo.create({
+                username: orgToken,
+                accessTokenOptions: {
+                    instanceUrl: orgUrl,
+                    serverUrl: orgUrl,
+                    sessionId: orgToken
+                }
+            });
+        } else {
+            throw new Error(`${orgType.charAt(0).toUpperCase() + orgType.slice(1)} org authentication missing: provide either ${orgType}Org alias or ${orgType}OrgUrl + ${orgType}OrgToken`);
+        }
+    };
 
-    // Create target connection
-    let authInfoB: AuthInfo;
-    if (options.targetOrg) {
-        // Use alias authentication for target
-        const getOrgUsername = (orgAlias: string) => allAuths.find(auth => auth.aliases?.includes(orgAlias))?.username;
-        const orgBUsername = getOrgUsername(options.targetOrg);
-        if (!orgBUsername) {
-            throw new Error(`Unable to find username for target org alias: ${options.targetOrg}`);
-        }
-        authInfoB = await AuthInfo.create({ username: orgBUsername });
-    } else if (options.targetOrgUrl && options.targetOrgToken) {
-        // Use token authentication for target
-        authInfoB = await AuthInfo.create({
-            username: options.targetOrgToken,
-            accessTokenOptions: {
-                instanceUrl: options.targetOrgUrl,
-                serverUrl: options.targetOrgUrl,
-                sessionId: options.targetOrgToken
-            }
-        });
-    } else {
-        throw new Error('Target org authentication missing: provide either targetOrg alias or targetOrgUrl + targetOrgToken');
-    }
+    const [authInfoA, authInfoB] = await Promise.all([
+        createAuthInfo(options.sourceOrg, options.sourceOrgUrl, options.sourceOrgToken, 'source'),
+        createAuthInfo(options.targetOrg, options.targetOrgUrl, options.targetOrgToken, 'target')
+    ]);
 
     // Create and return connections
     return await Promise.all([
