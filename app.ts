@@ -6,6 +6,7 @@ import path from 'path';
 import { scanForCircularDependency } from './circular';
 import Chunks from './chunks';
 import IOEvent from './ioevent';
+import IO from './io';
 console.log('importing dependencies done');
 
 interface Options {
@@ -119,16 +120,10 @@ const USER_INPUTS = {
 const CHUNKING_OBJECTS = ['User', 'UserRole', 'PermissionSetAssignment', 'BusinessHours'];
 
 async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>) {
-    const output = (event: IOEvent) => {
-        onOutput(new IOEvent(event.category, event.message, event.type, event.data));
-    };
-    const input = (question: IOEvent) => {
-        return onInput(new IOEvent(question.category, question.message, question.type, question.data));
-    };
-
+    const io = new IO(onOutput, onInput);
     const chunking = new Chunks(CHUNKING_OBJECTS, 200, 10);
 
-    output({ category: 'output', message: `starting migration: ${JSON.stringify(options)}`, type: 'info' });
+    io.startingMigration(options);
 
     const [connA, connB] = await getConnections(options);
 
@@ -143,7 +138,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const sObjectDescribes: Record<string, DescribeSObjectResult> = {};
     const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
         if (!(sObjectName in sObjectDescribes)) {
-            output({ category: 'output', message: `describing SObject ${sObjectName}`, type: 'info' });
+            io.describeSObject(sObjectName);
             sObjectDescribes[sObjectName] = await connB.sobject(sObjectName).describe();
         }
         return sObjectDescribes[sObjectName];
@@ -158,7 +153,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     };
 
     // check if all matchers are valid
-    output({ category: 'output', message: `checking matchers`, type: 'info' });
+    io.checkingMatchers();
     for (const matcher of options.matchers) {
         const sobjectDescribe = await getSObjectDescribe(matcher.sObjectType);
         for (const fieldMapping of matcher.fieldMappings) {
@@ -190,25 +185,25 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     while (recordIdsToFetch.length > 0) {
         console.log('depth', depth);
         depth++;
-        output({ category: 'output', message: `records so far: ${Object.keys(recordsByIds).length}`, type: 'info' });
+        io.recordsSoFar(Object.keys(recordsByIds).length);
         // Create parallel fetch promises for all records
         const fetchPromises = recordIdsToFetch.map(async (recordId) => {
             const sObjectName = await getSObjectType(recordId);
             const sobjectDescribe = await getSObjectDescribe(sObjectName);
-            output({ category: 'output', message: `fetching record ${recordId} of type ${sObjectName}`, type: 'info' });
+            io.fetchingRecord(recordId, sObjectName);
             let recordFields;
             try {
                 recordFields = await connA.sobject(sObjectName).retrieve(recordId);
             } catch (error) {
                 if (error.errorCode === 'NOT_FOUND' || error.message?.includes('resource does not exist')) {
-                    output({ category: 'output', message: `record ${recordId} of type ${sObjectName} does not exist in the source org`, type: 'info' });
+                    io.recordNotFound(recordId, sObjectName);
                     return [];
                 } else if (error.errorCode === 'INVALID_TYPE_FOR_OPERATION') {
-                    output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not queryable`, type: 'info' });
+                    io.recordNotQueryable(recordId, sObjectName);
                     old2new[recordId] = '';
                     return [];
                 } else if (error.errorCode === 'MALFORMED_ID') {
-                    output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is malformed`, type: 'info' });
+                    io.malformedId(recordId, sObjectName);
                     old2new[recordId] = recordId;
                     return [];
                 } else {
@@ -253,12 +248,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                     selector.include(relationship.name).select('Id').end();
                 }
                 selector.where(`Id = '${recordId}'`);
-                output({ category: 'output', message: `querying for related records: ${await selector.toSOQL()}`, type: 'info' });
+                io.queryingForRelatedRecords(await selector.toSOQL());
                 const relsResults = await selector.execute();
                 const recordRelationships = relsResults[0];
                 for (const relationship of relationships) {
                     const relatedRecords = recordRelationships![relationship.name]?.records;
-                    output({ category: 'output', message: `related records of ${relationship.name}: ${relatedRecords?.length}`, type: 'info' });
+                    io.relatedRecords(relationship.name, relatedRecords?.length);
                     if (relatedRecords) {
                         for (const relatedRecord of relatedRecords) {
                             if (!(relatedRecord.Id in recordsByIds) && !newIds.includes(relatedRecord.Id!)) {
@@ -288,7 +283,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         }
     }
 
-    output({ category: 'output', message: `fetched ${Object.keys(recordsByIds).length} records`, type: 'info' });
+    io.fetchedRecords(Object.keys(recordsByIds).length);
     // build map of record counts by sobject type
     const recordCountsBySObjectType: Record<string, number> = {};
     for (const record of Object.values(recordsByIds)) {
@@ -299,10 +294,9 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
 
     // ask for confirmation
-    const confirmation = await input({ category: 'input', message: 'Do you want to continue? (y/n)', type: 'confirm_migration', data: JSON.stringify(recordCountsBySObjectType) });
-    output({ category: 'output', message: `confirmation: ${confirmation}`, type: 'info' });
+    const confirmation = await io.askForConfirmation(recordCountsBySObjectType);
     if (confirmation !== 'y') {
-        output({ category: 'output', message: 'Aborted', type: 'info' });
+        io.aborted();
         return;
     }
 
@@ -312,7 +306,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             ...old2new,
             errors
         };
-        output({ category: 'output', message: 'Finished', data: JSON.stringify(outputData), type: 'info' });
+        io.finished(JSON.stringify(outputData));
     }
 
     const toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
@@ -331,7 +325,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
     
     while (Object.keys(recordsByIds).length > 0) {
-        output({ category: 'output', message: `remaining records: ${Object.keys(recordsByIds).length}`, type: 'info' });
+        io.remainingRecords(Object.keys(recordsByIds).length);
         let anyRecordProcessed = false;
         const toInsert: Record<string, SObjectRecord<Schema, string>> = {};
         for (const recordId of Object.keys(recordsByIds)) {
@@ -353,7 +347,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 recordReady = false;
                                 // output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not ready because lookup field ${field} (${match}) is not migrated`, type: 'info' });
                             } else if (match in old2new) {
-                                output({ category: 'output', message: `mapping ${field} to ${match} for record ${recordId} of type ${sObjectName} - new value: ${old2new[match]}`, type: 'info' });
+                                io.mapping(field, match, sObjectName, old2new[match]);
                                 record[field] = record[field].replace(match, old2new[match]);
                                 if (record[field] === '') {
                                     delete record[field];
@@ -378,13 +372,13 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         }
                     }
                     const selector = connB.sobject(sObjectName).find(conditions).select('Id');
-                    output({ category: 'output', message: `querying for existing record: ${await selector.toSOQL()}`, type: 'info' });
+                    io.queryingForExistingRecord(await selector.toSOQL());
                     const migratedRecord = await selector.execute();
                     if (migratedRecord.length > 0) {
                         migratedRecordId = migratedRecord[0].Id!;
-                        output({ category: 'output', message: `found existing record ${migratedRecordId} of type ${sObjectName}`, type: 'info' });
+                        io.foundExistingRecord(migratedRecordId, sObjectName);
                     } else if (matcher.whenMissing === 'skip') {
-                        output({ category: 'output', message: `skipping record ${recordId} of type ${sObjectName} because no existing record was found`, type: 'info' });
+                        io.skippingRecord(recordId, sObjectName);
                         skipRecord = true;
                     }
                 }
@@ -394,7 +388,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         attributes: record.attributes,
                             ...record
                         } as SObjectRecord<Schema, string>;
-                    output({ category: 'output', message: `creating record ${recordId} of type ${sObjectName} with fields ${JSON.stringify(record)}`, type: 'info' });
+                    io.creatingRecord(recordId, sObjectName, record);
                 } else {
                     setNewRecordId(recordId, migratedRecordId!);
                 }
@@ -404,7 +398,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             const chunks: Record<string, SObjectRecord<Schema, string>>[] = chunking.getChunks(toInsert);
             let retryAll = false;
             for (const chunk of chunks) {
-                output({ category: 'output', message: `saving ${Object.keys(chunk).length} records: ${JSON.stringify(Object.values(chunk))}`, type: 'info' });
+                io.savingRecords(chunk);
                 const savedRecords = (await connB.request({
                 method: 'POST',
                 url: `/services/data/v${connB.version}/composite/sobjects`,
@@ -413,7 +407,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         records: Object.values(chunk)
                     })
                 })) as Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>;
-                output({ category: 'output', message: `saved records: ${JSON.stringify(savedRecords)}`, type: 'info' });
+                io.savedRecords(savedRecords);
                 for (let i = 0; i < savedRecords.length; i++) {
                     const recordId = Object.keys(chunk)[i];
                     const record = recordsByIds[recordId];
@@ -422,7 +416,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                     let migratedRecordId = '';
                     if (savedRecord.success) {
                         migratedRecordId = savedRecord.id!;
-                        output({ category: 'output', message: `created record ${migratedRecordId}`, type: 'info' });
+                        io.createdRecord(migratedRecordId);
                     } else if (!retryRecord) {    
                         const errs = savedRecord.errors
                         for (const e of errs) {
@@ -432,7 +426,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 // get previously used solvers
                                 const usedSolvers = errors[recordId]?.filter(error => error.message === e.message).map(error => error.solver);
                                 if (usedSolvers?.length > 0) {
-                                    output({ category: 'output', message: `skipping previously used solvers: ${JSON.stringify(usedSolvers)}`, type: 'info' });
+                                    io.skippingPreviouslyUsedSolvers(usedSolvers);
                                 }
                                 // find solver that matches the error message
                                 solver = options.solvers.find(solver => new RegExp(solver.message).test(e.message) && !usedSolvers?.includes(solver));
@@ -441,22 +435,22 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                         for (const changeField of solver.changeFields) {
                                             setFieldWithLaterUpdate(recordId, record, changeField.field, changeField.value);
                                         }
-                                        output({ category: 'output', message: `fixing using solver: ${solver.message}`, type: 'info' });
-                                        output({ category: 'output', message: `saved old fields in toUpdateLater: ${JSON.stringify(toUpdateLater[recordId])}`, type: 'info' });
+                                        io.fixingUsingSolver(solver.message);
+                                        io.savedOldFieldsInToUpdateLater(toUpdateLater[recordId]);
                                         errorFixed = true;
                                         retryRecord = true;
                                     } else if (solver.action === 'skip') {
-                                        output({ category: 'output', message: `skipping record ${recordId} using solver: ${solver.message}`, type: 'info' });
+                                        io.skippingRecordUsingSolver(recordId, solver.message);
                                         errorFixed = true;
                                     } else if (solver.action === 'match') {
-                                        output({ category: 'output', message: `matching record ${recordId} using solver: ${solver.message}`, type: 'info' });
+                                        io.matchingRecordUsingSolver(recordId, solver.message);
                                         const matchId = new RegExp(solver.message).exec(e.message)?.[1];
                                         if (matchId) {
                                             migratedRecordId = matchId;
                                             errorFixed = true;
                                         }
                                     } else if (solver.action === 'extract_column') {
-                                        output({ category: 'output', message: `extracting column name from error: ${e.message}`, type: 'info' });
+                                        io.extractingColumnFromError(e.message);
                                         const columnName = new RegExp(solver.message).exec(e.message)?.[1];
                                         if (columnName) {
                                             setFieldWithLaterUpdate(recordId, record, columnName, solver.replaceWith);
@@ -464,7 +458,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             retryRecord = true;
                                         }
                                     } else if (solver.action === 'append_random') {
-                                        output({ category: 'output', message: `appending random to record ${recordId} using solver: ${solver.message}`, type: 'info' });
+                                        io.appendingRandomToRecord(recordId, solver.message);
                                         for (const changeField of solver.changeFields) {
                                             record[changeField.field] = record[changeField.field] + '.' + Math.random().toString(36).substring(2, 2 + changeField.length);
                                         }
@@ -475,20 +469,20 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                             }
                             if (!errorFixed) {
                                 // no solver found, ask user what to do
-                                output({ category: 'output', message: `error: ${JSON.stringify(e)}`, type: 'info' });
+                                io.error(e.message);
                                 let inputOk;
                                 let solverAdded = false;
                                 do {
                                     inputOk = true;
-                                    const userInput = await input({ category: 'input', message: `recordId: ${recordId}, no solver found for error: ${e.message}`, type: 'insert_error' });
+                                    const userInput = await io.askForInput(recordId, e.message);
                                     if (userInput === USER_INPUTS.fix) {
                                         let fieldsToUpdate;
                                         while (!fieldsToUpdate) {
-                                            const fieldsJson = await input({ category: 'input', message: 'Enter the fields to update in JSON format:', type: 'insert_error' });
+                                            const fieldsJson = await io.askForFieldsToUpdate(recordId, e.message);
                                             try {
                                                 fieldsToUpdate = JSON.parse(fieldsJson);
                                             } catch {
-                                                output({ category: 'output', message: `invalid JSON, please try again`, type: 'info' });
+                                                io.invalidJson();
                                             }
                                         }
                                         solver = {
@@ -508,20 +502,20 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                         retryAll = true;
                                         retryRecord = true;
                                     } else if (userInput === USER_INPUTS.match) {
-                                        migratedRecordId = await input({ category: 'input', message: `Enter the ID of the record to match:`, type: 'insert_error' });
+                                        migratedRecordId = await io.askForMatch();
                                     } else if (userInput === USER_INPUTS.saveAndExit) {
                                         saveAndExit();
                                         return;
                                     } else if (userInput === USER_INPUTS.addSolver) {
                                         let newSolver;
                                         while (!newSolver) {
-                                            const solverJson = await input({ category: 'input', message: 'Enter the solver in JSON format:', type: 'insert_error' });
+                                            const solverJson = await io.askForSolver();
                                             try {
                                                 newSolver = JSON.parse(solverJson);
                                                 new RegExp(newSolver.message);
                                             } catch {
                                                 newSolver = null;
-                                                output({ category: 'output', message: `invalid JSON or regex, please try again`, type: 'info' });
+                                                io.invalidJson();
                                             }
                                         }
                                         if (!options.solvers) {
@@ -534,7 +528,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                     } else if (userInput === USER_INPUTS.skip) {
                                         // skip record, don't do anything
                                     } else {
-                                        output({ category: 'output', message: `invalid input: ${userInput}`, type: 'info' });
+                                        io.invalidInput(userInput);
                                         inputOk = false;
                                     }
                                 } while (!inputOk);
@@ -575,10 +569,10 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 ...Object.fromEntries(Object.entries(record)),
                 Id: Object.keys(recordsByIds).find(key => recordsByIds[key] === record)
             }));
-            output({ category: 'output', message: `looking for circular dependencies with ${JSON.stringify(requiredLookupFieldsBySObjectType)} for records ${JSON.stringify(records)}`, type: 'info' });
+            io.lookingForCircularDependencies(requiredLookupFieldsBySObjectType, records);
             const toClear = scanForCircularDependency(records, requiredLookupFieldsBySObjectType);
             if (toClear.length > 0) {
-                output({ category: 'output', message: `found circular dependency: ${JSON.stringify(toClear)}`, type: 'info' });
+                io.foundCircularDependency(toClear);
                 // clear the fields that are causing the circular dependency
                 for (const clear of toClear) {
                     setFieldWithLaterUpdate(clear.recordId, recordsByIds[clear.recordId], clear.field, '');
@@ -607,14 +601,14 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         }
         record.Id = old2new[recordId];
         if (!record.Id) {
-            output({ category: 'output', message: `record ${recordId} has no ID, skipping update`, type: 'info' });
+            io.recordNoId(recordId);
             continue;
         }
-        output({ category: 'output', message: `updating record ${recordId} of type ${record.attributes!.type} to ${JSON.stringify(record)}`, type: 'info' });
+        io.updatingRecord(recordId, record.attributes!.type, record);
         try {
             await connB.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
         } catch (e) {
-            output({ category: 'output', message: `error updating record ${recordId} of type ${record.attributes!.type}: ${e}`, type: 'info' });
+            io.errorUpdatingRecord(recordId, record.attributes!.type, e);
         }
     }
 
