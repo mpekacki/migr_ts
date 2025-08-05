@@ -478,7 +478,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                     if (userInput === USER_INPUTS.fix) {
                                         let fieldsToUpdate;
                                         while (!fieldsToUpdate) {
-                                            const fieldsJson = await io.askForFieldsToUpdate(recordId, e.message);
+                                            const fieldsJson = await io.askForFieldsToUpdate();
                                             try {
                                                 fieldsToUpdate = JSON.parse(fieldsJson);
                                             } catch {

@@ -144,8 +144,8 @@ class IO {
         return await this.onInput({ category: 'input', message: `recordId: ${recordId}, no solver found for error: ${message}`, type: 'insert_error' });
     }
 
-    public async askForFieldsToUpdate(recordId: string, message: string): Promise<string> {
-        return await this.onInput({ category: 'input', message: `recordId: ${recordId}, no solver found for error: ${message}`, type: 'insert_error' });
+    public async askForFieldsToUpdate(): Promise<string> {
+        return await this.onInput({ category: 'input', message: `Enter the fields to update in JSON format:`, type: 'insert_error' });
     }
 
     public invalidJson() {
