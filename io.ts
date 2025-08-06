@@ -141,7 +141,22 @@ class IO {
     }
 
     public async askForInput(recordId: string, message: string): Promise<string> {
-        return await this.onInput({ category: 'input', message: `recordId: ${recordId}, no solver found for error: ${message}`, type: 'insert_error' });
+        this.onOutput({ category: 'output', message: `recordId: ${recordId}, no solver found for error: ${message}`, type: 'info' });
+        const options = [
+            { key: 'f', label: 'Fix' },
+            { key: 'r', label: 'Retry' },
+            { key: 'ra', label: 'Retry All' },
+            { key: 'm', label: 'Match' },
+            { key: 'h', label: 'Save and Exit' },
+            { key: 'a', label: 'Add Solver' },
+            { key: 's', label: 'Skip' }
+        ];
+        const optionsList = options.map(opt => `- ${opt.label} (${opt.key})`).join('\n');
+        return await this.onInput({
+            category: 'input',
+            message: `Please provide input to resolve the error:\nAvailable options:\n${optionsList}:`,
+            type: 'insert_error'
+        });
     }
 
     public async askForFieldsToUpdate(): Promise<string> {
