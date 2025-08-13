@@ -61,7 +61,7 @@ class IO {
     }
 
     public aborted() {
-        this.onOutput({ category: 'output', message: 'Aborted', type: 'info' });
+        this.onOutput({ category: 'output', message: 'aborted', type: 'info' });
     }
 
     public confirmation(confirmation: string) {
@@ -69,7 +69,7 @@ class IO {
     }
 
     public finished(data: string) {
-        this.onOutput({ category: 'output', message: 'Finished', data, type: 'info' });
+        this.onOutput({ category: 'output', message: 'finished', data, type: 'info' });
     }
 
     public remainingRecords(count: number) {
