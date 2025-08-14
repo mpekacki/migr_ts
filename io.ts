@@ -141,7 +141,6 @@ class IO {
     }
 
     public async askForInput(recordId: string, message: string): Promise<string> {
-        this.onOutput({ category: 'output', message: `recordId: ${recordId}, no solver found for error: ${message}`, type: 'info' });
         const options = [
             { key: 'f', label: 'Fix' },
             { key: 'r', label: 'Retry' },
@@ -154,7 +153,7 @@ class IO {
         const optionsList = options.map(opt => `- ${opt.label} (${opt.key})`).join('\n');
         return await this.onInput({
             category: 'input',
-            message: `Please provide input to resolve the error:\nAvailable options:\n${optionsList}:`,
+            message: `recordId: ${recordId}, no solver found for error: ${message}\nPlease provide input to resolve the error:\nAvailable options:\n${optionsList}:`,
             type: 'insert_error'
         });
     }
