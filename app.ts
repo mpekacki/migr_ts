@@ -16,6 +16,7 @@ interface Options {
     sourceOrgToken: string;
     targetOrgUrl: string;
     targetOrgToken: string;
+    targetFile: string;
     recordIds: string[];
     relatedRecordDepthLimit: number;
     matchers: {
@@ -68,7 +69,24 @@ interface AppendRandomSolver extends Solver {
     }[];
 }
 
-async function getConnections(options: Options): Promise<[Connection<Schema>, Connection<Schema>]> {
+const ID_REGEX = /[a-zA-Z0-9]{18}/g;
+const USER_INPUTS = {
+    fix: 'f',
+    retry: 'r',
+    retryAll: 'ra',
+    match: 'm',
+    saveAndExit: 'h',
+    addSolver: 'a',
+    skip: 's',
+};
+const CHUNKING_OBJECTS = ['User', 'UserRole', 'PermissionSetAssignment', 'BusinessHours'];
+
+async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>) {
+    const io = new IO(onOutput, onInput);
+    const chunking = new Chunks(CHUNKING_OBJECTS, 200, 10);
+
+    io.startingMigration(options);
+
     const allAuths = await AuthInfo.listAllAuthorizations();
     
     const createAuthInfo = async (orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined, orgType: 'source' | 'target'): Promise<AuthInfo> => {
@@ -95,37 +113,19 @@ async function getConnections(options: Options): Promise<[Connection<Schema>, Co
         }
     };
 
-    const [authInfoA, authInfoB] = await Promise.all([
-        createAuthInfo(options.sourceOrg, options.sourceOrgUrl, options.sourceOrgToken, 'source'),
-        createAuthInfo(options.targetOrg, options.targetOrgUrl, options.targetOrgToken, 'target')
-    ]);
+    const isMigrateToFile = options.targetFile !== undefined;
+
+    const authInfoPromises = [createAuthInfo(options.sourceOrg, options.sourceOrgUrl, options.sourceOrgToken, 'source')];
+    if (!isMigrateToFile) {
+        authInfoPromises.push(createAuthInfo(options.targetOrg, options.targetOrgUrl, options.targetOrgToken, 'target'));
+    }
+    const authInfos = await Promise.all(authInfoPromises);
 
     // Create and return connections
-    return await Promise.all([
-        Connection.create({ authInfo: authInfoA }),
-        Connection.create({ authInfo: authInfoB })
-    ]);
-}
-
-const ID_REGEX = /[a-zA-Z0-9]{18}/g;
-const USER_INPUTS = {
-    fix: 'f',
-    retry: 'r',
-    retryAll: 'ra',
-    match: 'm',
-    saveAndExit: 'h',
-    addSolver: 'a',
-    skip: 's',
-};
-const CHUNKING_OBJECTS = ['User', 'UserRole', 'PermissionSetAssignment', 'BusinessHours'];
-
-async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>) {
-    const io = new IO(onOutput, onInput);
-    const chunking = new Chunks(CHUNKING_OBJECTS, 200, 10);
-
-    io.startingMigration(options);
-
-    const [connA, connB] = await getConnections(options);
+    const connPromises = authInfos.map(authInfo => Connection.create({ authInfo }));
+    const conns = await Promise.all(connPromises);
+    const connA = conns[0];
+    const connB = isMigrateToFile ? connA : conns[1];
 
     // check if history file exists for target org
     const historyFilePath = path.join(process.cwd(), `${options.targetOrg}__history.json`);
@@ -324,295 +324,310 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         }
     }
     
-    while (Object.keys(recordsByIds).length > 0) {
-        io.remainingRecords(Object.keys(recordsByIds).length);
-        let anyRecordProcessed = false;
-        const toInsert: Record<string, SObjectRecord<Schema, string>> = {};
-        for (const recordId of Object.keys(recordsByIds)) {
-            const record = recordsByIds[recordId];
-            const sObjectName = await getSObjectType(recordId);
-            let recordReady = true;
-            for (const field of Object.keys(record)) {
-                if (record[field]) {
-                    const matches = String(record[field])?.match(ID_REGEX);
-                    if (matches) {
-                        for (const match of matches) {
-                            try {
-                                await getSObjectType(match);
-                            } catch {
-                                // do nothing, it was some random string
-                                continue;
-                            }
-                            if (!(match in old2new) && match in recordsByIds && match !== recordId) {
-                                recordReady = false;
-                                // output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not ready because lookup field ${field} (${match}) is not migrated`, type: 'info' });
-                            } else if (match in old2new) {
-                                io.mapping(field, match, recordId, sObjectName, old2new[match]);
-                                record[field] = record[field].replace(match, old2new[match]);
-                                if (record[field] === '') {
-                                    delete record[field];
+    if (!isMigrateToFile) {
+        while (Object.keys(recordsByIds).length > 0) {
+            io.remainingRecords(Object.keys(recordsByIds).length);
+            let anyRecordProcessed = false;
+            const toInsert: Record<string, SObjectRecord<Schema, string>> = {};
+            for (const recordId of Object.keys(recordsByIds)) {
+                const record = recordsByIds[recordId];
+                const sObjectName = await getSObjectType(recordId);
+                let recordReady = true;
+                for (const field of Object.keys(record)) {
+                    if (record[field]) {
+                        const matches = String(record[field])?.match(ID_REGEX);
+                        if (matches) {
+                            for (const match of matches) {
+                                try {
+                                    await getSObjectType(match);
+                                } catch {
+                                    // do nothing, it was some random string
+                                    continue;
+                                }
+                                if (!(match in old2new) && match in recordsByIds && match !== recordId) {
+                                    recordReady = false;
+                                    // output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not ready because lookup field ${field} (${match}) is not migrated`, type: 'info' });
+                                } else if (match in old2new) {
+                                    io.mapping(field, match, recordId, sObjectName, old2new[match]);
+                                    record[field] = record[field].replace(match, old2new[match]);
+                                    if (record[field] === '') {
+                                        delete record[field];
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            if (recordReady) {
-                anyRecordProcessed = true;
-                // output({ category: 'output', message: `anyRecordProcessed true for record ${recordId} of type ${sObjectName} because record is ready`, type: 'info' });
-                let migratedRecordId = '';
-                let skipRecord = false;
-                const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
-                if (matcher) {
-                    const conditions: Record<string, string> = {};
-                    for (const fieldMapping of matcher.fieldMappings) {
-                        conditions[fieldMapping.targetField] = fetchedRecordsByIds[recordId][fieldMapping.sourceField];
-                        if (conditions[fieldMapping.targetField] in old2new) {
-                            conditions[fieldMapping.targetField] = old2new[conditions[fieldMapping.targetField]];
-                        }
-                    }
-                    const selector = connB.sobject(sObjectName).find(conditions).select('Id');
-                    io.queryingForExistingRecord(await selector.toSOQL());
-                    const migratedRecord = await selector.execute();
-                    if (migratedRecord.length > 0) {
-                        migratedRecordId = migratedRecord[0].Id!;
-                        io.foundExistingRecord(migratedRecordId, sObjectName);
-                    } else if (matcher.whenMissing === 'skip') {
-                        io.skippingRecord(recordId, sObjectName);
-                        skipRecord = true;
-                    }
-                }
-                const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
-                if (!migratedRecordId && !skipRecord && isObjectCreatable) {
-                    toInsert[recordId] = {
-                        attributes: record.attributes,
-                            ...record
-                        } as SObjectRecord<Schema, string>;
-                    io.creatingRecord(recordId, sObjectName, record);
-                } else {
-                    setNewRecordId(recordId, migratedRecordId!);
-                }
-            }
-        }
-        if (Object.keys(toInsert).length > 0) {
-            const chunks: Record<string, SObjectRecord<Schema, string>>[] = chunking.getChunks(toInsert);
-            let retryAll = false;
-            for (const chunk of chunks) {
-                io.savingRecords(chunk);
-                const savedRecords = (await connB.request({
-                method: 'POST',
-                url: `/services/data/v${connB.version}/composite/sobjects`,
-                body: JSON.stringify({
-                        allOrNone: false,
-                        records: Object.values(chunk)
-                    })
-                })) as Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>;
-                io.savedRecords(savedRecords);
-                for (let i = 0; i < savedRecords.length; i++) {
-                    const recordId = Object.keys(chunk)[i];
-                    const record = recordsByIds[recordId];
-                    const savedRecord = savedRecords[i];
-                    let retryRecord = retryAll;
+                if (recordReady) {
+                    anyRecordProcessed = true;
+                    // output({ category: 'output', message: `anyRecordProcessed true for record ${recordId} of type ${sObjectName} because record is ready`, type: 'info' });
                     let migratedRecordId = '';
-                    if (savedRecord.success) {
-                        migratedRecordId = savedRecord.id!;
-                        io.createdRecord(migratedRecordId);
-                    } else if (!retryRecord) {    
-                        const errs = savedRecord.errors
-                        for (const e of errs) {
-                            let errorFixed = false;
-                            let solver: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver) | undefined;
-                            if (options.solvers) {
-                                // get previously used solvers
-                                const usedSolvers = errors[recordId]?.filter(error => error.message === e.message).map(error => error.solver);
-                                if (usedSolvers?.length > 0) {
-                                    io.skippingPreviouslyUsedSolvers(usedSolvers);
-                                }
-                                // find solver that matches the error message
-                                solver = options.solvers.find(solver => new RegExp(solver.message).test(e.message) && !usedSolvers?.includes(solver));
-                                if (solver) {
-                                    if (solver.action === 'fix') {
-                                        for (const changeField of solver.changeFields) {
-                                            setFieldWithLaterUpdate(recordId, record, changeField.field, changeField.value);
-                                        }
-                                        io.fixingUsingSolver(solver.message);
-                                        io.savedOldFieldsInToUpdateLater(toUpdateLater[recordId]);
-                                        errorFixed = true;
-                                        retryRecord = true;
-                                    } else if (solver.action === 'skip') {
-                                        io.skippingRecordUsingSolver(recordId, solver.message);
-                                        errorFixed = true;
-                                    } else if (solver.action === 'match') {
-                                        io.matchingRecordUsingSolver(recordId, solver.message);
-                                        const matchId = new RegExp(solver.message).exec(e.message)?.[1];
-                                        if (matchId) {
-                                            migratedRecordId = matchId;
+                    let skipRecord = false;
+                    const matcher = options.matchers.find(matcher => matcher.sObjectType === sObjectName);
+                    if (matcher) {
+                        const conditions: Record<string, string> = {};
+                        for (const fieldMapping of matcher.fieldMappings) {
+                            conditions[fieldMapping.targetField] = fetchedRecordsByIds[recordId][fieldMapping.sourceField];
+                            if (conditions[fieldMapping.targetField] in old2new) {
+                                conditions[fieldMapping.targetField] = old2new[conditions[fieldMapping.targetField]];
+                            }
+                        }
+                        const selector = connB.sobject(sObjectName).find(conditions).select('Id');
+                        io.queryingForExistingRecord(await selector.toSOQL());
+                        const migratedRecord = await selector.execute();
+                        if (migratedRecord.length > 0) {
+                            migratedRecordId = migratedRecord[0].Id!;
+                            io.foundExistingRecord(migratedRecordId, sObjectName);
+                        } else if (matcher.whenMissing === 'skip') {
+                            io.skippingRecord(recordId, sObjectName);
+                            skipRecord = true;
+                        }
+                    }
+                    const isObjectCreatable = (await getSObjectDescribe(sObjectName)).createable;
+                    if (!migratedRecordId && !skipRecord && isObjectCreatable) {
+                        toInsert[recordId] = {
+                            attributes: record.attributes,
+                                ...record
+                            } as SObjectRecord<Schema, string>;
+                        io.creatingRecord(recordId, sObjectName, record);
+                    } else {
+                        setNewRecordId(recordId, migratedRecordId!);
+                    }
+                }
+            }
+            if (Object.keys(toInsert).length > 0) {
+                const chunks: Record<string, SObjectRecord<Schema, string>>[] = chunking.getChunks(toInsert);
+                let retryAll = false;
+                for (const chunk of chunks) {
+                    io.savingRecords(chunk);
+                    const savedRecords = (await connB.request({
+                    method: 'POST',
+                    url: `/services/data/v${connB.version}/composite/sobjects`,
+                    body: JSON.stringify({
+                            allOrNone: false,
+                            records: Object.values(chunk)
+                        })
+                    })) as Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>;
+                    io.savedRecords(savedRecords);
+                    for (let i = 0; i < savedRecords.length; i++) {
+                        const recordId = Object.keys(chunk)[i];
+                        const record = recordsByIds[recordId];
+                        const savedRecord = savedRecords[i];
+                        let retryRecord = retryAll;
+                        let migratedRecordId = '';
+                        if (savedRecord.success) {
+                            migratedRecordId = savedRecord.id!;
+                            io.createdRecord(migratedRecordId);
+                        } else if (!retryRecord) {    
+                            const errs = savedRecord.errors
+                            for (const e of errs) {
+                                let errorFixed = false;
+                                let solver: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver) | undefined;
+                                if (options.solvers) {
+                                    // get previously used solvers
+                                    const usedSolvers = errors[recordId]?.filter(error => error.message === e.message).map(error => error.solver);
+                                    if (usedSolvers?.length > 0) {
+                                        io.skippingPreviouslyUsedSolvers(usedSolvers);
+                                    }
+                                    // find solver that matches the error message
+                                    solver = options.solvers.find(solver => new RegExp(solver.message).test(e.message) && !usedSolvers?.includes(solver));
+                                    if (solver) {
+                                        if (solver.action === 'fix') {
+                                            for (const changeField of solver.changeFields) {
+                                                setFieldWithLaterUpdate(recordId, record, changeField.field, changeField.value);
+                                            }
+                                            io.fixingUsingSolver(solver.message);
+                                            io.savedOldFieldsInToUpdateLater(toUpdateLater[recordId]);
                                             errorFixed = true;
-                                        }
-                                    } else if (solver.action === 'extract_column') {
-                                        io.extractingColumnFromError(e.message);
-                                        const columnName = new RegExp(solver.message).exec(e.message)?.[1];
-                                        if (columnName) {
-                                            setFieldWithLaterUpdate(recordId, record, columnName, solver.replaceWith);
+                                            retryRecord = true;
+                                        } else if (solver.action === 'skip') {
+                                            io.skippingRecordUsingSolver(recordId, solver.message);
+                                            errorFixed = true;
+                                        } else if (solver.action === 'match') {
+                                            io.matchingRecordUsingSolver(recordId, solver.message);
+                                            const matchId = new RegExp(solver.message).exec(e.message)?.[1];
+                                            if (matchId) {
+                                                migratedRecordId = matchId;
+                                                errorFixed = true;
+                                            }
+                                        } else if (solver.action === 'extract_column') {
+                                            io.extractingColumnFromError(e.message);
+                                            const columnName = new RegExp(solver.message).exec(e.message)?.[1];
+                                            if (columnName) {
+                                                setFieldWithLaterUpdate(recordId, record, columnName, solver.replaceWith);
+                                                errorFixed = true;
+                                                retryRecord = true;
+                                            }
+                                        } else if (solver.action === 'append_random') {
+                                            io.appendingRandomToRecord(recordId, solver.message);
+                                            for (const changeField of solver.changeFields) {
+                                                record[changeField.field] = record[changeField.field] + '.' + Math.random().toString(36).substring(2, 2 + changeField.length);
+                                            }
                                             errorFixed = true;
                                             retryRecord = true;
                                         }
-                                    } else if (solver.action === 'append_random') {
-                                        io.appendingRandomToRecord(recordId, solver.message);
-                                        for (const changeField of solver.changeFields) {
-                                            record[changeField.field] = record[changeField.field] + '.' + Math.random().toString(36).substring(2, 2 + changeField.length);
-                                        }
-                                        errorFixed = true;
-                                        retryRecord = true;
                                     }
                                 }
-                            }
-                            if (!errorFixed) {
-                                // no solver found, ask user what to do
-                                io.error(e.message);
-                                let inputOk;
-                                let solverAdded = false;
-                                do {
-                                    inputOk = true;
-                                    const userInput = await io.askForInput(recordId, e.message);
-                                    if (userInput === USER_INPUTS.fix) {
-                                        let fieldsToUpdate;
-                                        while (!fieldsToUpdate) {
-                                            const fieldsJson = await io.askForFieldsToUpdate();
-                                            try {
-                                                fieldsToUpdate = JSON.parse(fieldsJson);
-                                            } catch {
-                                                io.invalidJson();
+                                if (!errorFixed) {
+                                    // no solver found, ask user what to do
+                                    io.error(e.message);
+                                    let inputOk;
+                                    let solverAdded = false;
+                                    do {
+                                        inputOk = true;
+                                        const userInput = await io.askForInput(recordId, e.message);
+                                        if (userInput === USER_INPUTS.fix) {
+                                            let fieldsToUpdate;
+                                            while (!fieldsToUpdate) {
+                                                const fieldsJson = await io.askForFieldsToUpdate();
+                                                try {
+                                                    fieldsToUpdate = JSON.parse(fieldsJson);
+                                                } catch {
+                                                    io.invalidJson();
+                                                }
                                             }
-                                        }
-                                        solver = {
-                                            action: 'fix',
-                                            message: e.message,
-                                            changeFields: []
-                                        }
-                                        for (const field of Object.keys(fieldsToUpdate)) {
-                                            setFieldWithLaterUpdate(recordId, record, field, fieldsToUpdate[field]);
-                                            solver.changeFields.push({ field, value: fieldsToUpdate[field] });
-                                        }
-                                        retryRecord = true;
-                                        errorFixed = true;
-                                    } else if (userInput === USER_INPUTS.retry) {
-                                        retryRecord = true;
-                                    } else if (userInput === USER_INPUTS.retryAll) {
-                                        retryAll = true;
-                                        retryRecord = true;
-                                    } else if (userInput === USER_INPUTS.match) {
-                                        migratedRecordId = await io.askForMatch();
-                                    } else if (userInput === USER_INPUTS.saveAndExit) {
-                                        saveAndExit();
-                                        return;
-                                    } else if (userInput === USER_INPUTS.addSolver) {
-                                        let newSolver;
-                                        while (!newSolver) {
-                                            const solverJson = await io.askForSolver();
-                                            try {
-                                                newSolver = JSON.parse(solverJson);
-                                                new RegExp(newSolver.message);
-                                            } catch {
-                                                newSolver = null;
-                                                io.invalidJson();
+                                            solver = {
+                                                action: 'fix',
+                                                message: e.message,
+                                                changeFields: []
                                             }
+                                            for (const field of Object.keys(fieldsToUpdate)) {
+                                                setFieldWithLaterUpdate(recordId, record, field, fieldsToUpdate[field]);
+                                                solver.changeFields.push({ field, value: fieldsToUpdate[field] });
+                                            }
+                                            retryRecord = true;
+                                            errorFixed = true;
+                                        } else if (userInput === USER_INPUTS.retry) {
+                                            retryRecord = true;
+                                        } else if (userInput === USER_INPUTS.retryAll) {
+                                            retryAll = true;
+                                            retryRecord = true;
+                                        } else if (userInput === USER_INPUTS.match) {
+                                            migratedRecordId = await io.askForMatch();
+                                        } else if (userInput === USER_INPUTS.saveAndExit) {
+                                            saveAndExit();
+                                            return;
+                                        } else if (userInput === USER_INPUTS.addSolver) {
+                                            let newSolver;
+                                            while (!newSolver) {
+                                                const solverJson = await io.askForSolver();
+                                                try {
+                                                    newSolver = JSON.parse(solverJson);
+                                                    new RegExp(newSolver.message);
+                                                } catch {
+                                                    newSolver = null;
+                                                    io.invalidJson();
+                                                }
+                                            }
+                                            if (!options.solvers) {
+                                                options.solvers = [];
+                                            }
+                                            options.solvers.push(newSolver);
+                                            anyRecordProcessed = true;
+                                            solverAdded = true;
+                                            retryRecord = true;
+                                        } else if (userInput === USER_INPUTS.skip) {
+                                            // skip record, don't do anything
+                                        } else {
+                                            io.invalidInput(userInput);
+                                            inputOk = false;
                                         }
-                                        if (!options.solvers) {
-                                            options.solvers = [];
-                                        }
-                                        options.solvers.push(newSolver);
-                                        anyRecordProcessed = true;
-                                        solverAdded = true;
-                                        retryRecord = true;
-                                    } else if (userInput === USER_INPUTS.skip) {
-                                        // skip record, don't do anything
-                                    } else {
-                                        io.invalidInput(userInput);
-                                        inputOk = false;
+                                    } while (!inputOk);
+                                    if (solverAdded) {
+                                        break;
                                     }
-                                } while (!inputOk);
-                                if (solverAdded) {
-                                    break;
                                 }
-                            }
-                            if (!solver?.hideError) {
-                                if (!(recordId in errors)) {
-                                    errors[recordId] = [];
+                                if (!solver?.hideError) {
+                                    if (!(recordId in errors)) {
+                                        errors[recordId] = [];
+                                    }
+                                    errors[recordId].push({ message: e.message, fixed: errorFixed, solver });
                                 }
-                                errors[recordId].push({ message: e.message, fixed: errorFixed, solver });
                             }
                         }
+                        if (retryRecord) {
+                            continue;
+                        }
+                        setNewRecordId(recordId, migratedRecordId!);
                     }
-                    if (retryRecord) {
-                        continue;
+                }
+            }
+            if (!anyRecordProcessed) {
+                // build lookupFieldsBySObjectType from object describes
+                const requiredLookupFieldsBySObjectType: Record<string, string[]> = {};
+                const allLookupFieldsBySObjectType: Record<string, string[]> = {};
+                const uniqueSObjectTypes = [...new Set(Object.values(recordsByIds).map(record => record.attributes!.type))];
+                for (const sObjectName of uniqueSObjectTypes) {
+                    requiredLookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
+                        .filter(field => field.type === 'reference' && !field.nillable && field.createable)
+                        .map(field => field.name);
+                    allLookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
+                        .filter(field => field.type === 'reference' && field.createable)
+                        .map(field => field.name);
+                }
+                const records = Object.values(recordsByIds).map(record => ({
+                    attributes: record.attributes,
+                    ...Object.fromEntries(Object.entries(record)),
+                    Id: Object.keys(recordsByIds).find(key => recordsByIds[key] === record)
+                }));
+                io.lookingForCircularDependencies(requiredLookupFieldsBySObjectType, records);
+                const toClear = scanForCircularDependency(records, requiredLookupFieldsBySObjectType);
+                if (toClear.length > 0) {
+                    io.foundCircularDependency(toClear);
+                    // clear the fields that are causing the circular dependency
+                    for (const clear of toClear) {
+                        setFieldWithLaterUpdate(clear.recordId, recordsByIds[clear.recordId], clear.field, '');
                     }
-                    setNewRecordId(recordId, migratedRecordId!);
+                } else {
+                    throw new Error('Cannot find record ready to migrate. Circular dependency?');
                 }
             }
         }
-        if (!anyRecordProcessed) {
-            // build lookupFieldsBySObjectType from object describes
-            const requiredLookupFieldsBySObjectType: Record<string, string[]> = {};
-            const allLookupFieldsBySObjectType: Record<string, string[]> = {};
-            const uniqueSObjectTypes = [...new Set(Object.values(recordsByIds).map(record => record.attributes!.type))];
-            for (const sObjectName of uniqueSObjectTypes) {
-                requiredLookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
-                    .filter(field => field.type === 'reference' && !field.nillable && field.createable)
-                    .map(field => field.name);
-                allLookupFieldsBySObjectType[sObjectName] = (await getSObjectDescribe(sObjectName)).fields
-                    .filter(field => field.type === 'reference' && field.createable)
-                    .map(field => field.name);
+
+        // update the fields that were cleared
+        for (const recordId of Object.keys(toUpdateLater)) {
+            const record = toUpdateLater[recordId];
+            for (const field of Object.keys(record)) {
+                if (field !== 'attributes') {
+                    const value = String(record[field]);
+                    const matches = value.match(ID_REGEX);
+                    if (matches) {
+                        for (const match of matches) {
+                            if (match in old2new) {
+                                record[field] = value.replace(match, old2new[match]);
+                            }
+                        }
+                    }
+                }
             }
-            const records = Object.values(recordsByIds).map(record => ({
+            record.Id = old2new[recordId];
+            if (!record.Id) {
+                io.recordNoId(recordId);
+                continue;
+            }
+            io.updatingRecord(recordId, record.attributes!.type, record);
+            try {
+                await connB.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
+            } catch (e) {
+                io.errorUpdatingRecord(recordId, record.attributes!.type, e);
+            }
+        }
+
+        saveAndExit();
+    } else {
+        // migrate to file
+        // Write JSON as key-value pairs: id -> record
+        const recordsObj: Record<string, any> = {};
+        for (const [id, record] of Object.entries(recordsByIds)) {
+            recordsObj[id] = {
                 attributes: record.attributes,
                 ...Object.fromEntries(Object.entries(record)),
-                Id: Object.keys(recordsByIds).find(key => recordsByIds[key] === record)
-            }));
-            io.lookingForCircularDependencies(requiredLookupFieldsBySObjectType, records);
-            const toClear = scanForCircularDependency(records, requiredLookupFieldsBySObjectType);
-            if (toClear.length > 0) {
-                io.foundCircularDependency(toClear);
-                // clear the fields that are causing the circular dependency
-                for (const clear of toClear) {
-                    setFieldWithLaterUpdate(clear.recordId, recordsByIds[clear.recordId], clear.field, '');
-                }
-            } else {
-                throw new Error('Cannot find record ready to migrate. Circular dependency?');
-            }
+                Id: id
+            };
         }
+        fs.writeFileSync(options.targetFile, JSON.stringify(recordsObj, null, 2));
+        io.finished(JSON.stringify(recordsObj));
     }
-
-    // update the fields that were cleared
-    for (const recordId of Object.keys(toUpdateLater)) {
-        const record = toUpdateLater[recordId];
-        for (const field of Object.keys(record)) {
-            if (field !== 'attributes') {
-                const value = String(record[field]);
-                const matches = value.match(ID_REGEX);
-                if (matches) {
-                    for (const match of matches) {
-                        if (match in old2new) {
-                            record[field] = value.replace(match, old2new[match]);
-                        }
-                    }
-                }
-            }
-        }
-        record.Id = old2new[recordId];
-        if (!record.Id) {
-            io.recordNoId(recordId);
-            continue;
-        }
-        io.updatingRecord(recordId, record.attributes!.type, record);
-        try {
-            await connB.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
-        } catch (e) {
-            io.errorUpdatingRecord(recordId, record.attributes!.type, e);
-        }
-    }
-
-    saveAndExit();
 }
 
 export { main, Options, IOEvent };

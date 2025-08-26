@@ -2079,12 +2079,8 @@ test('migrate to file', async () => {
         matchers: defaultMatchers
     };
 
-    const { parsedOutput } = await runMigration(config);
+    await runMigration(config);
 
-    const newAccountId = assertRecordMigrated(parsedOutput, account.id!);
-
-    // Ids should be the same
-    expect(newAccountId).toBe(account.id);
 
     const outputFile = fs.readFileSync('test-output.json', 'utf8');
     // parse JSON
@@ -2092,5 +2088,5 @@ test('migrate to file', async () => {
     expect(outputJson).toHaveProperty(account.id!);
     const accountInFile = outputJson[account.id!];
     expect(accountInFile['Name']).toBe('Ebola Cola');
-    expect(accountInFile['Id']).toBe(newAccountId);
+    expect(accountInFile['Id']).toBe(account.id);
 });
