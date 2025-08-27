@@ -2067,7 +2067,7 @@ test('fetch related record for a record that is in history', async () => {
 test('migrate to file', async () => {
     console.log('starting test: migrate to file');
 
-    const { conn1, conn2 } = await setupTestConnections();
+    const { conn1 } = await setupTestConnections();
 
     const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
     expect(account.id).toBeDefined();
@@ -2089,4 +2089,33 @@ test('migrate to file', async () => {
     const accountInFile = outputJson[account.id!];
     expect(accountInFile['Name']).toBe('Ebola Cola');
     expect(accountInFile['Id']).toBe(account.id);
+});
+
+test('migrate from file', async () => {
+    console.log('starting test: migrate from file');
+
+    const { conn2 } = await setupTestConnections();
+
+    // create a file with a record
+    const account = {
+        Id: '001KJ00000HsZttYAF',
+        Name: 'Ebola Cola'
+    };
+
+    fs.writeFileSync('test-output.json', JSON.stringify({ [account.Id]: account }, null, 2));
+
+    const config = {
+        sourceFile: 'test-output.json',
+        targetOrg: targetOrgAlias,
+        recordIds: [account.Id],
+    };
+
+    const { parsedOutput } = await runMigration(config);
+
+    const newAccountId = assertRecordMigrated(parsedOutput, account.Id);
+
+    const newAccount = await conn2.sobject('Account').retrieve(newAccountId);
+    expect(newAccount).toBeDefined();
+    expect(newAccount['Name']).toBe('Ebola Cola');
+    expect(newAccount['Id']).toBe(account.Id);
 });
