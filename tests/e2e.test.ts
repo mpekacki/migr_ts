@@ -112,8 +112,10 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
 }
 
 function assertRecordMigrated(parsedOutput: any, recordId: string): string {
-    expect(parsedOutput).toHaveProperty(recordId);
-    const newRecordId = parsedOutput[recordId];
+    // Support both old and new output formats
+    const recordSource = parsedOutput.allMigratedRecords || parsedOutput;
+    expect(recordSource).toHaveProperty(recordId);
+    const newRecordId = recordSource[recordId];
     expect(newRecordId).toBeTruthy();
     expect(newRecordId).not.toEqual(recordId);
     return newRecordId;
@@ -486,8 +488,9 @@ test('match record by id field', async () => {
 
     const { parsedOutput } = await runMigration(config);
 
-    expect(parsedOutput).toHaveProperty(custObjB.id!);
-    const newCustObjBId = parsedOutput[custObjB.id!];
+    const recordSource = parsedOutput.allMigratedRecords || parsedOutput;
+    expect(recordSource).toHaveProperty(custObjB.id!);
+    const newCustObjBId = recordSource[custObjB.id!];
     expect(newCustObjBId).toBeTruthy();
     expect(newCustObjBId).toEqual(custObjB2.id);
 });
@@ -560,8 +563,9 @@ test('migrate record with error - fixed automatically', async () => {
     const { parsedOutput } = await runMigration(config);
 
     // Check if contract was migrated
-    expect(parsedOutput).toHaveProperty(contract.id!);
-    const newContractId = parsedOutput[contract.id!];
+    const recordSource = parsedOutput.allMigratedRecords || parsedOutput;
+    expect(recordSource).toHaveProperty(contract.id!);
+    const newContractId = recordSource[contract.id!];
     expect(newContractId).toBeTruthy();
     expect(newContractId).not.toEqual(contract.id);
 
@@ -1101,39 +1105,29 @@ test('migrate record with error - automatically skip record', async () => {
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await createAccount(conn1, 'Ebola Cola');
     console.log(account);
-    expect(account.id).toBeDefined();
 
-    const contract = await conn1.sobject('Contract').create({ 
-        AccountId: account.id!, 
-        Status: 'Draft', 
-        StartDate: new Date().toISOString(), 
-        ContractTerm: 12 
-    });
+    const contract = await createContract(conn1, account.id!);
     console.log(contract);
-    expect(contract.id).toBeDefined();
 
     await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
 
-    const config = {
-        sourceOrg: sourceOrgAlias,
-        targetOrg: targetOrgAlias,
-        recordIds: [contract.id!],
-        matchers: defaultMatchers,
+    const config = createBasicConfig([contract.id!], {
         solvers: [
             {
                 action: 'skip',
                 message: 'Choose a valid contract status and save your changes. Ask your admin for details.'
             }
         ]
-    };
+    });
 
     const { parsedOutput } = await runMigration(config);
 
     // Check if contract was migrated
-    expect(parsedOutput).toHaveProperty(contract.id!);
-    const newContractId = parsedOutput[contract.id!];
+    const recordSource = parsedOutput.allMigratedRecords || parsedOutput;
+    expect(recordSource).toHaveProperty(contract.id!);
+    const newContractId = recordSource[contract.id!];
     expect(newContractId).toBe('');
 
     // Check if account was migrated
@@ -1176,8 +1170,9 @@ test('migrate record with error - manually skip record', async () => {
     const { parsedOutput } = await runMigration(config, ['y', 's']);
 
     // Check if contract was migrated
-    expect(parsedOutput).toHaveProperty(contract.id!);
-    const newContractId = parsedOutput[contract.id!];
+    const recordSource = parsedOutput.allMigratedRecords || parsedOutput;
+    expect(recordSource).toHaveProperty(contract.id!);
+    const newContractId = recordSource[contract.id!];
     expect(newContractId).toBe('');
 
     // Check if account was migrated
@@ -1220,8 +1215,9 @@ test('migrate record with error - automatically match duplicate record', async (
     const { parsedOutput } = await runMigration(config);
 
     // check if the record was migrated
-    expect(parsedOutput).toHaveProperty(custObjCorgA.id!);
-    const newCustObjCId = parsedOutput[custObjCorgA.id!];
+    const recordSource = parsedOutput.allMigratedRecords || parsedOutput;
+    expect(recordSource).toHaveProperty(custObjCorgA.id!);
+    const newCustObjCId = recordSource[custObjCorgA.id!];
     expect(newCustObjCId).toBeTruthy();
     expect(newCustObjCId).toEqual(custObjCorgB.id);
 
@@ -1256,8 +1252,9 @@ test('migrate record with error - manually match duplicate record', async () => 
     const { parsedOutput } = await runMigration(config, ['y', 'm', custObjCorgB.id!]);
 
     // check if the record was migrated
-    expect(parsedOutput).toHaveProperty(custObjCorgA.id!);
-    const newCustObjCId = parsedOutput[custObjCorgA.id!];
+    const recordSource = parsedOutput.allMigratedRecords || parsedOutput;
+    expect(recordSource).toHaveProperty(custObjCorgA.id!);
+    const newCustObjCId = recordSource[custObjCorgA.id!];
     expect(newCustObjCId).toBeTruthy();
     expect(newCustObjCId).toEqual(custObjCorgB.id);
 
@@ -1405,8 +1402,9 @@ test('migrate record with error - quit and save results so far', async () => {
     const { parsedOutput: parsedOutput2 } = await runMigration(config, ['y']);
 
     // Account should not be migrated again
-    expect(parsedOutput2).toHaveProperty(account.id!);
-    const newAccountId2 = parsedOutput2[account.id!];
+    const recordSource2 = parsedOutput2.allMigratedRecords || parsedOutput2;
+    expect(recordSource2).toHaveProperty(account.id!);
+    const newAccountId2 = recordSource2[account.id!];
     expect(newAccountId2).toBeTruthy();
     expect(newAccountId2).toEqual(newAccountId);
 });
@@ -1497,8 +1495,9 @@ test('match not found, skip record', async () => {
     const newAccount1Id = assertRecordMigrated(parsedOutput, account1.id!);
     expect(newAccount1Id).toEqual(account1B.id);
 
-    expect(parsedOutput).toHaveProperty(account2.id!);
-    const newAccount2Id = parsedOutput[account2.id!];
+    const recordSource = parsedOutput.allMigratedRecords || parsedOutput;
+    expect(recordSource).toHaveProperty(account2.id!);
+    const newAccount2Id = recordSource[account2.id!];
     expect(newAccount2Id).toBe('');
 
     // should not be able to query the new account record by account name

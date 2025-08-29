@@ -342,9 +342,17 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
 
     const saveAndExit = () => {
         fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
+        
+        // Create a summary of original recordIds from config with their new mappings
+        const requestedRecordsMappings: Record<string, string> = {};
+        for (const originalRecordId of options.recordIds) {
+            requestedRecordsMappings[originalRecordId] = old2new[originalRecordId] || '';
+        }
+        
         const outputData = {
-            ...old2new,
-            errors
+            allMigratedRecords: old2new,
+            errors,
+            requestedRecords: requestedRecordsMappings
         };
         io.finished(JSON.stringify(outputData));
     }
@@ -666,7 +674,19 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             };
         }
         fs.writeFileSync(options.targetFile!, JSON.stringify(recordsObj, null, 2));
-        io.finished(JSON.stringify(recordsObj));
+        
+        // Create a summary for file migration (all records are "as-is" with same IDs)
+        const requestedRecordsMappings: Record<string, string> = {};
+        for (const originalRecordId of options.recordIds) {
+            requestedRecordsMappings[originalRecordId] = originalRecordId; // Same ID when migrating to file
+        }
+        
+        const outputData = {
+            allMigratedRecords: recordsObj,
+            errors: {}, // No errors in file migration typically
+            requestedRecords: requestedRecordsMappings
+        };
+        io.finished(JSON.stringify(outputData));
     }
 }
 
