@@ -10,13 +10,14 @@ import IO from './io';
 console.log('importing dependencies done');
 
 interface Options {
-    sourceOrg: string;
+    sourceOrg?: string;
+    sourceFile?: string;
     targetOrg: string;
-    sourceOrgUrl: string;
-    sourceOrgToken: string;
-    targetOrgUrl: string;
-    targetOrgToken: string;
-    targetFile: string;
+    sourceOrgUrl?: string;
+    sourceOrgToken?: string;
+    targetOrgUrl?: string;
+    targetOrgToken?: string;
+    targetFile?: string;
     recordIds: string[];
     relatedRecordDepthLimit: number;
     matchers: {
@@ -114,8 +115,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     };
 
     const isMigrateToFile = options.targetFile !== undefined;
+    const isMigrateFromFile = options.sourceFile !== undefined;
 
-    const authInfoPromises = [createAuthInfo(options.sourceOrg, options.sourceOrgUrl, options.sourceOrgToken, 'source')];
+    const authInfoPromises: Promise<AuthInfo>[] = [];
+    if (!isMigrateFromFile) {
+        authInfoPromises.push(createAuthInfo(options.sourceOrg, options.sourceOrgUrl, options.sourceOrgToken, 'source'));
+    }
     if (!isMigrateToFile) {
         authInfoPromises.push(createAuthInfo(options.targetOrg, options.targetOrgUrl, options.targetOrgToken, 'target'));
     }
@@ -124,8 +129,13 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     // Create and return connections
     const connPromises = authInfos.map(authInfo => Connection.create({ authInfo }));
     const conns = await Promise.all(connPromises);
-    const connA = conns[0];
-    const connB = isMigrateToFile ? connA : conns[1];
+    const connA = isMigrateFromFile ? (conns.length > 0 ? conns[0] : null) : conns[0];
+    const connB = isMigrateToFile ? connA : (isMigrateFromFile ? conns[0] : conns[1]);
+    
+    // Ensure we have at least one connection for target operations
+    if (!connB) {
+        throw new Error('No target connection available');
+    }
 
     // check if history file exists for target org
     const historyFilePath = path.join(process.cwd(), `${options.targetOrg}__history.json`);
@@ -134,22 +144,28 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         history = JSON.parse(fs.readFileSync(historyFilePath, 'utf8'));
     }
 
-    const describeGlobal = await connA.describeGlobal();
+    const describeGlobal = isMigrateFromFile ? null : await connA!.describeGlobal();
     const sObjectDescribes: Record<string, DescribeSObjectResult> = {};
     const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
         if (!(sObjectName in sObjectDescribes)) {
             io.describeSObject(sObjectName);
-            sObjectDescribes[sObjectName] = await connB.sobject(sObjectName).describe();
+            sObjectDescribes[sObjectName] = await connB!.sobject(sObjectName).describe();
         }
         return sObjectDescribes[sObjectName];
     };
-    const getSObjectType = async (recordId: string): Promise<string> => {
-        const prefix = recordId.substring(0, 3);
-        const sobject = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix);
-        if (!sobject) {
-            throw new Error(`SObject with prefix ${prefix} not found`);
+    const getSObjectType = async (recordId: string, record?: any): Promise<string> => {
+        if (record && record.attributes && record.attributes.type) {
+            return record.attributes.type;
         }
-        return sobject.name;
+        if (describeGlobal) {
+            const prefix = recordId.substring(0, 3);
+            const sobject = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix);
+            if (!sobject) {
+                throw new Error(`SObject with prefix ${prefix} not found`);
+            }
+            return sobject.name;
+        }
+        throw new Error('Unable to determine SObject type');
     };
 
     // check if all matchers are valid
@@ -170,6 +186,30 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const old2new: Record<string, string> = {};
     const errors: Record<string, { message: string, fixed: boolean, solver?: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver) }[]> = {};
     const migratedRecords: Record<string, string> = {};
+    
+    // Load records from file if sourceFile is provided
+    if (isMigrateFromFile) {
+        const fileContent = fs.readFileSync(options.sourceFile!, 'utf8');
+        const fileRecords = JSON.parse(fileContent);
+        
+        for (const recordId of Object.keys(fileRecords)) {
+            if (options.recordIds.includes(recordId)) {
+                const record = fileRecords[recordId];
+                fetchedRecordsByIds[recordId] = record;
+                
+                // Create record for migration (filter out non-creatable fields if needed)
+                const sObjectName = await getSObjectType(recordId, record);
+                const creatableFields = (await getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
+                const recordForMigration: SObjectRecord<Schema, string> = {};
+                for (const field of creatableFields) {
+                    recordForMigration[field.name] = record[field.name];
+                }
+                recordForMigration.attributes = record.attributes || { type: sObjectName, url: '' };
+                recordsByIds[recordId] = recordForMigration;
+            }
+        }
+        recordIdsToFetch = []; // No need to fetch from org when reading from file
+    }
     
     const setNewRecordId = (recordId: string, newRecordId: string) => {
         old2new[recordId] = newRecordId;
@@ -193,7 +233,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             io.fetchingRecord(recordId, sObjectName);
             let recordFields;
             try {
-                recordFields = await connA.sobject(sObjectName).retrieve(recordId);
+                recordFields = await connA!.sobject(sObjectName).retrieve(recordId);
             } catch (error) {
                 if (error.errorCode === 'NOT_FOUND' || error.message?.includes('resource does not exist')) {
                     io.recordNotFound(recordId, sObjectName);
@@ -243,7 +283,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
             const relationships = options.relationships?.[sObjectName];
             if (relationships && (!options.relatedRecordDepthLimit || depth < options.relatedRecordDepthLimit)) {
-                const selector = connA.sobject(sObjectName).select('Id');
+                const selector = connA!.sobject(sObjectName).select('Id');
                 for (const relationship of relationships) {
                     selector.include(relationship.name).select('Id').end();
                 }
@@ -331,7 +371,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             const toInsert: Record<string, SObjectRecord<Schema, string>> = {};
             for (const recordId of Object.keys(recordsByIds)) {
                 const record = recordsByIds[recordId];
-                const sObjectName = await getSObjectType(recordId);
+                const sObjectName = await getSObjectType(recordId, record);
                 let recordReady = true;
                 for (const field of Object.keys(record)) {
                     if (record[field]) {
@@ -372,7 +412,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 conditions[fieldMapping.targetField] = old2new[conditions[fieldMapping.targetField]];
                             }
                         }
-                        const selector = connB.sobject(sObjectName).find(conditions).select('Id');
+                        const selector = connB!.sobject(sObjectName).find(conditions).select('Id');
                         io.queryingForExistingRecord(await selector.toSOQL());
                         const migratedRecord = await selector.execute();
                         if (migratedRecord.length > 0) {
@@ -400,9 +440,9 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 let retryAll = false;
                 for (const chunk of chunks) {
                     io.savingRecords(chunk);
-                    const savedRecords = (await connB.request({
+                    const savedRecords = (await connB!.request({
                     method: 'POST',
-                    url: `/services/data/v${connB.version}/composite/sobjects`,
+                    url: `/services/data/v${connB!.version}/composite/sobjects`,
                     body: JSON.stringify({
                             allOrNone: false,
                             records: Object.values(chunk)
@@ -607,7 +647,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
             io.updatingRecord(recordId, record.attributes!.type, record);
             try {
-                await connB.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
+                await connB!.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
             } catch (e) {
                 io.errorUpdatingRecord(recordId, record.attributes!.type, e);
             }
@@ -625,7 +665,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 Id: id
             };
         }
-        fs.writeFileSync(options.targetFile, JSON.stringify(recordsObj, null, 2));
+        fs.writeFileSync(options.targetFile!, JSON.stringify(recordsObj, null, 2));
         io.finished(JSON.stringify(recordsObj));
     }
 }

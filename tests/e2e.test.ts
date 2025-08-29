@@ -2099,7 +2099,11 @@ test('migrate from file', async () => {
     // create a file with a record
     const account = {
         Id: '001KJ00000HsZttYAF',
-        Name: 'Ebola Cola'
+        Name: 'Ebola Cola',
+        attributes: {
+            type: 'Account',
+            url: '/services/data/v61.0/sobjects/Account/001KJ00000HsZttYAF'
+        }
     };
 
     fs.writeFileSync('test-output.json', JSON.stringify({ [account.Id]: account }, null, 2));
@@ -2108,6 +2112,7 @@ test('migrate from file', async () => {
         sourceFile: 'test-output.json',
         targetOrg: targetOrgAlias,
         recordIds: [account.Id],
+        matchers: defaultMatchers
     };
 
     const { parsedOutput } = await runMigration(config);
@@ -2117,5 +2122,5 @@ test('migrate from file', async () => {
     const newAccount = await conn2.sobject('Account').retrieve(newAccountId);
     expect(newAccount).toBeDefined();
     expect(newAccount['Name']).toBe('Ebola Cola');
-    expect(newAccount['Id']).toBe(account.Id);
+    expect(newAccount['Id']).toBe(newAccountId);
 });
