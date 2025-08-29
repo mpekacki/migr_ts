@@ -119,6 +119,62 @@ function assertRecordMigrated(parsedOutput: any, recordId: string): string {
     return newRecordId;
 }
 
+// Helper functions to reduce duplication
+async function createAccount(conn: any, name: string = `Account-${Math.random()}`) {
+    const account = await conn.sobject('Account').create({ Name: name });
+    expect(account.id).toBeDefined();
+    return account;
+}
+
+async function createContact(conn: any, firstName: string = 'John', lastName: string = 'Doe', accountId?: string) {
+    const contact = await conn.sobject('Contact').create({ 
+        FirstName: firstName, 
+        LastName: lastName, 
+        AccountId: accountId 
+    });
+    expect(contact.id).toBeDefined();
+    return contact;
+}
+
+async function createContract(conn: any, accountId: string, status: string = 'Draft', contractTerm: number = 12) {
+    const contract = await conn.sobject('Contract').create({
+        AccountId: accountId,
+        Status: status,
+        StartDate: new Date().toISOString(),
+        ContractTerm: contractTerm
+    });
+    expect(contract.id).toBeDefined();
+    return contract;
+}
+
+async function createCustomObject(conn: any, objectType: string, fields: any = {}) {
+    const obj = await conn.sobject(objectType).create(fields);
+    expect(obj.id).toBeDefined();
+    return obj;
+}
+
+function createBasicConfig(recordIds: string[], additionalOptions: any = {}) {
+    return {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds,
+        matchers: defaultMatchers,
+        ...additionalOptions
+    };
+}
+
+function createTokenAuthConfig(conn1: any, conn2: any, recordIds: string[], additionalOptions: any = {}) {
+    return {
+        sourceOrgUrl: conn1.instanceUrl,
+        sourceOrgToken: conn1.accessToken,
+        targetOrgUrl: conn2.instanceUrl,
+        targetOrgToken: conn2.accessToken,
+        recordIds,
+        matchers: defaultMatchers,
+        ...additionalOptions
+    };
+}
+
 const defaultMatchers = [
     {
         sObjectType: 'Profile',
@@ -152,17 +208,10 @@ test('migrate record - single', async () => {
     const { conn1 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await createAccount(conn1, 'Ebola Cola');
     console.log(account);
-    expect(account.id).toBeDefined();
 
-    const config = {
-        sourceOrg: sourceOrgAlias,
-        targetOrg: targetOrgAlias,
-        recordIds: [account.id!],
-        matchers: defaultMatchers
-    };
-
+    const config = createBasicConfig([account.id!]);
     const { parsedOutput } = await runMigration(config);
 
     assertRecordMigrated(parsedOutput, account.id!);
@@ -174,19 +223,10 @@ test('url and token auth', async () => {
     const { conn1, conn2 } = await setupTestConnections();
     
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await createAccount(conn1, 'Ebola Cola');
     console.log(account);
-    expect(account.id).toBeDefined();
 
-    const config = {
-        sourceOrgUrl: conn1.instanceUrl,
-        sourceOrgToken: conn1.accessToken,
-        targetOrgUrl: conn2.instanceUrl,
-        targetOrgToken: conn2.accessToken,
-        recordIds: [account.id!],
-        matchers: defaultMatchers
-    };
-
+    const config = createTokenAuthConfig(conn1, conn2, [account.id!]);
     const { parsedOutput } = await runMigration(config);
 
     assertRecordMigrated(parsedOutput, account.id!);
@@ -198,9 +238,8 @@ test('source auth token, target auth alias', async () => {
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await createAccount(conn1, 'Ebola Cola');
     console.log(account);
-    expect(account.id).toBeDefined();
     
     const config = {
         sourceOrgUrl: conn1.instanceUrl,
@@ -221,9 +260,8 @@ test('source auth alias, target auth token', async () => {
     const { conn1, conn2 } = await setupTestConnections();
     
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await createAccount(conn1, 'Ebola Cola');
     console.log(account);
-    expect(account.id).toBeDefined();
 
     const config = {
         sourceOrg: sourceOrgAlias,
@@ -244,13 +282,11 @@ test('migrate record - complex', async () => {
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await createAccount(conn1, 'Ebola Cola');
     console.log(account);
-    expect(account.id).toBeDefined();
 
-    const contact = await conn1.sobject('Contact').create({ FirstName: 'Spider', LastName: 'Jerusalem', AccountId: account.id! });
+    const contact = await createContact(conn1, 'Spider', 'Jerusalem', account.id!);
     console.log(contact);
-    expect(contact.id).toBeDefined();
 
     const campaignFields = { Name: `Aaa! ${Math.random()}`, IsActive: true };
 
@@ -498,26 +534,15 @@ test('migrate record with error - fixed automatically', async () => {
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await createAccount(conn1, 'Ebola Cola');
     console.log(account);
-    expect(account.id).toBeDefined();
 
-    const contract = await conn1.sobject('Contract').create({ 
-        AccountId: account.id!, 
-        Status: 'Draft', 
-        StartDate: new Date().toISOString(), 
-        ContractTerm: 12 
-    });
+    const contract = await createContract(conn1, account.id!);
     console.log(contract);
-    expect(contract.id).toBeDefined();
 
     await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
 
-    const config = {
-        sourceOrg: sourceOrgAlias,
-        targetOrg: targetOrgAlias,
-        recordIds: [contract.id!],
-        matchers: defaultMatchers,
+    const config = createBasicConfig([contract.id!], {
         solvers: [
             {
                 action: 'fix',
@@ -530,7 +555,7 @@ test('migrate record with error - fixed automatically', async () => {
                 ]
             }
         ]
-    };
+    });
 
     const { parsedOutput } = await runMigration(config);
 
@@ -2069,21 +2094,17 @@ test('migrate to file', async () => {
 
     const { conn1 } = await setupTestConnections();
 
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
-    expect(account.id).toBeDefined();
+    const account = await createAccount(conn1, 'Ebola Cola');
 
-    const config = {
+    const config = createBasicConfig([account.id!], { 
         sourceOrg: sourceOrgAlias,
-        targetFile: 'test-output.json',
-        recordIds: [account.id!],
-        matchers: defaultMatchers
-    };
+        targetFile: 'test-output.json' 
+    });
+    delete config.targetOrg; // Remove targetOrg when using targetFile
 
     await runMigration(config);
 
-
     const outputFile = fs.readFileSync('test-output.json', 'utf8');
-    // parse JSON
     const outputJson = JSON.parse(outputFile);
     expect(outputJson).toHaveProperty(account.id!);
     const accountInFile = outputJson[account.id!];
