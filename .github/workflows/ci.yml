@@ -110,13 +110,10 @@ jobs:
       run: npm run build
 
     - name: Run tests
-      run: npm test
-
-    - name: Cleanup scratch orgs (on failure)
-      if: failure()
       run: |
-        sf org delete scratch --alias "$TEST_ORG_A_ALIAS" --no-prompt || true
-        sf org delete scratch --alias "$TEST_ORG_B_ALIAS" --no-prompt || true
+        echo "::group::Running Jest Tests"
+        npm run test:ci
+        echo "::endgroup::"
 
   build:
     runs-on: ubuntu-latest

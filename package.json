@@ -7,6 +7,7 @@
     "build": "npx esbuild main.ts --bundle --outfile=bundle.js --platform=node --packages=external",
     "release": "npx esbuild main.ts --bundle --outfile=build/bundle.js --platform=node --packages=external --minify",
     "test": "jest",
+    "test:ci": "jest --verbose --no-coverage --detectOpenHandles --forceExit --passWithNoTests",
     "start": "node bundle.js",
     "deps": "npx ts-node simple-deps.ts",
     "deps:advanced": "npx ts-node generate-deps.ts"
