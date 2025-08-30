@@ -170,8 +170,15 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
 
     // check if all matchers are valid
     io.checkingMatchers();
+    // Get all unique SObject types from matchers to describe them in bulk
+    const matcherSObjectTypes = [...new Set(options.matchers.map(m => m.sObjectType))];
+    
+    // Describe all matcher SObjects in parallel
+    await Promise.all(matcherSObjectTypes.map(sObjectType => getSObjectDescribe(sObjectType)));
+    
+    // Now validate field mappings
     for (const matcher of options.matchers) {
-        const sobjectDescribe = await getSObjectDescribe(matcher.sObjectType);
+        const sobjectDescribe = sObjectDescribes[matcher.sObjectType];
         for (const fieldMapping of matcher.fieldMappings) {
             if (!sobjectDescribe.fields.some(field => field.name === fieldMapping.sourceField)) {
                 throw new Error(`Field ${fieldMapping.sourceField} not found in SObject ${matcher.sObjectType}`);
