@@ -42,9 +42,9 @@ jobs:
           ~/.sf
           ~/.sfdx
           ./scratch-orgs.json
-        key: sf-data-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_number }}
+        key: sf-data-${{ runner.os }}-${{ github.repository }}
         restore-keys: |
-          sf-data-${{ runner.os }}-${{ github.ref_name }}-
+          sf-data-${{ runner.os }}-${{ github.repository }}
           sf-data-${{ runner.os }}-
 
     - name: Authenticate to DevHub
@@ -59,10 +59,21 @@ jobs:
 
     - name: Check and manage scratch orgs
       run: |
+        # Debug: Show cache status
+        echo "=== Cache Debug Info ==="
+        echo "Working directory: $(pwd)"
+        echo "Files in current directory:"
+        ls -la
+        
         # Initialize scratch org cache file if it doesn't exist
         if [ ! -f scratch-orgs.json ]; then
+          echo "Creating new scratch-orgs.json cache file"
           echo '{}' > scratch-orgs.json
+        else
+          echo "Found existing scratch-orgs.json:"
+          cat scratch-orgs.json
         fi
+        echo "========================"
 
         # Function to check if cached org is still valid
         is_org_valid() {
