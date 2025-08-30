@@ -35,6 +35,18 @@ jobs:
         npm install -g @salesforce/cli
         sf --version
 
+    - name: Cache Salesforce CLI data
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.sf
+          ~/.sfdx
+          ./scratch-orgs.json
+        key: sf-data-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_number }}
+        restore-keys: |
+          sf-data-${{ runner.os }}-${{ github.ref_name }}-
+          sf-data-${{ runner.os }}-
+
     - name: Authenticate to DevHub
       env:
         DEVHUB_AUTH_URL: ${{ secrets.DEVHUB_AUTH_URL }}
@@ -47,10 +59,56 @@ jobs:
 
     - name: Check and manage scratch orgs
       run: |
-        # Function to check if org exists and is active
-        check_org_status() {
+        # Initialize scratch org cache file if it doesn't exist
+        if [ ! -f scratch-orgs.json ]; then
+          echo '{}' > scratch-orgs.json
+        fi
+
+        # Function to check if cached org is still valid
+        is_org_valid() {
           local org_alias=$1
-          sf org list --json | jq -r ".result.scratchOrgs[]? | select(.alias == \"$org_alias\") | .status"
+          local org_info=$(jq -r ".$org_alias // empty" scratch-orgs.json)
+          
+          if [ -z "$org_info" ] || [ "$org_info" = "null" ]; then
+            echo "false"
+            return
+          fi
+          
+          local created_date=$(echo "$org_info" | jq -r '.createdDate // empty')
+          local org_id=$(echo "$org_info" | jq -r '.orgId // empty')
+          
+          if [ -z "$created_date" ] || [ -z "$org_id" ]; then
+            echo "false"
+            return
+          fi
+          
+          # Check if org is less than 28 days old (2 day buffer before 30-day expiry)
+          local created_timestamp=$(date -d "$created_date" +%s 2>/dev/null || echo "0")
+          local current_timestamp=$(date +%s)
+          local days_old=$(( (current_timestamp - created_timestamp) / 86400 ))
+          
+          if [ $days_old -lt 28 ]; then
+            echo "true"
+          else
+            echo "false"
+          fi
+        }
+
+        # Function to save org info to cache
+        save_org_info() {
+          local org_alias=$1
+          local org_list_output=$(sf org list --json)
+          local org_info=$(echo "$org_list_output" | jq -r ".result.scratchOrgs[]? | select(.alias == \"$org_alias\")")
+          
+          if [ -n "$org_info" ]; then
+            local org_id=$(echo "$org_info" | jq -r '.orgId')
+            local created_date=$(echo "$org_info" | jq -r '.createdDate')
+            
+            # Update cache with org info
+            jq ".$org_alias = {\"orgId\": \"$org_id\", \"createdDate\": \"$created_date\", \"alias\": \"$org_alias\"}" scratch-orgs.json > temp.json
+            mv temp.json scratch-orgs.json
+            echo "Cached info for $org_alias (ID: $org_id, Created: $created_date)"
+          fi
         }
 
         # Function to create or recreate scratch org
@@ -72,6 +130,9 @@ jobs:
             --duration-days "$SCRATCH_ORG_DURATION" \
             --wait 10
           
+          # Save org info to cache
+          save_org_info "$org_alias"
+          
           # Deploy test project to scratch org
           cd tests/TestProject
           sf project deploy start --target-org "$org_alias"
@@ -79,21 +140,33 @@ jobs:
         }
 
         # Check and manage Test Org A
-        org_a_status=$(check_org_status "$TEST_ORG_A_ALIAS")
-        if [ "$org_a_status" != "Active" ]; then
-          echo "Test Org A status: $org_a_status (needs recreation)"
-          create_scratch_org "$TEST_ORG_A_ALIAS"
+        if [ "$(is_org_valid "$TEST_ORG_A_ALIAS")" = "true" ]; then
+          echo "Test Org A is cached and should be valid"
+          # Try to verify it's actually accessible
+          if sf org list --json | jq -e ".result.scratchOrgs[]? | select(.alias == \"$TEST_ORG_A_ALIAS\" and .status == \"Active\")" > /dev/null; then
+            echo "Test Org A confirmed active"
+          else
+            echo "Test Org A not found in SF CLI, recreating"
+            create_scratch_org "$TEST_ORG_A_ALIAS"
+          fi
         else
-          echo "Test Org A is active"
+          echo "Test Org A not cached or expired, creating new org"
+          create_scratch_org "$TEST_ORG_A_ALIAS"
         fi
 
-        # Check and manage Test Org B  
-        org_b_status=$(check_org_status "$TEST_ORG_B_ALIAS")
-        if [ "$org_b_status" != "Active" ]; then
-          echo "Test Org B status: $org_b_status (needs recreation)"
-          create_scratch_org "$TEST_ORG_B_ALIAS"
+        # Check and manage Test Org B
+        if [ "$(is_org_valid "$TEST_ORG_B_ALIAS")" = "true" ]; then
+          echo "Test Org B is cached and should be valid"
+          # Try to verify it's actually accessible
+          if sf org list --json | jq -e ".result.scratchOrgs[]? | select(.alias == \"$TEST_ORG_B_ALIAS\" and .status == \"Active\")" > /dev/null; then
+            echo "Test Org B confirmed active"
+          else
+            echo "Test Org B not found in SF CLI, recreating"
+            create_scratch_org "$TEST_ORG_B_ALIAS"
+          fi
         else
-          echo "Test Org B is active"
+          echo "Test Org B not cached or expired, creating new org"
+          create_scratch_org "$TEST_ORG_B_ALIAS"
         fi
 
         # Create test data in Org A
@@ -102,6 +175,9 @@ jobs:
           --target-org "$TEST_ORG_A_ALIAS" \
           --sobject Custom_Setting_1__c \
           --values "Is_Org_A__c=true"
+
+        echo "Current scratch org cache:"
+        cat scratch-orgs.json
 
     - name: Run linter
       run: npm run lint || true
