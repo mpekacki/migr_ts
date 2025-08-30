@@ -148,6 +148,15 @@ jobs:
           cd tests/TestProject
           sf project deploy start --target-org "$org_alias"
           cd ../..
+          
+          # Create test data if this is Org A
+          if [ "$org_alias" = "$TEST_ORG_A_ALIAS" ]; then
+            echo "Setting up test data in new Org A"
+            sf data create record \
+              --target-org "$TEST_ORG_A_ALIAS" \
+              --sobject Custom_Setting_1__c \
+              --values "Is_Org_A__c=true"
+          fi
         }
 
         # Check and manage Test Org A
@@ -179,13 +188,6 @@ jobs:
           echo "Test Org B not cached or expired, creating new org"
           create_scratch_org "$TEST_ORG_B_ALIAS"
         fi
-
-        # Create test data in Org A
-        echo "Setting up test data in Org A"
-        sf data create record \
-          --target-org "$TEST_ORG_A_ALIAS" \
-          --sobject Custom_Setting_1__c \
-          --values "Is_Org_A__c=true"
 
         echo "Current scratch org cache:"
         cat scratch-orgs.json
