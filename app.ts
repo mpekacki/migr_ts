@@ -145,13 +145,13 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
 
     const describeGlobal = isMigrateFromFile ? null : await connA!.describeGlobal();
-    const sObjectDescribes: Record<string, DescribeSObjectResult> = {};
+    const sObjectDescribes = { cache: {} as Record<string, Promise<DescribeSObjectResult>> };
     const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
-        if (!(sObjectName in sObjectDescribes)) {
+        if (!(sObjectName in sObjectDescribes.cache)) {
             io.describeSObject(sObjectName);
-            sObjectDescribes[sObjectName] = await connB!.sobject(sObjectName).describe();
+            sObjectDescribes.cache[sObjectName] = connB!.sobject(sObjectName).describe();
         }
-        return sObjectDescribes[sObjectName];
+        return await sObjectDescribes.cache[sObjectName];
     };
     const getSObjectType = async (recordId: string, record?: any): Promise<string> => {
         if (record && record.attributes && record.attributes.type) {
@@ -178,7 +178,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     
     // Now validate field mappings
     for (const matcher of options.matchers) {
-        const sobjectDescribe = sObjectDescribes[matcher.sObjectType];
+        const sobjectDescribe = await getSObjectDescribe(matcher.sObjectType);
         for (const fieldMapping of matcher.fieldMappings) {
             if (!sobjectDescribe.fields.some(field => field.name === fieldMapping.sourceField)) {
                 throw new Error(`Field ${fieldMapping.sourceField} not found in SObject ${matcher.sObjectType}`);
