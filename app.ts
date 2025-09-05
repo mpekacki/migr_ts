@@ -1,6 +1,6 @@
 console.log('importing dependencies');
-import { Connection, AuthInfo } from '@salesforce/core';
 import { DescribeSObjectResult, Field, Schema, SObjectRecord, SObjectUpdateRecord } from 'jsforce';
+import { SalesforceClient, DefaultSalesforceClient, AuthConfig } from './salesforce-client';
 import fs from 'fs';
 import path from 'path';
 import { scanForCircularDependency } from './circular';
@@ -88,53 +88,36 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
 
     io.startingMigration(options);
 
-    const allAuths = await AuthInfo.listAllAuthorizations();
-    
-    const createAuthInfo = async (orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined, orgType: 'source' | 'target'): Promise<AuthInfo> => {
-        if (orgAlias) {
-            // Use alias authentication
-            const getOrgUsername = (alias: string) => allAuths.find(auth => auth.aliases?.includes(alias))?.username;
-            const username = getOrgUsername(orgAlias);
-            if (!username) {
-                throw new Error(`Unable to find username for ${orgType} org alias: ${orgAlias}`);
-            }
-            return await AuthInfo.create({ username });
-        } else if (orgUrl && orgToken) {
-            // Use token authentication
-            return await AuthInfo.create({
-                username: orgToken,
-                accessTokenOptions: {
-                    instanceUrl: orgUrl,
-                    serverUrl: orgUrl,
-                    sessionId: orgToken
-                }
-            });
-        } else {
-            throw new Error(`${orgType.charAt(0).toUpperCase() + orgType.slice(1)} org authentication missing: provide either ${orgType}Org alias or ${orgType}OrgUrl + ${orgType}OrgToken`);
+    const createSalesforceClient = async (orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined, orgType: 'source' | 'target'): Promise<SalesforceClient> => {
+        const authConfig: AuthConfig = {
+            orgAlias,
+            orgUrl,
+            orgToken
+        };
+        try {
+            return await DefaultSalesforceClient.createFromAuth(authConfig);
+        } catch (error) {
+            throw new Error(`${orgType.charAt(0).toUpperCase() + orgType.slice(1)} org authentication failed: ${error.message}`);
         }
     };
 
     const isMigrateToFile = options.targetFile !== undefined;
     const isMigrateFromFile = options.sourceFile !== undefined;
 
-    const authInfoPromises: Promise<AuthInfo>[] = [];
+    const clientPromises: Promise<SalesforceClient>[] = [];
     if (!isMigrateFromFile) {
-        authInfoPromises.push(createAuthInfo(options.sourceOrg, options.sourceOrgUrl, options.sourceOrgToken, 'source'));
+        clientPromises.push(createSalesforceClient(options.sourceOrg, options.sourceOrgUrl, options.sourceOrgToken, 'source'));
     }
     if (!isMigrateToFile) {
-        authInfoPromises.push(createAuthInfo(options.targetOrg, options.targetOrgUrl, options.targetOrgToken, 'target'));
+        clientPromises.push(createSalesforceClient(options.targetOrg, options.targetOrgUrl, options.targetOrgToken, 'target'));
     }
-    const authInfos = await Promise.all(authInfoPromises);
-
-    // Create and return connections
-    const connPromises = authInfos.map(authInfo => Connection.create({ authInfo }));
-    const conns = await Promise.all(connPromises);
-    const connA = isMigrateFromFile ? (conns.length > 0 ? conns[0] : null) : conns[0];
-    const connB = isMigrateToFile ? connA : (isMigrateFromFile ? conns[0] : conns[1]);
+    const clients = await Promise.all(clientPromises);
+    const sourceClient = isMigrateFromFile ? (clients.length > 0 ? clients[0] : null) : clients[0];
+    const targetClient = isMigrateToFile ? sourceClient : (isMigrateFromFile ? clients[0] : clients[1]);
     
-    // Ensure we have at least one connection for target operations
-    if (!connB) {
-        throw new Error('No target connection available');
+    // Ensure we have at least one client for target operations
+    if (!targetClient) {
+        throw new Error('No target client available');
     }
 
     // check if history file exists for target org
@@ -144,12 +127,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         history = JSON.parse(fs.readFileSync(historyFilePath, 'utf8'));
     }
 
-    const describeGlobal = isMigrateFromFile ? null : await connA!.describeGlobal();
+    const describeGlobal = isMigrateFromFile ? null : await sourceClient!.describeGlobal();
     const sObjectDescribes = { cache: {} as Record<string, Promise<DescribeSObjectResult>> };
     const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
         if (!(sObjectName in sObjectDescribes.cache)) {
             io.describeSObject(sObjectName);
-            sObjectDescribes.cache[sObjectName] = connB!.sobject(sObjectName).describe();
+            sObjectDescribes.cache[sObjectName] = targetClient!.describeSObject(sObjectName);
         }
         return await sObjectDescribes.cache[sObjectName];
     };
@@ -240,7 +223,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             io.fetchingRecord(recordId, sObjectName);
             let recordFields;
             try {
-                recordFields = await connA!.sobject(sObjectName).retrieve(recordId);
+                recordFields = await sourceClient!.retrieve(sObjectName, recordId);
             } catch (error) {
                 if (error.errorCode === 'NOT_FOUND' || error.message?.includes('resource does not exist')) {
                     io.recordNotFound(recordId, sObjectName);
@@ -290,7 +273,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
             const relationships = options.relationships?.[sObjectName];
             if (relationships && (!options.relatedRecordDepthLimit || depth < options.relatedRecordDepthLimit)) {
-                const selector = connA!.sobject(sObjectName).select('Id');
+                const selector = sourceClient!.select(sObjectName);
                 for (const relationship of relationships) {
                     selector.include(relationship.name).select('Id').end();
                 }
@@ -427,8 +410,8 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 conditions[fieldMapping.targetField] = old2new[conditions[fieldMapping.targetField]];
                             }
                         }
-                        const selector = connB!.sobject(sObjectName).find(conditions).select('Id');
-                        io.queryingForExistingRecord(await selector.toSOQL());
+                        const selector = targetClient!.find(sObjectName, conditions).select('Id');
+                        io.queryingForExistingRecord('SELECT Id FROM ' + sObjectName + ' WHERE ' + Object.entries(conditions).map(([k, v]) => `${k} = '${v}'`).join(' AND '));
                         const migratedRecord = await selector.execute();
                         if (migratedRecord.length > 0) {
                             migratedRecordId = migratedRecord[0].Id!;
@@ -455,14 +438,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 let retryAll = false;
                 for (const chunk of chunks) {
                     io.savingRecords(chunk);
-                    const savedRecords = (await connB!.request({
-                    method: 'POST',
-                    url: `/services/data/v${connB!.version}/composite/sobjects`,
-                    body: JSON.stringify({
-                            allOrNone: false,
-                            records: Object.values(chunk)
-                        })
-                    })) as Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>;
+                    const savedRecords = await targetClient!.bulkCreate(Object.values(chunk));
                     io.savedRecords(savedRecords);
                     for (let i = 0; i < savedRecords.length; i++) {
                         const recordId = Object.keys(chunk)[i];
@@ -662,7 +638,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
             io.updatingRecord(recordId, record.attributes!.type, record);
             try {
-                await connB!.sobject(record.attributes!.type).update(record as SObjectUpdateRecord<Schema, string>);
+                await targetClient!.update(record.attributes!.type, record);
             } catch (e) {
                 io.errorUpdatingRecord(recordId, record.attributes!.type, e);
             }
