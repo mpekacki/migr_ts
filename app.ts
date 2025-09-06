@@ -1,8 +1,8 @@
 console.log('importing dependencies');
 import { DescribeSObjectResult, Field, Schema, SObjectRecord, SObjectUpdateRecord } from 'jsforce';
 import { SalesforceClient, DefaultSalesforceClient, AuthConfig } from './salesforce-client';
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 import { scanForCircularDependency } from './circular';
 import Chunks from './chunks';
 import IOEvent from './ioevent';
@@ -33,7 +33,7 @@ interface Options {
             name: string;
         }[];
     };
-    solvers: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver)[];
+    solvers: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver | RetrySolver | BackoffSolver | FallbackSolver)[];
 }
 
 interface Solver {
@@ -70,6 +70,29 @@ interface AppendRandomSolver extends Solver {
     }[];
 }
 
+interface RetrySolver extends Solver {
+    action: 'retry';
+    maxAttempts?: number;
+    delay?: number; // milliseconds
+}
+
+interface BackoffSolver extends Solver {
+    action: 'backoff';
+    maxAttempts?: number;
+    initialDelay?: number; // milliseconds
+    backoffMultiplier?: number;
+}
+
+interface FallbackSolver extends Solver {
+    action: 'fallback';
+    fallbackAction: 'skip' | 'log_and_continue';
+}
+
+export interface ClientFactory {
+    createSourceClient(orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined): Promise<SalesforceClient>;
+    createTargetClient(orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined): Promise<SalesforceClient>;
+}
+
 const ID_REGEX = /[a-zA-Z0-9]{18}/g;
 const USER_INPUTS = {
     fix: 'f',
@@ -82,22 +105,98 @@ const USER_INPUTS = {
 };
 const CHUNKING_OBJECTS = ['User', 'UserRole', 'PermissionSetAssignment', 'BusinessHours'];
 
-async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>) {
+async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>, clientFactory?: ClientFactory) {
     const io = new IO(onOutput, onInput);
     const chunking = new Chunks(CHUNKING_OBJECTS, 200, 10);
 
     io.startingMigration(options);
 
+    // Helper function to handle jsforce errors with solvers
+    const handleJsforceError = async (error: any, context: string, retryOperation?: () => Promise<any>): Promise<{ success: boolean, result?: any, shouldSkip?: boolean }> => {
+        const errorMessage = error.message || error.toString();
+        
+        // Find applicable solver
+        const solver = options.solvers?.find(solver => new RegExp(solver.message).test(errorMessage));
+        
+        if (solver) {
+            if (solver.action === 'retry') {
+                const retrySolver = solver as RetrySolver;
+                const maxAttempts = retrySolver.maxAttempts || 3;
+                const delay = retrySolver.delay || 1000;
+                
+                for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                    try {
+                        if (delay > 0) {
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                        }
+                        io.error(`Retrying ${context} (attempt ${attempt}/${maxAttempts})`);
+                        const result = await retryOperation!();
+                        return { success: true, result };
+                    } catch (retryError) {
+                        if (attempt === maxAttempts) {
+                            return { success: false };
+                        }
+                    }
+                }
+            } else if (solver.action === 'backoff') {
+                const backoffSolver = solver as BackoffSolver;
+                const maxAttempts = backoffSolver.maxAttempts || 3;
+                const initialDelay = backoffSolver.initialDelay || 1000;
+                const multiplier = backoffSolver.backoffMultiplier || 2;
+                
+                for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                    try {
+                        const delay = initialDelay * Math.pow(multiplier, attempt - 1);
+                        if (delay > 0) {
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                        }
+                        io.error(`Retrying ${context} with backoff (attempt ${attempt}/${maxAttempts}, delay: ${delay}ms)`);
+                        const result = await retryOperation!();
+                        return { success: true, result };
+                    } catch (retryError) {
+                        if (attempt === maxAttempts) {
+                            return { success: false };
+                        }
+                    }
+                }
+            } else if (solver.action === 'fallback') {
+                const fallbackSolver = solver as FallbackSolver;
+                io.error(`Fallback action for ${context}: ${fallbackSolver.fallbackAction}`);
+                if (fallbackSolver.fallbackAction === 'skip') {
+                    return { success: false, shouldSkip: true };
+                } else if (fallbackSolver.fallbackAction === 'log_and_continue') {
+                    io.error(`Continuing despite error in ${context}: ${errorMessage}`);
+                    return { success: false, shouldSkip: false };
+                }
+            }
+        }
+        
+        // No solver found or solver didn't handle the error
+        throw error;
+    };
+
     const createSalesforceClient = async (orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined, orgType: 'source' | 'target'): Promise<SalesforceClient> => {
-        const authConfig: AuthConfig = {
-            orgAlias,
-            orgUrl,
-            orgToken
-        };
-        try {
-            return await DefaultSalesforceClient.createFromAuth(authConfig);
-        } catch (error) {
-            throw new Error(`${orgType.charAt(0).toUpperCase() + orgType.slice(1)} org authentication failed: ${error.message}`);
+        if (clientFactory) {
+            try {
+                if (orgType === 'source') {
+                    return await clientFactory.createSourceClient(orgAlias, orgUrl, orgToken);
+                } else {
+                    return await clientFactory.createTargetClient(orgAlias, orgUrl, orgToken);
+                }
+            } catch (error) {
+                throw new Error(`${orgType.charAt(0).toUpperCase() + orgType.slice(1)} org authentication failed: ${error.message}`);
+            }
+        } else {
+            const authConfig: AuthConfig = {
+                orgAlias,
+                orgUrl,
+                orgToken
+            };
+            try {
+                return await DefaultSalesforceClient.createFromAuth(authConfig);
+            } catch (error) {
+                throw new Error(`${orgType.charAt(0).toUpperCase() + orgType.slice(1)} org authentication failed: ${error.message}`);
+            }
         }
     };
 
@@ -174,7 +273,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const fetchedRecordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     const lookupFieldsBySObjectType: Record<string, Field[]> = {};
     const old2new: Record<string, string> = {};
-    const errors: Record<string, { message: string, fixed: boolean, solver?: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver) }[]> = {};
+    const errors: Record<string, { message: string, fixed: boolean, solver?: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver | RetrySolver | BackoffSolver | FallbackSolver) }[]> = {};
     const migratedRecords: Record<string, string> = {};
     
     // Load records from file if sourceFile is provided
@@ -279,7 +378,31 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 }
                 selector.where(`Id = '${recordId}'`);
                 io.queryingForRelatedRecords(await selector.toSOQL());
-                const relsResults = await selector.execute();
+                let relsResults: any[] = [];
+                
+                try {
+                    relsResults = await selector.execute();
+                } catch (jsforceError) {
+                    try {
+                        const errorResult = await handleJsforceError(
+                            jsforceError,
+                            `query related records for ${recordId}`,
+                            () => selector.execute()
+                        );
+                        
+                        if (errorResult.success && errorResult.result) {
+                            relsResults = errorResult.result;
+                        } else if (errorResult.shouldSkip) {
+                            io.error(`Skipping related records query for ${recordId} due to jsforce error: ${jsforceError.message}`);
+                            relsResults = [];
+                        } else {
+                            throw jsforceError;
+                        }
+                    } catch (unhandledError) {
+                        io.error(`Unhandled jsforce error in related records query: ${jsforceError.message}`);
+                        relsResults = [];
+                    }
+                }
                 const recordRelationships = relsResults[0];
                 for (const relationship of relationships) {
                     const relatedRecords = recordRelationships![relationship.name]?.records;
@@ -412,7 +535,31 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         }
                         const selector = targetClient!.find(sObjectName, conditions).select('Id');
                         io.queryingForExistingRecord('SELECT Id FROM ' + sObjectName + ' WHERE ' + Object.entries(conditions).map(([k, v]) => `${k} = '${v}'`).join(' AND '));
-                        const migratedRecord = await selector.execute();
+                        let migratedRecord: any[] = [];
+                        
+                        try {
+                            migratedRecord = await selector.execute();
+                        } catch (jsforceError) {
+                            try {
+                                const errorResult = await handleJsforceError(
+                                    jsforceError,
+                                    `find existing record for ${sObjectName}`,
+                                    () => selector.execute()
+                                );
+                                
+                                if (errorResult.success && errorResult.result) {
+                                    migratedRecord = errorResult.result;
+                                } else if (errorResult.shouldSkip) {
+                                    io.error(`Skipping existing record search for ${recordId} due to jsforce error: ${jsforceError.message}`);
+                                    migratedRecord = [];
+                                } else {
+                                    throw jsforceError;
+                                }
+                            } catch (unhandledError) {
+                                io.error(`Unhandled jsforce error in find operation: ${jsforceError.message}`);
+                                migratedRecord = [];
+                            }
+                        }
                         if (migratedRecord.length > 0) {
                             migratedRecordId = migratedRecord[0].Id!;
                             io.foundExistingRecord(migratedRecordId, sObjectName);
@@ -438,8 +585,45 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 let retryAll = false;
                 for (const chunk of chunks) {
                     io.savingRecords(chunk);
-                    const savedRecords = await targetClient!.bulkCreate(Object.values(chunk));
-                    io.savedRecords(savedRecords);
+                    let savedRecords: Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>;
+                    
+                    try {
+                        savedRecords = await targetClient!.bulkCreate(Object.values(chunk));
+                        io.savedRecords(savedRecords);
+                    } catch (jsforceError) {
+                        // Handle jsforce connection errors with solvers
+                        try {
+                            const errorResult = await handleJsforceError(
+                                jsforceError, 
+                                `bulkCreate for chunk with ${Object.keys(chunk).length} records`,
+                                () => targetClient!.bulkCreate(Object.values(chunk))
+                            );
+                            
+                            if (errorResult.success && errorResult.result) {
+                                savedRecords = errorResult.result;
+                                io.savedRecords(savedRecords);
+                            } else if (errorResult.shouldSkip) {
+                                // Skip this chunk - mark all records as failed
+                                savedRecords = Object.keys(chunk).map(() => ({
+                                    id: '',
+                                    success: false,
+                                    errors: [{ message: `Skipped due to jsforce error: ${jsforceError.message}`, fields: [] }]
+                                }));
+                                io.error(`Skipping chunk due to jsforce error: ${jsforceError.message}`);
+                            } else {
+                                // Re-throw if not handled by solver
+                                throw jsforceError;
+                            }
+                        } catch (unhandledError) {
+                            // If error handling fails, mark all records in chunk as failed
+                            savedRecords = Object.keys(chunk).map(() => ({
+                                id: '',
+                                success: false,
+                                errors: [{ message: `Jsforce error: ${jsforceError.message}`, fields: [] }]
+                            }));
+                            io.error(`Unhandled jsforce error in bulkCreate: ${jsforceError.message}`);
+                        }
+                    }
                     for (let i = 0; i < savedRecords.length; i++) {
                         const recordId = Object.keys(chunk)[i];
                         const record = recordsByIds[recordId];
@@ -453,7 +637,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                             const errs = savedRecord.errors
                             for (const e of errs) {
                                 let errorFixed = false;
-                                let solver: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver) | undefined;
+                                let solver: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver | RetrySolver | BackoffSolver | FallbackSolver) | undefined;
                                 if (options.solvers) {
                                     // get previously used solvers
                                     const usedSolvers = errors[recordId]?.filter(error => error.message === e.message).map(error => error.solver);
@@ -639,8 +823,22 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             io.updatingRecord(recordId, record.attributes!.type, record);
             try {
                 await targetClient!.update(record.attributes!.type, record);
-            } catch (e) {
-                io.errorUpdatingRecord(recordId, record.attributes!.type, e);
+            } catch (jsforceError) {
+                try {
+                    const errorResult = await handleJsforceError(
+                        jsforceError,
+                        `update record ${recordId} of type ${record.attributes!.type}`,
+                        () => targetClient!.update(record.attributes!.type, record)
+                    );
+                    
+                    if (!errorResult.success && !errorResult.shouldSkip) {
+                        io.errorUpdatingRecord(recordId, record.attributes!.type, jsforceError);
+                    } else if (errorResult.shouldSkip) {
+                        io.error(`Skipping update for ${recordId} due to jsforce error: ${jsforceError.message}`);
+                    }
+                } catch (unhandledError) {
+                    io.errorUpdatingRecord(recordId, record.attributes!.type, jsforceError);
+                }
             }
         }
 
