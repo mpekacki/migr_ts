@@ -2144,3 +2144,22 @@ test('migrate from file', async () => {
     expect(newAccount['Name']).toBe('Ebola Cola');
     expect(newAccount['Id']).toBe(newAccountId);
 });
+
+test('full auto mode', async () => {
+    console.log('starting test: full auto mode');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const account = await createAccount(conn1, 'Ebola Cola');
+    expect(account.id).toBeDefined();
+
+    const config = createBasicConfig([account.id!], { 
+        fullAuto: {
+            enabled: true
+        }
+    });
+
+    const { parsedOutput } = await runMigration(config, []); // no input needed for full auto mode
+
+    assertRecordMigrated(parsedOutput, account.id!);
+});
