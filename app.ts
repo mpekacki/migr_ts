@@ -34,6 +34,10 @@ interface Options {
         }[];
     };
     solvers: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver | RetrySolver | BackoffSolver | FallbackSolver)[];
+    fullAuto?: {
+        enabled: boolean;
+        unhandledErrorBehavior: 'skip' | 'saveAndExit';
+    };
 }
 
 interface Solver {
@@ -303,6 +307,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const setNewRecordId = (recordId: string, newRecordId: string) => {
         old2new[recordId] = newRecordId;
         delete recordsByIds[recordId];
+        delete fetchedRecordsByIds[recordId];
         migratedRecords[recordId] = newRecordId;
     }
     
@@ -423,7 +428,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         const newIdsArrays = await Promise.all(fetchPromises);
         
         // Flatten array of arrays into single array of new IDs to fetch
-        const newRecordIdsToFetch = newIdsArrays.flat();
+        const newRecordIdsToFetch = newIdsArrays.flat().filter((id): id is string => id !== undefined);
         // remove records that are already fetched
         recordIdsToFetch = recordIdsToFetch.filter(id => !(id in fetchedRecordsByIds));
         recordIdsToFetch = newRecordIdsToFetch;
@@ -446,11 +451,13 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         recordCountsBySObjectType[record.attributes!.type]++;
     }
 
-    // ask for confirmation
-    const confirmation = await io.askForConfirmation(recordCountsBySObjectType);
-    if (confirmation !== 'y') {
-        io.aborted();
-        return;
+    if (!options.fullAuto?.enabled) {
+        // ask for confirmation
+        const confirmation = await io.askForConfirmation(recordCountsBySObjectType);
+        if (confirmation !== 'y') {
+            io.aborted();
+            return;
+        }
     }
 
     const saveAndExit = () => {
@@ -688,10 +695,11 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                     io.error(e.message);
                                     let inputOk;
                                     let solverAdded = false;
-                                    do {
-                                        inputOk = true;
-                                        const userInput = await io.askForInput(recordId, e.message);
-                                        if (userInput === USER_INPUTS.fix) {
+                                    if (!options.fullAuto?.enabled) {
+                                        do {
+                                            inputOk = true;
+                                            const userInput = await io.askForInput(recordId, e.message);
+                                            if (userInput === USER_INPUTS.fix) {
                                             let fieldsToUpdate;
                                             while (!fieldsToUpdate) {
                                                 const fieldsJson = await io.askForFieldsToUpdate();
@@ -741,15 +749,19 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             anyRecordProcessed = true;
                                             solverAdded = true;
                                             retryRecord = true;
-                                        } else if (userInput === USER_INPUTS.skip) {
-                                            // skip record, don't do anything
-                                        } else {
-                                            io.invalidInput(userInput);
-                                            inputOk = false;
+                                            } else if (userInput === USER_INPUTS.skip) {
+                                                // skip record, don't do anything
+                                            } else {
+                                                io.invalidInput(userInput);
+                                                inputOk = false;
+                                            }
+                                        } while (!inputOk);
+                                        if (solverAdded) {
+                                            break;
                                         }
-                                    } while (!inputOk);
-                                    if (solverAdded) {
-                                        break;
+                                    } else {
+                                        saveAndExit();
+                                        return;
                                     }
                                 }
                                 if (!solver?.hideError) {
