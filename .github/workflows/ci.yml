@@ -68,7 +68,7 @@ jobs:
           # Delete existing org if it exists
           if sf org list --json | jq -e ".result.scratchOrgs[]? | select(.alias == \"$org_alias\")" > /dev/null; then
             echo "Deleting existing scratch org: $org_alias"
-            sf org delete scratch --alias "$org_alias" --no-prompt || true
+            sf org delete scratch --target-org "$org_alias" --no-prompt || true
           fi
           
           # Create new scratch org
@@ -120,7 +120,7 @@ jobs:
         # Clean up Test Org A
         if sf org list --json | jq -e ".result.scratchOrgs[]? | select(.alias == \"$TEST_ORG_A_ALIAS\")" > /dev/null; then
           echo "Deleting Test Org A: $TEST_ORG_A_ALIAS"
-          sf org delete scratch --alias "$TEST_ORG_A_ALIAS" --no-prompt || true
+          sf org delete scratch --target-org "$TEST_ORG_A_ALIAS" --no-prompt || true
         else
           echo "Test Org A not found, skipping cleanup"
         fi
@@ -128,7 +128,7 @@ jobs:
         # Clean up Test Org B  
         if sf org list --json | jq -e ".result.scratchOrgs[]? | select(.alias == \"$TEST_ORG_B_ALIAS\")" > /dev/null; then
           echo "Deleting Test Org B: $TEST_ORG_B_ALIAS"
-          sf org delete scratch --alias "$TEST_ORG_B_ALIAS" --no-prompt || true
+          sf org delete scratch --target-org "$TEST_ORG_B_ALIAS" --no-prompt || true
         else
           echo "Test Org B not found, skipping cleanup"
         fi
