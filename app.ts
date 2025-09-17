@@ -700,55 +700,55 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             inputOk = true;
                                             const userInput = await io.askForInput(recordId, e.message);
                                             if (userInput === USER_INPUTS.fix) {
-                                            let fieldsToUpdate;
-                                            while (!fieldsToUpdate) {
-                                                const fieldsJson = await io.askForFieldsToUpdate();
-                                                try {
-                                                    fieldsToUpdate = JSON.parse(fieldsJson);
-                                                } catch {
-                                                    io.invalidJson();
+                                                let fieldsToUpdate;
+                                                while (!fieldsToUpdate) {
+                                                    const fieldsJson = await io.askForFieldsToUpdate();
+                                                    try {
+                                                        fieldsToUpdate = JSON.parse(fieldsJson);
+                                                    } catch {
+                                                        io.invalidJson();
+                                                    }
                                                 }
-                                            }
-                                            solver = {
-                                                action: 'fix',
-                                                message: e.message,
-                                                changeFields: []
-                                            }
-                                            for (const field of Object.keys(fieldsToUpdate)) {
-                                                setFieldWithLaterUpdate(recordId, record, field, fieldsToUpdate[field]);
-                                                solver.changeFields.push({ field, value: fieldsToUpdate[field] });
-                                            }
-                                            retryRecord = true;
-                                            errorFixed = true;
-                                        } else if (userInput === USER_INPUTS.retry) {
-                                            retryRecord = true;
-                                        } else if (userInput === USER_INPUTS.retryAll) {
-                                            retryAll = true;
-                                            retryRecord = true;
-                                        } else if (userInput === USER_INPUTS.match) {
-                                            migratedRecordId = await io.askForMatch();
-                                        } else if (userInput === USER_INPUTS.saveAndExit) {
-                                            saveAndExit();
-                                            return;
-                                        } else if (userInput === USER_INPUTS.addSolver) {
-                                            let newSolver;
-                                            while (!newSolver) {
-                                                const solverJson = await io.askForSolver();
-                                                try {
-                                                    newSolver = JSON.parse(solverJson);
-                                                    new RegExp(newSolver.message);
-                                                } catch {
-                                                    newSolver = null;
-                                                    io.invalidJson();
+                                                solver = {
+                                                    action: 'fix',
+                                                    message: e.message,
+                                                    changeFields: []
                                                 }
-                                            }
-                                            if (!options.solvers) {
-                                                options.solvers = [];
-                                            }
-                                            options.solvers.push(newSolver);
-                                            anyRecordProcessed = true;
-                                            solverAdded = true;
-                                            retryRecord = true;
+                                                for (const field of Object.keys(fieldsToUpdate)) {
+                                                    setFieldWithLaterUpdate(recordId, record, field, fieldsToUpdate[field]);
+                                                    solver.changeFields.push({ field, value: fieldsToUpdate[field] });
+                                                }
+                                                retryRecord = true;
+                                                errorFixed = true;
+                                            } else if (userInput === USER_INPUTS.retry) {
+                                                retryRecord = true;
+                                            } else if (userInput === USER_INPUTS.retryAll) {
+                                                retryAll = true;
+                                                retryRecord = true;
+                                            } else if (userInput === USER_INPUTS.match) {
+                                                migratedRecordId = await io.askForMatch();
+                                            } else if (userInput === USER_INPUTS.saveAndExit) {
+                                                saveAndExit();
+                                                return;
+                                            } else if (userInput === USER_INPUTS.addSolver) {
+                                                let newSolver;
+                                                while (!newSolver) {
+                                                    const solverJson = await io.askForSolver();
+                                                    try {
+                                                        newSolver = JSON.parse(solverJson);
+                                                        new RegExp(newSolver.message);
+                                                    } catch {
+                                                        newSolver = null;
+                                                        io.invalidJson();
+                                                    }
+                                                }
+                                                if (!options.solvers) {
+                                                    options.solvers = [];
+                                                }
+                                                options.solvers.push(newSolver);
+                                                anyRecordProcessed = true;
+                                                solverAdded = true;
+                                                retryRecord = true;
                                             } else if (userInput === USER_INPUTS.skip) {
                                                 // skip record, don't do anything
                                             } else {
@@ -760,8 +760,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             break;
                                         }
                                     } else {
-                                        saveAndExit();
-                                        return;
+                                        if (options.fullAuto?.unhandledErrorBehavior === 'saveAndExit') {
+                                            saveAndExit();
+                                            return;
+                                        } else {
+                                            // skip record, don't do anything
+                                        }
                                     }
                                 }
                                 if (!solver?.hideError) {

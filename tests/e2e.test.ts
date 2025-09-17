@@ -2145,7 +2145,7 @@ test('migrate from file', async () => {
     expect(newAccount['Id']).toBe(newAccountId);
 });
 
-test('full auto mode', async () => {
+test('full auto mode - save and exit', async () => {
     console.log('starting test: full auto mode');
 
     const { conn1, conn2 } = await setupTestConnections();
@@ -2163,7 +2163,15 @@ test('full auto mode', async () => {
 
     await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
 
-    const config = createBasicConfig([contract.id!], { 
+    const contract2 = await conn1.sobject('Contract').create({ 
+        AccountId: account.id!, 
+        Status: 'Draft', 
+        StartDate: new Date().toISOString(), 
+        ContractTerm: 12 
+    });
+    expect(contract2.id).toBeDefined();
+
+    const config = createBasicConfig([contract.id!, contract2.id!], { 
         fullAuto: {
             enabled: true,
             unhandledErrorBehavior: 'saveAndExit'
@@ -2172,16 +2180,50 @@ test('full auto mode', async () => {
 
     const { parsedOutput } = await runMigration(config, []); // no input needed for full auto mode
 
-    const newAccountId = assertRecordMigrated(parsedOutput, account.id!);
+    assertRecordMigrated(parsedOutput, account.id!);
 
-    // run migration again, only for Account
-    config.recordIds = [account.id!];
-    const { parsedOutput: parsedOutput2 } = await runMigration(config, []);
+    expect(parsedOutput.allMigratedRecords).not.toHaveProperty(contract.id!);
+    expect(parsedOutput.allMigratedRecords).not.toHaveProperty(contract2.id!);
+});
 
-    // Account should not be migrated again
-    const recordSource2 = parsedOutput2.allMigratedRecords || parsedOutput2;
-    expect(recordSource2).toHaveProperty(account.id!);
-    const newAccountId2 = recordSource2[account.id!];
-    expect(newAccountId2).toBeTruthy();
-    expect(newAccountId2).toEqual(newAccountId);
+test('full auto mode - skip', async () => {
+    console.log('starting test: full auto mode - skip');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const account = await createAccount(conn1, 'Ebola Cola');
+    expect(account.id).toBeDefined();
+
+    const contract = await conn1.sobject('Contract').create({ 
+        AccountId: account.id!, 
+        Status: 'Draft', 
+        StartDate: new Date().toISOString(), 
+        ContractTerm: 12 
+    });
+    expect(contract.id).toBeDefined();
+
+    await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
+
+    const contract2 = await conn1.sobject('Contract').create({ 
+        AccountId: account.id!, 
+        Status: 'Draft', 
+        StartDate: new Date().toISOString(), 
+        ContractTerm: 12 
+    });
+    expect(contract2.id).toBeDefined();
+
+    const config = createBasicConfig([contract.id!, contract2.id!], { 
+        fullAuto: {
+            enabled: true,
+            unhandledErrorBehavior: 'skip'
+        }
+    });
+
+    const { parsedOutput } = await runMigration(config, []); // no input needed for full auto mode
+
+    assertRecordMigrated(parsedOutput, account.id!);
+
+    expect(parsedOutput.allMigratedRecords).toHaveProperty(contract.id!);
+    expect(parsedOutput.allMigratedRecords[contract.id!]).toBe('');
+    assertRecordMigrated(parsedOutput, contract2.id!);
 });
