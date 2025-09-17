@@ -162,11 +162,11 @@ jobs:
         # Check and manage Test Org A
         if [ "$(is_org_valid "$TEST_ORG_A_ALIAS")" = "true" ]; then
           echo "Test Org A is cached and should be valid"
-          # Try to verify it's actually accessible
-          if sf org list --json | jq -e ".result.scratchOrgs[]? | select(.alias == \"$TEST_ORG_A_ALIAS\" and .status == \"Active\")" > /dev/null; then
-            echo "Test Org A confirmed active"
+          # Try to verify it's actually accessible by testing connection
+          if sf org display --target-org "$TEST_ORG_A_ALIAS" --json > /dev/null 2>&1; then
+            echo "Test Org A confirmed active and accessible"
           else
-            echo "Test Org A not found in SF CLI, recreating"
+            echo "Test Org A not accessible, recreating"
             create_scratch_org "$TEST_ORG_A_ALIAS"
           fi
         else
@@ -177,11 +177,11 @@ jobs:
         # Check and manage Test Org B
         if [ "$(is_org_valid "$TEST_ORG_B_ALIAS")" = "true" ]; then
           echo "Test Org B is cached and should be valid"
-          # Try to verify it's actually accessible
-          if sf org list --json | jq -e ".result.scratchOrgs[]? | select(.alias == \"$TEST_ORG_B_ALIAS\" and .status == \"Active\")" > /dev/null; then
-            echo "Test Org B confirmed active"
+          # Try to verify it's actually accessible by testing connection
+          if sf org display --target-org "$TEST_ORG_B_ALIAS" --json > /dev/null 2>&1; then
+            echo "Test Org B confirmed active and accessible"
           else
-            echo "Test Org B not found in SF CLI, recreating"
+            echo "Test Org B not accessible, recreating"
             create_scratch_org "$TEST_ORG_B_ALIAS"
           fi
         else
