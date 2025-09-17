@@ -108,9 +108,9 @@ jobs:
 
     - name: Run tests
       run: |
-        echo "::group::Running Jest Tests"
+        echo "Starting test execution..."
         npm run test:ci
-        echo "::endgroup::"
+        echo "All tests completed"
 
     - name: Cleanup scratch orgs
       if: always()

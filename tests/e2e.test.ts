@@ -2153,6 +2153,12 @@ test('full auto mode - save and exit', async () => {
     const account = await createAccount(conn1, 'Ebola Cola');
     expect(account.id).toBeDefined();
 
+    const childAccount = await conn1.sobject('Account').create({ 
+        Name: 'Child Account', 
+        ParentId: account.id 
+    });
+    expect(childAccount.id).toBeDefined();
+
     const contract = await conn1.sobject('Contract').create({ 
         AccountId: account.id!, 
         Status: 'Draft', 
@@ -2164,7 +2170,7 @@ test('full auto mode - save and exit', async () => {
     await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
 
     const contract2 = await conn1.sobject('Contract').create({ 
-        AccountId: account.id!, 
+        AccountId: childAccount.id!, 
         Status: 'Draft', 
         StartDate: new Date().toISOString(), 
         ContractTerm: 12 
@@ -2194,6 +2200,12 @@ test('full auto mode - skip', async () => {
     const account = await createAccount(conn1, 'Ebola Cola');
     expect(account.id).toBeDefined();
 
+    const childAccount = await conn1.sobject('Account').create({ 
+        Name: 'Child Account', 
+        ParentId: account.id 
+    });
+    expect(childAccount.id).toBeDefined();
+
     const contract = await conn1.sobject('Contract').create({ 
         AccountId: account.id!, 
         Status: 'Draft', 
@@ -2205,7 +2217,7 @@ test('full auto mode - skip', async () => {
     await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
 
     const contract2 = await conn1.sobject('Contract').create({ 
-        AccountId: account.id!, 
+        AccountId: childAccount.id!, 
         Status: 'Draft', 
         StartDate: new Date().toISOString(), 
         ContractTerm: 12 
