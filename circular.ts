@@ -7,56 +7,96 @@ interface ToClear {
 
 export const scanForCircularDependency = (records: SfRecord[], requiredLookupsBySObjectType: Record<string, string[]>): ToClear[] => {
     const toClear: ToClear[] = [];
-
-    const recordsById = records.reduce((acc, record) => {
-        acc[record.Id as string] = record;
-        return acc;
-    }, {} as Record<string, SfRecord>);
-
-    const visited = new Set<string>();
-
-    const search = (recordId: string, path: string[]) => {
-        // console.log('searching', recordId, path[0], path[path.length - 1], path.length);
-        const record = recordsById[recordId];
-        for (const field of Object.keys(record)) {
-            if (field !== 'Id' && field !== 'attributes') {
-                const val = String(record[field as string]);
-                const idsInVal = Object.keys(recordsById).filter(id => val?.includes(id));
-                if (idsInVal.length === 0) {
-                    continue;
-                }
-                for (const lookup of idsInVal) {
-                    const newPath = [...path, field, lookup];
-                    for (let j = 0; j < newPath.length; j += 2) {
-                        if (lookup === newPath[j]) {
-                            for (let i = j + 1; i < newPath.length - 1; i += 2) {
-                                const objectType = recordsById[newPath[i - 1]].attributes?.type;
-                                const requiredLookups = requiredLookupsBySObjectType[objectType || ''] || [];
-                                const field = newPath[i];
-                                if (!requiredLookups.includes(field)) {
-                                    toClear.push({ recordId: newPath[i - 1], field });
-                                    console.log('clearing', newPath[i - 1], field);
-                                    recordsById[newPath[i - 1]][field as string] = null;
-                                    for (let k = 0; k < newPath.length; k += 2) {
-                                        visited.add(newPath[k]);
-                                    }
-                                }
-                                return;
-                            }
-                        }
-                    }
-                    if (!(visited.has(recordId) && visited.has(lookup))) {
-                        search(lookup, newPath);
-                    }
-                }
-            }
-        }
-    }
+    const recordsById = new Map<string, SfRecord>();
+    const allRecordIds = new Set<string>();
 
     for (const record of records) {
         const recordId = record.Id as string;
-        const path = [recordId];
-        search(recordId, path);
+        recordsById.set(recordId, record);
+        allRecordIds.add(recordId);
+    }
+
+    const findDependencies = () => {
+        const fieldDependencies = new Map<string, Set<string>>();
+
+        for (const record of records) {
+            const recordId = record.Id as string;
+            const dependencies = new Set<string>();
+
+            for (const [field, value] of Object.entries(record)) {
+                if (field === 'Id' || field === 'attributes' || value == null) continue;
+
+                const valueStr = String(value);
+                for (const targetId of allRecordIds) {
+                    if (targetId !== recordId && valueStr.includes(targetId)) {
+                        dependencies.add(`${field}:${targetId}`);
+                    }
+                }
+            }
+            fieldDependencies.set(recordId, dependencies);
+        }
+        return fieldDependencies;
+    };
+
+    let foundCycle = true;
+    while (foundCycle) {
+        foundCycle = false;
+        const fieldDependencies = findDependencies();
+        const visited = new Set<string>();
+        const inPath = new Set<string>();
+        const pathStack: Array<{recordId: string, field: string}> = [];
+
+        const dfs = (recordId: string): boolean => {
+            if (inPath.has(recordId)) {
+                const cycleStart = pathStack.findIndex(entry => entry.recordId === recordId);
+                for (let i = cycleStart; i < pathStack.length; i++) {
+                    const entry = pathStack[i];
+                    const record = recordsById.get(entry.recordId)!;
+                    const objectType = record.attributes?.type || '';
+                    const requiredLookups = requiredLookupsBySObjectType[objectType] || [];
+
+                    if (!requiredLookups.includes(entry.field)) {
+                        toClear.push({ recordId: entry.recordId, field: entry.field });
+                        console.log('clearing', entry.recordId, entry.field);
+                        record[entry.field as string] = null;
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            if (visited.has(recordId)) return false;
+
+            visited.add(recordId);
+            inPath.add(recordId);
+
+            const dependencies = fieldDependencies.get(recordId);
+            if (dependencies) {
+                for (const dep of dependencies) {
+                    const [field, targetId] = dep.split(':');
+                    pathStack.push({ recordId, field });
+
+                    if (dfs(targetId)) {
+                        inPath.delete(recordId);
+                        return true;
+                    }
+                    pathStack.pop();
+                }
+            }
+
+            inPath.delete(recordId);
+            return false;
+        };
+
+        for (const record of records) {
+            const recordId = record.Id as string;
+            if (!visited.has(recordId)) {
+                if (dfs(recordId)) {
+                    foundCycle = true;
+                    break;
+                }
+            }
+        }
     }
 
     return toClear;
