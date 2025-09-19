@@ -10,7 +10,7 @@ export const preprocessData = (recordsByIds: Record<string, SObjectRecord<Schema
             const record = recordsByIds[recordId];
             for (const field in record) {
                 // if value contains @, clear it
-                if (record[field] && record[field].includes('@')) {
+                if (record[field] && typeof record[field] === 'string' && record[field].includes('@')) {
                     record[field] = '';
                 }
             }

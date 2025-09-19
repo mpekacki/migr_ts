@@ -2239,3 +2239,28 @@ test('full auto mode - skip', async () => {
     expect(parsedOutput.allMigratedRecords[contract.id!]).toBe('');
     assertRecordMigrated(parsedOutput, contract2.id!);
 });
+
+test('anonymize email fields', async () => {
+    console.log('starting test: anonymize email fields');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const uniqueEmail = `test+${Date.now()}@example.com`;
+    const contact = await conn1.sobject('Contact').create({ FirstName: 'John', LastName: 'Doe', Email: uniqueEmail });
+
+    const config = createBasicConfig([contact.id!], { 
+        anonymization: {
+            emailFields: {
+                anonymize: true
+            }
+        }
+    });
+
+    const { parsedOutput } = await runMigration(config);
+
+    const newContactId = assertRecordMigrated(parsedOutput, contact.id!);
+
+    const newContact = await conn2.sobject('Contact').retrieve(newContactId);
+    expect(newContact).toBeDefined();
+    expect(newContact.Email).not.toBe(uniqueEmail);
+});

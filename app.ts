@@ -7,6 +7,7 @@ import { scanForCircularDependency } from './circular';
 import Chunks from './chunks';
 import IOEvent from './ioevent';
 import IO from './io';
+import { preprocessData } from './preprocess-data';
 console.log('importing dependencies done');
 
 interface Options {
@@ -37,6 +38,11 @@ interface Options {
     fullAuto?: {
         enabled: boolean;
         unhandledErrorBehavior: 'skip' | 'saveAndExit';
+    };
+    anonymization?: {
+        emailFields?: {
+            anonymize: boolean;
+        };
     };
 }
 
@@ -442,6 +448,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
 
     io.fetchedRecords(Object.keys(recordsByIds).length);
+
+    // Apply preprocessing (e.g., anonymization)
+    if (options.anonymization?.emailFields?.anonymize) {
+        preprocessData(recordsByIds, { anonymizeEmailFields: true });
+    }
+
     // build map of record counts by sobject type
     const recordCountsBySObjectType: Record<string, number> = {};
     for (const record of Object.values(recordsByIds)) {
