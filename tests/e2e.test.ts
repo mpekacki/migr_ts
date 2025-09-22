@@ -2263,4 +2263,5 @@ test('anonymize email fields', async () => {
     const newContact = await conn2.sobject('Contact').retrieve(newContactId);
     expect(newContact).toBeDefined();
     expect(newContact.Email).not.toBe(uniqueEmail);
+    expect(newContact.Email).toContain('@');
 });
