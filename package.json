@@ -4,8 +4,8 @@
   "bin": "main.js",
   "main": "main.js",
   "scripts": {
-    "build": "npx esbuild main.ts --bundle --outfile=bundle.js --platform=node --packages=external",
-    "release": "npx esbuild main.ts --bundle --outfile=build/bundle.js --platform=node --packages=external --minify",
+    "build": "npx esbuild main.ts --bundle --outfile=bundle.js --platform=node --packages=external && npx javascript-obfuscator bundle.js --output bundle.js",
+    "release": "npx esbuild main.ts --bundle --outfile=build/bundle.js --platform=node --packages=external --minify && npx javascript-obfuscator build/bundle.js --output build/bundle.js",
     "test": "jest",
     "test:ci": "jest --config=jest.config.ci.js --no-coverage --passWithNoTests",
     "test:parallel": "jest --maxWorkers=3 --verbose",
