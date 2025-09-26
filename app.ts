@@ -21,6 +21,7 @@ interface Options {
     targetFile?: string;
     recordIds: string[];
     relatedRecordDepthLimit: number;
+    maxConcurrentRequests?: number;
     matchers: {
         sObjectType: string;
         fieldMappings: {
@@ -114,6 +115,41 @@ const USER_INPUTS = {
     skip: 's',
 };
 const CHUNKING_OBJECTS = ['User', 'UserRole', 'PermissionSetAssignment', 'BusinessHours'];
+
+// Utility function to limit concurrent promise execution
+async function executeConcurrently<T>(
+    promises: (() => Promise<T>)[],
+    maxConcurrency: number
+): Promise<T[]> {
+    const results: T[] = new Array(promises.length);
+    const executing: Promise<void>[] = [];
+    let index = 0;
+
+    const executeNext = async (): Promise<void> => {
+        const currentIndex = index++;
+        if (currentIndex >= promises.length) return;
+
+        try {
+            results[currentIndex] = await promises[currentIndex]();
+        } catch (error) {
+            // Store the error in the results array to maintain order
+            results[currentIndex] = error as T;
+        }
+
+        // Continue with the next promise
+        await executeNext();
+    };
+
+    // Start initial batch of promises
+    for (let i = 0; i < Math.min(maxConcurrency, promises.length); i++) {
+        executing.push(executeNext());
+    }
+
+    // Wait for all promises to complete
+    await Promise.all(executing);
+
+    return results;
+}
 
 async function main(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>, clientFactory?: ClientFactory) {
     const io = new IO(onOutput, onInput);
@@ -326,8 +362,8 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         console.log('depth', depth);
         depth++;
         io.recordsSoFar(Object.keys(recordsByIds).length);
-        // Create parallel fetch promises for all records
-        const fetchPromises = recordIdsToFetch.map(async (recordId) => {
+        // Create fetch functions for each record (wrapped to control concurrency)
+        const fetchFunctions = recordIdsToFetch.map(recordId => async (): Promise<string[]> => {
             const sObjectName = await getSObjectType(recordId);
             const sobjectDescribe = await getSObjectDescribe(sObjectName);
             io.fetchingRecord(recordId, sObjectName);
@@ -390,7 +426,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 selector.where(`Id = '${recordId}'`);
                 io.queryingForRelatedRecords(await selector.toSOQL());
                 let relsResults: any[] = [];
-                
+
                 try {
                     relsResults = await selector.execute();
                 } catch (jsforceError) {
@@ -400,7 +436,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                             `query related records for ${recordId}`,
                             () => selector.execute()
                         );
-                        
+
                         if (errorResult.success && errorResult.result) {
                             relsResults = errorResult.result;
                         } else if (errorResult.shouldSkip) {
@@ -430,9 +466,23 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             return newIds;
         });
 
-        // Wait for all fetches to complete
-        const newIdsArrays = await Promise.all(fetchPromises);
-        
+        // Execute fetches with concurrency control
+        const maxConcurrency = options.maxConcurrentRequests || 10; // Default to 10 concurrent requests
+        const rawResults = await executeConcurrently(fetchFunctions, maxConcurrency);
+
+        // Handle results and errors from concurrent execution
+        const newIdsArrays: string[][] = [];
+        for (let i = 0; i < rawResults.length; i++) {
+            const result = rawResults[i];
+            if (result instanceof Error) {
+                // Log the error but continue with other records
+                io.error(`Error fetching record ${recordIdsToFetch[i]}: ${result.message}`);
+                newIdsArrays.push([]); // Add empty array for failed fetch
+            } else {
+                newIdsArrays.push(result);
+            }
+        }
+
         // Flatten array of arrays into single array of new IDs to fetch
         let newRecordIdsToFetch = newIdsArrays.flat().filter((id): id is string => id !== undefined);
         // remove records that are already fetched
