@@ -165,7 +165,7 @@ describe('scanForCircularDependency', () => {
 
     it('should work for a large number of records and complete under 10 seconds', () => {
         const records = [];
-        const num = 500;
+        const num = 10000;
         const createId = (i: number) => `a00KO0000016wtaYAA${i.toString().padStart(num.toString().length, '0')}`;
         for (let i = 0; i < num; i++) {
             records.push({
