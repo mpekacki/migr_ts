@@ -434,10 +434,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         const newIdsArrays = await Promise.all(fetchPromises);
         
         // Flatten array of arrays into single array of new IDs to fetch
-        const newRecordIdsToFetch = newIdsArrays.flat().filter((id): id is string => id !== undefined);
+        let newRecordIdsToFetch = newIdsArrays.flat().filter((id): id is string => id !== undefined);
         // remove records that are already fetched
-        recordIdsToFetch = recordIdsToFetch.filter(id => !(id in fetchedRecordsByIds));
+        newRecordIdsToFetch = newRecordIdsToFetch.filter(id => !(id in fetchedRecordsByIds));
         recordIdsToFetch = newRecordIdsToFetch;
+        // remove duplicates
+        recordIdsToFetch = [...new Set(recordIdsToFetch)];
     }
 
     // remove records that are already migrated
