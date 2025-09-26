@@ -25,25 +25,28 @@ export const scanForCircularDependency = (records: SfRecord[], requiredLookupsBy
             graph.set(recordId, new Set());
         }
 
-        const recordIdArray = Array.from(allRecordIds);
-
         for (const record of records) {
             const recordId = record.Id as string;
 
-            for (const [field, value] of Object.entries(record)) {
-                if (field === 'Id' || field === 'attributes' || value == null) continue;
+            for (const field in record) {
+                if (field === 'Id' || field === 'attributes') continue;
 
-                const valueStr = String(value);
+                const value = record[field];
+                if (value == null || typeof value !== 'string') continue;
 
-                if (allRecordIds.has(valueStr) && valueStr !== recordId) {
-                    graph.get(recordId)!.add(valueStr);
-                    fieldToRecord.set(`${recordId}:${valueStr}`, field);
-                } else {
-                    for (const targetId of recordIdArray) {
-                        if (targetId !== recordId && targetId.length > 15 && valueStr.includes(targetId)) {
-                            graph.get(recordId)!.add(targetId);
-                            fieldToRecord.set(`${recordId}:${targetId}`, field);
-                            break;
+                if (allRecordIds.has(value) && value !== recordId) {
+                    graph.get(recordId)!.add(value);
+                    fieldToRecord.set(`${recordId}:${value}`, field);
+                } else if (value.length >= 15) {
+                    const idPattern = /[a-zA-Z0-9]{15,18}/g;
+                    const possibleIds = value.match(idPattern);
+                    if (possibleIds) {
+                        for (const possibleId of possibleIds) {
+                            if (possibleId !== recordId && allRecordIds.has(possibleId)) {
+                                graph.get(recordId)!.add(possibleId);
+                                fieldToRecord.set(`${recordId}:${possibleId}`, field);
+                                break;
+                            }
                         }
                     }
                 }

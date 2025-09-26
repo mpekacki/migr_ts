@@ -167,10 +167,25 @@ describe('scanForCircularDependency', () => {
         const records = [];
         const num = 10000;
         const createId = (i: number) => `a00KO0000016wtaYAA${i.toString().padStart(num.toString().length, '0')}`;
+        const additionalFieldsObject: Record<string, null | string> = {};
+        for (let i = 0; i < 100; i++) {
+            const mod3 = i % 3;
+            let value = null;
+            if (mod3 === 0) {
+                value = null
+            } else if (mod3 === 1) {
+                value = `Value${i}`;
+            } else {
+                value = `Value${i}Value${i}Value${i}`;
+            }
+            additionalFieldsObject[`Field${i}`] = value;
+        }
+
         for (let i = 0; i < num; i++) {
             records.push({
                 "Id": createId(i),
-                "Lookup__c": createId(i+1)
+                "Lookup__c": createId(i+1),
+                ...additionalFieldsObject
             });
         }
         records[records.length - 1].Lookup__c = createId(0);
