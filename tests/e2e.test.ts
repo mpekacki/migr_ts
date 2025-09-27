@@ -2116,7 +2116,7 @@ test('migrate from file', async () => {
 
     const { conn2 } = await setupTestConnections();
 
-    // create a file with a record
+    // create a file with records
     const account = {
         Id: '001KJ00000HsZttYAF',
         Name: 'Ebola Cola',
@@ -2126,12 +2126,23 @@ test('migrate from file', async () => {
         }
     };
 
-    fs.writeFileSync('test-output.json', JSON.stringify({ [account.Id]: account }, null, 2));
+    const contact = {
+        Id: '003KJ00000HsZttYAF',
+        FirstName: 'John',
+        LastName: 'Doe',
+        AccountId: account.Id,
+        attributes: {
+            type: 'Contact',
+            url: '/services/data/v61.0/sobjects/Contact/003KJ00000HsZttYAF'
+        }
+    };
+
+    fs.writeFileSync('test-output.json', JSON.stringify({ [account.Id]: account, [contact.Id]: contact }, null, 2));
 
     const config = {
         sourceFile: 'test-output.json',
         targetOrg: targetOrgAlias,
-        recordIds: [account.Id],
+        recordIds: [contact.Id],
         matchers: defaultMatchers
     };
 
@@ -2143,6 +2154,14 @@ test('migrate from file', async () => {
     expect(newAccount).toBeDefined();
     expect(newAccount['Name']).toBe('Ebola Cola');
     expect(newAccount['Id']).toBe(newAccountId);
+
+    const newContactId = assertRecordMigrated(parsedOutput, contact.Id);
+
+    const newContact = await conn2.sobject('Contact').retrieve(newContactId);
+    expect(newContact).toBeDefined();
+    expect(newContact['Name']).toBe('John Doe');
+    expect(newContact['Id']).toBe(newContactId);
+    expect(newContact['AccountId']).toBe(newAccountId);
 });
 
 test('full auto mode - save and exit', async () => {

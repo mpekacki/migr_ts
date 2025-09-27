@@ -272,7 +272,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         history = JSON.parse(fs.readFileSync(historyFilePath, 'utf8'));
     }
 
-    const describeGlobal = isMigrateFromFile ? null : await sourceClient!.describeGlobal();
+    const describeGlobal = isMigrateFromFile ? await targetClient!.describeGlobal() : await sourceClient!.describeGlobal();
     const sObjectDescribes = { cache: {} as Record<string, Promise<DescribeSObjectResult>> };
     const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
         if (!(sObjectName in sObjectDescribes.cache)) {
@@ -328,20 +328,18 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         const fileRecords = JSON.parse(fileContent);
         
         for (const recordId of Object.keys(fileRecords)) {
-            if (options.recordIds.includes(recordId)) {
-                const record = fileRecords[recordId];
-                fetchedRecordsByIds[recordId] = record;
-                
-                // Create record for migration (filter out non-creatable fields if needed)
-                const sObjectName = await getSObjectType(recordId, record);
-                const creatableFields = (await getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
-                const recordForMigration: SObjectRecord<Schema, string> = {};
-                for (const field of creatableFields) {
-                    recordForMigration[field.name] = record[field.name];
-                }
-                recordForMigration.attributes = record.attributes || { type: sObjectName, url: '' };
-                recordsByIds[recordId] = recordForMigration;
+            const record = fileRecords[recordId];
+            fetchedRecordsByIds[recordId] = record;
+            
+            // Create record for migration (filter out non-creatable fields if needed)
+            const sObjectName = await getSObjectType(recordId, record);
+            const creatableFields = (await getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
+            const recordForMigration: SObjectRecord<Schema, string> = {};
+            for (const field of creatableFields) {
+                recordForMigration[field.name] = record[field.name];
             }
+            recordForMigration.attributes = record.attributes || { type: sObjectName, url: '' };
+            recordsByIds[recordId] = recordForMigration;
         }
         recordIdsToFetch = []; // No need to fetch from org when reading from file
     }
