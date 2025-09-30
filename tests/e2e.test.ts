@@ -58,7 +58,7 @@ async function setupTestConnections() {
     return { conn1, conn2 };
 }
 
-async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInput: (input: string) => void) => void) | string[] = ['y'], outputFile: string | undefined = undefined) {
+async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInput: (input: string) => void, exit: () => void) => void) | string[] = ['y'], outputFile: string | undefined = undefined) {
     fs.writeFileSync('./config_test.json', JSON.stringify(config, null, 2));
     const capturedOutput: IOEvent[] = [];
     let capturedError = '';
@@ -68,6 +68,7 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
         command += ` --output-file ${outputFile}`;
     }
     const child = exec(command);
+    let exitCalled = false;
     child.stdout?.on('data', (data) => {
         console.log(data);
         const lines = data.toString().split('\n');
@@ -83,6 +84,9 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
                         console.log(`sending input: ${input}`);
                         child.stdin?.write(input);
                         child.stdin?.write('\n');
+                    }, () => {
+                        exitCalled = true;
+                        child.kill();
                     });
                 } else {
                     const input = inputHandler.shift();
@@ -103,12 +107,19 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
     });
     await new Promise(resolve => child.on('close', resolve));
 
-    expect(capturedError).toBe('');
-    expect(capturedOutput.length).toBeGreaterThan(1);
-    return { 
-        parsedOutput: JSON.parse(capturedOutput[capturedOutput.length - 1].data!),
-        capturedOutput
-    };
+    if (!exitCalled) {
+        expect(capturedError).toBe('');
+        expect(capturedOutput.length).toBeGreaterThan(1);
+        return { 
+            parsedOutput: JSON.parse(capturedOutput[capturedOutput.length - 1].data!),
+            capturedOutput
+        };
+    } else {
+        return {
+            parsedOutput: null,
+            capturedOutput
+        };
+    }
 }
 
 function assertRecordMigrated(parsedOutput: any, recordId: string): string {
@@ -2086,6 +2097,62 @@ test('fetch related record for a record that is in history', async () => {
     const newAccountId2 = assertRecordMigrated(parsedOutput2, account.id!);
 
     const newContactId2 = assertRecordMigrated(parsedOutput2, contact.id!);
+});
+
+test('save history file even if app is closed unexpectedly', async () => {
+    console.log('starting test: save history file even if app is closed unexpectedly');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const accountName = `Unique Account ${Date.now()}`;
+    const account = await conn1.sobject('Account').create({ Name: accountName });
+    expect(account.id).toBeDefined();
+
+    const contract = await conn1.sobject('Contract').create({
+        AccountId: account.id!,
+        Status: 'Draft',
+        StartDate: new Date().toISOString(),
+        ContractTerm: 12
+    });
+    expect(contract.id).toBeDefined();
+
+    // activate contract
+    await conn1.sobject('Contract').update({ Id: contract.id!, Status: 'Activated' });
+
+    const config = createBasicConfig([contract.id!]);
+    
+    await runMigration(config, function(event, sendInput, exit) {
+        if (event.type === 'confirm_migration') {
+            sendInput('y');
+        } else if (event.type === 'insert_error') {
+            // close app
+            exit();
+        }
+    });
+
+    const newAccount = await conn2.query(`SELECT Id, Name FROM Account WHERE Name = '${accountName}'`);
+    expect(newAccount).toBeDefined();
+    expect(newAccount.records.length).toBe(1);
+
+    // run migration again
+    const config2 = createBasicConfig([contract.id!], {
+        solvers: [
+            {
+                action: 'fix',
+                message: 'Choose a valid contract status and save your changes. Ask your admin for details.',
+                changeFields: [
+                    {
+                        field: 'Status',
+                        value: 'Draft'
+                    }
+                ]
+            }
+        ]
+    });
+    const { parsedOutput: parsedOutput2 } = await runMigration(config2);
+
+    const newAccountId2 = assertRecordMigrated(parsedOutput2, account.id!);
+    expect(newAccountId2).toBe(newAccount.records[0].Id);
 });
 
 test('migrate to file', async () => {

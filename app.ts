@@ -349,6 +349,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         delete recordsByIds[recordId];
         delete fetchedRecordsByIds[recordId];
         migratedRecords[recordId] = newRecordId;
+        saveHistoryFile();
     }
     
     for (const recordId of Object.keys(history)) {
@@ -522,8 +523,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         }
     }
 
-    const saveAndExit = () => {
+    const saveHistoryFile = () => {
         fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
+    }
+
+    const saveAndExit = () => {
+        saveHistoryFile();
         
         // Create a summary of original recordIds from config with their new mappings
         const requestedRecordsMappings: Record<string, string> = {};
