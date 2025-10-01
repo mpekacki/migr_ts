@@ -707,6 +707,10 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         if (savedRecord.success) {
                             migratedRecordId = savedRecord.id!;
                             io.createdRecord(migratedRecordId);
+                            // mark errors as fixed
+                            if (errors[recordId]) {
+                                errors[recordId].forEach(error => error.fixed = true);
+                            }
                         } else if (!retryRecord) {    
                             const errs = savedRecord.errors
                             for (const e of errs) {

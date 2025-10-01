@@ -1316,6 +1316,10 @@ test('migrate record with error - manually retry insert', async () => {
     const newCustObjC: any = await conn2.sobject('Custom_Object_C__c').retrieve(newCustObjCId);
     expect(newCustObjC).toBeDefined();
     expect(newCustObjC.External_Id__c).toEqual(externalId);
+
+    expect(parsedOutput.errors).toHaveProperty(custObjCorgA.id!);
+    expect(parsedOutput.errors[custObjCorgA.id!]).toHaveLength(1);
+    expect(parsedOutput.errors[custObjCorgA.id!][0].fixed).toBeTruthy();
 });
 
 test('manually retry all records', async () => {
