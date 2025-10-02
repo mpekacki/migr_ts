@@ -512,12 +512,17 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         preprocessData(recordsByIds, { anonymizeEmailFields: true });
     }
 
-    // Helper function to count record reasons
-    const countRecordReasons = (): Record<string, number> => {
-        const recordReasons: Record<string, number> = {};
+    // Helper function to count record reasons by SObject type
+    const countRecordReasons = async (): Promise<Record<string, Record<string, number>>> => {
+        const recordReasons: Record<string, Record<string, number>> = {};
         for (const recordId in recordAddedReasons) {
             const reason = recordAddedReasons[recordId];
-            recordReasons[reason] = (recordReasons[reason] || 0) + 1;
+            const sObjectType = await getSObjectType(recordId);
+
+            if (!recordReasons[reason]) {
+                recordReasons[reason] = {};
+            }
+            recordReasons[reason][sObjectType] = (recordReasons[reason][sObjectType] || 0) + 1;
         }
         return recordReasons;
     }
@@ -533,7 +538,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
 
     if (!options.fullAuto?.enabled) {
         // ask for confirmation
-        const confirmationData = { ...recordCountsBySObjectType, recordReasons: countRecordReasons() };
+        const confirmationData = { ...recordCountsBySObjectType, recordReasons: await countRecordReasons() };
         const confirmation = await io.askForConfirmation(confirmationData);
         if (confirmation !== 'y') {
             io.aborted();
@@ -545,7 +550,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
     }
 
-    const saveAndExit = () => {
+    const saveAndExit = async () => {
         saveHistoryFile();
 
         // Create a summary of original recordIds from config with their new mappings
@@ -558,7 +563,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             allMigratedRecords: old2new,
             errors,
             requestedRecords: requestedRecordsMappings,
-            recordReasons: countRecordReasons()
+            recordReasons: await countRecordReasons()
         };
         io.finished(JSON.stringify(outputData));
     }
@@ -818,7 +823,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             } else if (userInput === USER_INPUTS.match) {
                                                 migratedRecordId = await io.askForMatch();
                                             } else if (userInput === USER_INPUTS.saveAndExit) {
-                                                saveAndExit();
+                                                await saveAndExit();
                                                 return;
                                             } else if (userInput === USER_INPUTS.addSolver) {
                                                 let newSolver;
@@ -851,7 +856,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                         }
                                     } else {
                                         if (options.fullAuto?.unhandledErrorBehavior === 'saveAndExit') {
-                                            saveAndExit();
+                                            await saveAndExit();
                                             return;
                                         } else {
                                             // skip record, don't do anything
@@ -948,7 +953,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
         }
 
-        saveAndExit();
+        await await saveAndExit();
     } else {
         // migrate to file
         // Write JSON as key-value pairs: id -> record
@@ -972,7 +977,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             allMigratedRecords: recordsObj,
             errors: {}, // No errors in file migration typically
             requestedRecords: requestedRecordsMappings,
-            recordReasons: countRecordReasons()
+            recordReasons: await countRecordReasons()
         };
         io.finished(JSON.stringify(outputData));
     }

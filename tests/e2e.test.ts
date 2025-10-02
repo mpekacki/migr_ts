@@ -2396,7 +2396,8 @@ test('report record reason counts', async () => {
 
             expect(recordCounts).toHaveProperty('recordReasons');
             expect(recordCounts.recordReasons).toHaveProperty(['Account.Contacts']);
-            expect(recordCounts.recordReasons['Account.Contacts']).toBe(2);
+            expect(recordCounts.recordReasons['Account.Contacts']).toHaveProperty('Contact');
+            expect(recordCounts.recordReasons['Account.Contacts'].Contact).toBe(2);
         }
     });
 
