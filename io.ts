@@ -30,8 +30,9 @@ class IO {
         this.onOutput(this.buildIOEvent('output', `records so far: ${count}`, 'info'));
     }
 
-    public fetchingRecord(recordId: string, sObjectName: string) {
-        this.onOutput(this.buildIOEvent('output', `fetching record ${recordId} of type ${sObjectName}`, 'info'));
+    public fetchingRecord(recordId: string, sObjectName: string, reason?: string) {
+        const reasonText = reason ? ` (via ${reason})` : '';
+        this.onOutput(this.buildIOEvent('output', `fetching record ${recordId} of type ${sObjectName}${reasonText}`, 'info'));
     }
 
     public recordNotFound(recordId: string, sObjectName: string) {
@@ -58,7 +59,7 @@ class IO {
         this.onOutput(this.buildIOEvent('output', `fetched ${count} records`, 'info'));
     }
 
-    public async askForConfirmation(recordCountsBySObjectType: Record<string, number>) {
+    public async askForConfirmation(recordCountsBySObjectType: Record<string, any>) {
         const confirmation = await this.onInput(this.buildIOEvent('input', 'Do you want to continue? (y/n)', 'confirm_migration', JSON.stringify(recordCountsBySObjectType)));
         this.confirmation(confirmation);
         return confirmation;

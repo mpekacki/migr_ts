@@ -366,7 +366,8 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         const fetchFunctions = recordIdsToFetch.map(recordId => async (): Promise<string[]> => {
             const sObjectName = await getSObjectType(recordId);
             const sobjectDescribe = await getSObjectDescribe(sObjectName);
-            io.fetchingRecord(recordId, sObjectName);
+            const reason = recordAddedReasons[recordId];
+            io.fetchingRecord(recordId, sObjectName, reason);
             let recordFields;
             try {
                 recordFields = await sourceClient!.retrieve(sObjectName, recordId);
