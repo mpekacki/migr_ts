@@ -321,6 +321,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     const old2new: Record<string, string> = {};
     const errors: Record<string, { message: string, fixed: boolean, solver?: (FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver | RetrySolver | BackoffSolver | FallbackSolver) }[]> = {};
     const migratedRecords: Record<string, string> = {};
+    const recordAddedReasons: Record<string, string> = {}; // Track why each record was added
     
     // Load records from file if sourceFile is provided
     if (isMigrateFromFile) {
@@ -408,6 +409,10 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 try {
                                     await getSObjectType(match);
                                     newIds.push(match);
+                                    // Propagate the reason if current record was added due to a relationship
+                                    if (recordId in recordAddedReasons) {
+                                        recordAddedReasons[match] = recordAddedReasons[recordId];
+                                    }
                                 } catch {
                                     // do nothing, it was some random string
                                 }
@@ -457,6 +462,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         for (const relatedRecord of relatedRecords) {
                             if (!(relatedRecord.Id in recordsByIds) && !newIds.includes(relatedRecord.Id!)) {
                                 newIds.push(relatedRecord.Id!);
+                                recordAddedReasons[relatedRecord.Id!] = `${sObjectName}.${relationship.name}`;
                             }
                         }
                     }
@@ -514,9 +520,17 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         recordCountsBySObjectType[record.attributes!.type]++;
     }
 
+    // Count record reasons
+    const recordReasons: Record<string, number> = {};
+    for (const recordId in recordAddedReasons) {
+        const reason = recordAddedReasons[recordId];
+        recordReasons[reason] = (recordReasons[reason] || 0) + 1;
+    }
+
     if (!options.fullAuto?.enabled) {
         // ask for confirmation
-        const confirmation = await io.askForConfirmation(recordCountsBySObjectType);
+        const confirmationData = { ...recordCountsBySObjectType, recordReasons };
+        const confirmation = await io.askForConfirmation(confirmationData);
         if (confirmation !== 'y') {
             io.aborted();
             return;
@@ -529,17 +543,25 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
 
     const saveAndExit = () => {
         saveHistoryFile();
-        
+
         // Create a summary of original recordIds from config with their new mappings
         const requestedRecordsMappings: Record<string, string> = {};
         for (const originalRecordId of options.recordIds) {
             requestedRecordsMappings[originalRecordId] = old2new[originalRecordId] || '';
         }
-        
+
+        // Count record reasons
+        const recordReasons: Record<string, number> = {};
+        for (const recordId in recordAddedReasons) {
+            const reason = recordAddedReasons[recordId];
+            recordReasons[reason] = (recordReasons[reason] || 0) + 1;
+        }
+
         const outputData = {
             allMigratedRecords: old2new,
             errors,
-            requestedRecords: requestedRecordsMappings
+            requestedRecords: requestedRecordsMappings,
+            recordReasons
         };
         io.finished(JSON.stringify(outputData));
     }
@@ -948,11 +970,19 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         for (const originalRecordId of options.recordIds) {
             requestedRecordsMappings[originalRecordId] = originalRecordId; // Same ID when migrating to file
         }
-        
+
+        // Count record reasons
+        const recordReasons: Record<string, number> = {};
+        for (const recordId in recordAddedReasons) {
+            const reason = recordAddedReasons[recordId];
+            recordReasons[reason] = (recordReasons[reason] || 0) + 1;
+        }
+
         const outputData = {
             allMigratedRecords: recordsObj,
             errors: {}, // No errors in file migration typically
-            requestedRecords: requestedRecordsMappings
+            requestedRecords: requestedRecordsMappings,
+            recordReasons
         };
         io.finished(JSON.stringify(outputData));
     }

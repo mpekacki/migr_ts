@@ -2355,3 +2355,52 @@ test('anonymize email fields', async () => {
     expect(newContact.Email).not.toBe(uniqueEmail);
     expect(newContact.Email).toContain('@');
 });
+
+test('report record reason counts', async () => {
+    console.log('starting test: report record reason counts');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+
+    const contact = await conn1.sobject('Contact').create({ 
+        FirstName: 'John',
+        LastName: 'Doe'
+    });
+
+    const contact2 = await conn1.sobject('Contact').create({ 
+        FirstName: 'Jane',
+        LastName: 'Doe',
+        AccountId: account.id!,
+        ReportsToId: contact.id!
+    });
+
+    const config = createBasicConfig([account.id!], {
+        relationships: {
+            "Account": [
+                {
+                    "name": "Contacts"
+                }
+            ]
+        }
+    });
+
+    const { parsedOutput } = await runMigration(config, async (ioEvent, sendInput) => {
+        if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
+            sendInput('y');
+            const recordCounts = JSON.parse(ioEvent.data!);
+            expect(recordCounts).toHaveProperty('Account');
+            expect(recordCounts).toHaveProperty('Contact');
+            expect(recordCounts.Account).toBe(1);
+            expect(recordCounts.Contact).toBe(2);
+
+            expect(recordCounts).toHaveProperty('recordReasons');
+            expect(recordCounts.recordReasons).toHaveProperty(['Account.Contacts']);
+            expect(recordCounts.recordReasons['Account.Contacts']).toBe(2);
+        }
+    });
+
+    assertRecordMigrated(parsedOutput, account.id!);
+    assertRecordMigrated(parsedOutput, contact.id!);
+    assertRecordMigrated(parsedOutput, contact2.id!);
+});
