@@ -512,6 +512,16 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         preprocessData(recordsByIds, { anonymizeEmailFields: true });
     }
 
+    // Helper function to count record reasons
+    const countRecordReasons = (): Record<string, number> => {
+        const recordReasons: Record<string, number> = {};
+        for (const recordId in recordAddedReasons) {
+            const reason = recordAddedReasons[recordId];
+            recordReasons[reason] = (recordReasons[reason] || 0) + 1;
+        }
+        return recordReasons;
+    }
+
     // build map of record counts by sobject type
     const recordCountsBySObjectType: Record<string, number> = {};
     for (const record of Object.values(recordsByIds)) {
@@ -521,16 +531,9 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         recordCountsBySObjectType[record.attributes!.type]++;
     }
 
-    // Count record reasons
-    const recordReasons: Record<string, number> = {};
-    for (const recordId in recordAddedReasons) {
-        const reason = recordAddedReasons[recordId];
-        recordReasons[reason] = (recordReasons[reason] || 0) + 1;
-    }
-
     if (!options.fullAuto?.enabled) {
         // ask for confirmation
-        const confirmationData = { ...recordCountsBySObjectType, recordReasons };
+        const confirmationData = { ...recordCountsBySObjectType, recordReasons: countRecordReasons() };
         const confirmation = await io.askForConfirmation(confirmationData);
         if (confirmation !== 'y') {
             io.aborted();
@@ -551,18 +554,11 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             requestedRecordsMappings[originalRecordId] = old2new[originalRecordId] || '';
         }
 
-        // Count record reasons
-        const recordReasons: Record<string, number> = {};
-        for (const recordId in recordAddedReasons) {
-            const reason = recordAddedReasons[recordId];
-            recordReasons[reason] = (recordReasons[reason] || 0) + 1;
-        }
-
         const outputData = {
             allMigratedRecords: old2new,
             errors,
             requestedRecords: requestedRecordsMappings,
-            recordReasons
+            recordReasons: countRecordReasons()
         };
         io.finished(JSON.stringify(outputData));
     }
@@ -972,18 +968,11 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             requestedRecordsMappings[originalRecordId] = originalRecordId; // Same ID when migrating to file
         }
 
-        // Count record reasons
-        const recordReasons: Record<string, number> = {};
-        for (const recordId in recordAddedReasons) {
-            const reason = recordAddedReasons[recordId];
-            recordReasons[reason] = (recordReasons[reason] || 0) + 1;
-        }
-
         const outputData = {
             allMigratedRecords: recordsObj,
             errors: {}, // No errors in file migration typically
             requestedRecords: requestedRecordsMappings,
-            recordReasons
+            recordReasons: countRecordReasons()
         };
         io.finished(JSON.stringify(outputData));
     }
