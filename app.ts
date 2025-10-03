@@ -787,7 +787,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 }
                                 if (!errorFixed) {
                                     // no solver found, ask user what to do
-                                    io.error(e.message);
+                                    io.error(JSON.stringify(e));
                                     let inputOk;
                                     let solverAdded = false;
                                     if (!options.fullAuto?.enabled) {
