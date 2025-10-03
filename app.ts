@@ -538,7 +538,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
 
     if (!options.fullAuto?.enabled) {
         // ask for confirmation
-        const confirmationData = { ...recordCountsBySObjectType, recordReasons: await countRecordReasons() };
+        const confirmationData = { recordReasons: await countRecordReasons(), ...recordCountsBySObjectType };
         const confirmation = await io.askForConfirmation(confirmationData);
         if (confirmation !== 'y') {
             io.aborted();
@@ -562,8 +562,8 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         const outputData = {
             allMigratedRecords: old2new,
             errors,
-            requestedRecords: requestedRecordsMappings,
-            recordReasons: await countRecordReasons()
+            recordReasons: await countRecordReasons(),
+            requestedRecords: requestedRecordsMappings
         };
         io.finished(JSON.stringify(outputData));
     }
