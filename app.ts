@@ -273,7 +273,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         history = JSON.parse(fs.readFileSync(historyFilePath, 'utf8'));
     }
 
-    let describeFromFile: DescribeGlobalResult | null = null;
+    let describeFromFile: any | null = null;
     const getDescribeGlobal = async () => {
         if (isMigrateFromFile) {
             return describeFromFile;
@@ -335,10 +335,18 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     if (isMigrateFromFile) {
         const fileContent = fs.readFileSync(options.sourceFile!, 'utf8');
         const parsedFile = JSON.parse(fileContent);
-        describeFromFile = parsedFile.describeGlobal;
+        describeFromFile = {
+            sobjects: []
+        };
         
         for (const recordId of Object.keys(parsedFile.records)) {
             const record = parsedFile.records[recordId];
+            if (!describeFromFile.sobjects.find((sobject: any) => sobject.name === record.attributes.type)) {
+                describeFromFile.sobjects.push({
+                    keyPrefix: recordId.substring(0, 3),
+                    name: record.attributes.type
+                });
+            }
             fetchedRecordsByIds[recordId] = record;
             
             // Create record for migration (filter out non-creatable fields if needed)
@@ -976,20 +984,8 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 Id: id
             };
         }
-        const describeGlobal = await getDescribeGlobal();
-        let describeGlobalForFile: any = describeGlobal;
-        if (describeGlobal) {
-            // remove everything except sobject prefix and name
-            describeGlobalForFile = {
-                sobjects: describeGlobal.sobjects.map(sobject => ({
-                    keyPrefix: sobject.keyPrefix,
-                    name: sobject.name
-                }))
-            };
-        }
         const fileData = {
-            records: recordsObj,
-            describeGlobal: describeGlobalForFile
+            records: recordsObj
         };
         fs.writeFileSync(options.targetFile!, JSON.stringify(fileData, null, 2));
         
