@@ -556,13 +556,13 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
 
     const saveHistoryFile = () => {
-        fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
+        if (!isMigrateToFile) {
+            fs.writeFileSync(historyFilePath, JSON.stringify(old2new, null, 2));
+        }
     }
 
     const saveAndExit = async () => {
-        if (!isMigrateToFile) {
-            saveHistoryFile();
-        }
+        saveHistoryFile();
 
         // Create a summary of original recordIds from config with their new mappings
         const requestedRecordsMappings: Record<string, string> = {};
