@@ -1,5 +1,5 @@
 console.log('importing dependencies');
-import { DescribeSObjectResult, Field, Schema, SObjectRecord, SObjectUpdateRecord } from 'jsforce';
+import { DescribeSObjectResult, Field, Schema, SObjectRecord } from 'jsforce';
 import { SalesforceClient, DefaultSalesforceClient, AuthConfig } from './salesforce-client';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -8,6 +8,7 @@ import Chunks from './chunks';
 import IOEvent from './ioevent';
 import IO from './io';
 import { preprocessData } from './preprocess-data';
+import { DescribeGlobalResult } from 'jsforce/lib/api/soap/schema';
 console.log('importing dependencies done');
 
 interface Options {
@@ -272,7 +273,13 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         history = JSON.parse(fs.readFileSync(historyFilePath, 'utf8'));
     }
 
-    const describeGlobal = isMigrateFromFile ? await targetClient!.describeGlobal() : await sourceClient!.describeGlobal();
+    let describeFromFile: DescribeGlobalResult | null = null;
+    const getDescribeGlobal = async () => {
+        if (isMigrateFromFile) {
+            return describeFromFile;
+        }
+        return await sourceClient!.describeGlobal();
+    }
     const sObjectDescribes = { cache: {} as Record<string, Promise<DescribeSObjectResult>> };
     const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
         if (!(sObjectName in sObjectDescribes.cache)) {
@@ -285,6 +292,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         if (record && record.attributes && record.attributes.type) {
             return record.attributes.type;
         }
+        const describeGlobal = await getDescribeGlobal();
         if (describeGlobal) {
             const prefix = recordId.substring(0, 3);
             const sobject = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix);
@@ -326,10 +334,11 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     // Load records from file if sourceFile is provided
     if (isMigrateFromFile) {
         const fileContent = fs.readFileSync(options.sourceFile!, 'utf8');
-        const fileRecords = JSON.parse(fileContent);
+        const parsedFile = JSON.parse(fileContent);
+        describeFromFile = parsedFile.describeGlobal;
         
-        for (const recordId of Object.keys(fileRecords)) {
-            const record = fileRecords[recordId];
+        for (const recordId of Object.keys(parsedFile.records)) {
+            const record = parsedFile.records[recordId];
             fetchedRecordsByIds[recordId] = record;
             
             // Create record for migration (filter out non-creatable fields if needed)
@@ -551,7 +560,9 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
 
     const saveAndExit = async () => {
-        saveHistoryFile();
+        if (!isMigrateToFile) {
+            saveHistoryFile();
+        }
 
         // Create a summary of original recordIds from config with their new mappings
         const requestedRecordsMappings: Record<string, string> = {};
@@ -953,7 +964,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             }
         }
 
-        await await saveAndExit();
+        await saveAndExit();
     } else {
         // migrate to file
         // Write JSON as key-value pairs: id -> record
@@ -965,7 +976,22 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 Id: id
             };
         }
-        fs.writeFileSync(options.targetFile!, JSON.stringify(recordsObj, null, 2));
+        const describeGlobal = await getDescribeGlobal();
+        let describeGlobalForFile: any = describeGlobal;
+        if (describeGlobal) {
+            // remove everything except sobject prefix and name
+            describeGlobalForFile = {
+                sobjects: describeGlobal.sobjects.map(sobject => ({
+                    keyPrefix: sobject.keyPrefix,
+                    name: sobject.name
+                }))
+            };
+        }
+        const fileData = {
+            records: recordsObj,
+            describeGlobal: describeGlobalForFile
+        };
+        fs.writeFileSync(options.targetFile!, JSON.stringify(fileData, null, 2));
         
         // Create a summary for file migration (all records are "as-is" with same IDs)
         const requestedRecordsMappings: Record<string, string> = {};

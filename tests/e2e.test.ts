@@ -90,9 +90,10 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
                     });
                 } else {
                     const input = inputHandler.shift();
-                    expect(input).toBeDefined();
                     if (!input) {
-                        throw new Error('No input provided');
+                        capturedError = `Unexpected input request: "${event.message}"`;
+                        child.kill();
+                        return;
                     }
                     console.log(`sending input: ${input}`);
                     child.stdin?.write(input);
@@ -2159,80 +2160,51 @@ test('save history file even if app is closed unexpectedly', async () => {
     expect(newAccountId2).toBe(newAccount.records[0].Id);
 });
 
-test('migrate to file', async () => {
-    console.log('starting test: migrate to file');
+test('migrate to file and from file', async () => {
+    console.log('starting test: migrate to file and from file');
 
-    const { conn1 } = await setupTestConnections();
+    const { conn1, conn2 } = await setupTestConnections();
+    const custObjC = await conn1.sobject('Custom_Object_C__c').create({ });
+    console.log(custObjC);
+    expect(custObjC.id).toBeDefined();
 
-    const account = await createAccount(conn1, 'Ebola Cola');
+    const custObjB = await conn1.sobject('Custom_Object_B__c').create({ Lookup_to_C__c: custObjC.id! });
+    console.log(custObjB);
+    expect(custObjB.id).toBeDefined();
 
-    const config = createBasicConfig([account.id!], { 
+    const custObjA = await conn1.sobject('Custom_Object_A__c').create({ Lookup_to_B__c: custObjB.id! });
+    console.log(custObjA);
+    expect(custObjA.id).toBeDefined();
+
+    const config = createBasicConfig([custObjA.id!], { 
         sourceOrg: sourceOrgAlias,
-        targetFile: 'test-output.json' 
+        targetFile: 'test-output.json'
     });
     delete config.targetOrg; // Remove targetOrg when using targetFile
 
     await runMigration(config);
 
-    const outputFile = fs.readFileSync('test-output.json', 'utf8');
-    const outputJson = JSON.parse(outputFile);
-    expect(outputJson).toHaveProperty(account.id!);
-    const accountInFile = outputJson[account.id!];
-    expect(accountInFile['Name']).toBe('Ebola Cola');
-    expect(accountInFile['Id']).toBe(account.id);
-});
-
-test('migrate from file', async () => {
-    console.log('starting test: migrate from file');
-
-    const { conn2 } = await setupTestConnections();
-
-    // create a file with records
-    const account = {
-        Id: '001KJ00000HsZttYAF',
-        Name: 'Ebola Cola',
-        attributes: {
-            type: 'Account',
-            url: '/services/data/v61.0/sobjects/Account/001KJ00000HsZttYAF'
-        }
-    };
-
-    const contact = {
-        Id: '003KJ00000HsZttYAF',
-        FirstName: 'John',
-        LastName: 'Doe',
-        AccountId: account.Id,
-        attributes: {
-            type: 'Contact',
-            url: '/services/data/v61.0/sobjects/Contact/003KJ00000HsZttYAF'
-        }
-    };
-
-    fs.writeFileSync('test-output.json', JSON.stringify({ [account.Id]: account, [contact.Id]: contact }, null, 2));
-
-    const config = {
+    const config2 = createBasicConfig([custObjA.id!], { 
         sourceFile: 'test-output.json',
         targetOrg: targetOrgAlias,
-        recordIds: [contact.Id],
+        recordIds: [custObjA.id!],
         matchers: defaultMatchers
-    };
+    });
+    delete config2.sourceOrg; // Remove sourceOrg when using sourceFile
 
-    const { parsedOutput } = await runMigration(config);
+    const { parsedOutput } = await runMigration(config2);
 
-    const newAccountId = assertRecordMigrated(parsedOutput, account.Id);
+    const newCustObjAId = assertRecordMigrated(parsedOutput, custObjA.id!);
+    const newCustObjBId = assertRecordMigrated(parsedOutput, custObjB.id!);
+    const newCustObjCId = assertRecordMigrated(parsedOutput, custObjC.id!);
 
-    const newAccount = await conn2.sobject('Account').retrieve(newAccountId);
-    expect(newAccount).toBeDefined();
-    expect(newAccount['Name']).toBe('Ebola Cola');
-    expect(newAccount['Id']).toBe(newAccountId);
+    const newCustObjB = await conn2.sobject('Custom_Object_B__c').retrieve(newCustObjBId);
+    expect(newCustObjB).toBeDefined();
+    expect(newCustObjB.Lookup_to_C__c).toBe(newCustObjCId);
 
-    const newContactId = assertRecordMigrated(parsedOutput, contact.Id);
-
-    const newContact = await conn2.sobject('Contact').retrieve(newContactId);
-    expect(newContact).toBeDefined();
-    expect(newContact['Name']).toBe('John Doe');
-    expect(newContact['Id']).toBe(newContactId);
-    expect(newContact['AccountId']).toBe(newAccountId);
+    const newCustObjA = await conn2.sobject('Custom_Object_A__c').retrieve(newCustObjAId);
+    expect(newCustObjA).toBeDefined();
+    expect(newCustObjA.Lookup_to_B__c).toBe(newCustObjBId);
 });
 
 test('full auto mode - save and exit', async () => {
