@@ -295,7 +295,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         const describeGlobal = await getDescribeGlobal();
         if (describeGlobal) {
             const prefix = recordId.substring(0, 3);
-            const sobject = describeGlobal.sobjects.find(sobject => sobject.keyPrefix === prefix);
+            const sobject = describeGlobal.sobjects.find((sobject: any) => sobject.keyPrefix === prefix);
             if (!sobject) {
                 throw new Error(`SObject with prefix ${prefix} not found`);
             }
