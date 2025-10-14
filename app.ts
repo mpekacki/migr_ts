@@ -274,11 +274,15 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
 
     let describeFromFile: any | null = null;
+    let describeGlobal: DescribeGlobalResult | null = null;
     const getDescribeGlobal = async () => {
         if (isMigrateFromFile) {
             return describeFromFile;
         }
-        return await sourceClient!.describeGlobal();
+        if (!describeGlobal) {
+            describeGlobal = await sourceClient!.describeGlobal();
+        }
+        return describeGlobal;
     }
     const sObjectDescribes = { cache: {} as Record<string, Promise<DescribeSObjectResult>> };
     const getSObjectDescribe = async (sObjectName: string): Promise<DescribeSObjectResult> => {
