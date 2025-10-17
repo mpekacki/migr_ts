@@ -44,7 +44,7 @@ interface Options {
     anonymization?: {
         emailFields?: {
             mode: 'obfuscate' | 'sanitize';
-            domain?: string;
+            template?: string;
         };
     };
 }
@@ -534,7 +534,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         preprocessData(recordsByIds, {
             emailAnonymization: {
                 mode: options.anonymization.emailFields.mode,
-                domain: options.anonymization.emailFields.domain
+                template: options.anonymization.emailFields.template
             }
         });
     }
