@@ -2313,7 +2313,7 @@ test('anonymize email fields', async () => {
     const config = createBasicConfig([contact.id!], { 
         anonymization: {
             emailFields: {
-                anonymize: true
+                mode: 'obfuscate'
             }
         }
     });

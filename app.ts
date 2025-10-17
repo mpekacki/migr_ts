@@ -43,7 +43,8 @@ interface Options {
     };
     anonymization?: {
         emailFields?: {
-            anonymize: boolean;
+            mode: 'obfuscate' | 'sanitize';
+            domain?: string;
         };
     };
 }
@@ -529,8 +530,13 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     io.fetchedRecords(Object.keys(recordsByIds).length);
 
     // Apply preprocessing (e.g., anonymization)
-    if (options.anonymization?.emailFields?.anonymize) {
-        preprocessData(recordsByIds, { anonymizeEmailFields: true });
+    if (options.anonymization?.emailFields?.mode) {
+        preprocessData(recordsByIds, {
+            emailAnonymization: {
+                mode: options.anonymization.emailFields.mode,
+                domain: options.anonymization.emailFields.domain
+            }
+        });
     }
 
     // Helper function to count record reasons by SObject type
