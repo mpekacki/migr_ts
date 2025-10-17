@@ -60,7 +60,7 @@ describe('preprocessData', () => {
         preprocessData(recordsByIds2, { anonymizeEmailFields: true });
 
         expect(recordsByIds1['0012x0000000001'].email).toBe(recordsByIds2['0012x0000000002'].email);
-        expect(recordsByIds1['0012x0000000001'].email).toMatch(/^user[a-f0-9]{8}@obfuscated\.local$/);
+        expect(recordsByIds1['0012x0000000001'].email).toMatch(/^user[a-f0-9]{8}@obfuscated\.example\.com$/);
     });
 
     it('should produce different hashes for different email addresses', () => {
@@ -74,7 +74,7 @@ describe('preprocessData', () => {
         preprocessData(recordsByIds, { anonymizeEmailFields: true });
 
         expect(recordsByIds['0012x0000000001'].email1).not.toBe(recordsByIds['0012x0000000001'].email2);
-        expect(recordsByIds['0012x0000000001'].email1).toMatch(/^user[a-f0-9]{8}@obfuscated\.local$/);
-        expect(recordsByIds['0012x0000000001'].email2).toMatch(/^user[a-f0-9]{8}@obfuscated\.local$/);
+        expect(recordsByIds['0012x0000000001'].email1).toMatch(/^user[a-f0-9]{8}@obfuscated\.example\.com$/);
+        expect(recordsByIds['0012x0000000001'].email2).toMatch(/^user[a-f0-9]{8}@obfuscated\.example\.com$/);
     });
 });

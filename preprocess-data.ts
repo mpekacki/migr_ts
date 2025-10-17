@@ -9,7 +9,7 @@ type PreprocessStrategy = {
 const defaultEmailObfuscator = (email: string): string => {
     const hash = createHash('sha256').update(email.toLowerCase()).digest('hex');
     const shortHash = hash.substring(0, 8);
-    return `user${shortHash}@obfuscated.local`;
+    return `user${shortHash}@obfuscated.example.com`;
 };
 
 export const preprocessData = (recordsByIds: Record<string, SObjectRecord<Schema, string>>, strategy: PreprocessStrategy) => {
