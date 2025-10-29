@@ -782,7 +782,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             for (const changeField of solver.changeFields) {
                                                 setFieldWithLaterUpdate(recordId, record, changeField.field, changeField.value);
                                             }
-                                            io.fixingUsingSolver(solver.message);
+                                            io.fixingUsingSolver(e.message, solver.message, solver.action);
                                             io.savedOldFieldsInToUpdateLater(toUpdateLater[recordId]);
                                             errorFixed = true;
                                             retryRecord = true;
@@ -797,7 +797,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                                 errorFixed = true;
                                             }
                                         } else if (solver.action === 'extract_column') {
-                                            io.extractingColumnFromError(e.message);
+                                            io.extractingColumnFromError(e.message, solver.message);
                                             const columnName = new RegExp(solver.message).exec(e.message)?.[1];
                                             if (columnName) {
                                                 setFieldWithLaterUpdate(recordId, record, columnName, solver.replaceWith);

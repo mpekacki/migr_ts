@@ -1,5 +1,6 @@
 import { SObjectRecord, Schema } from "jsforce";
 import { IOEvent, Options } from "./app";
+import { IOEventType } from "./ioevent";
 
 class IO {
     private readonly onOutput: (output: IOEvent) => void;
@@ -10,8 +11,8 @@ class IO {
         this.onInput = onInput;
     }
 
-    private buildIOEvent(category: 'output' | 'input', message: string, type: 'confirm_migration' | 'info' | 'insert_error', data?: string) : IOEvent {
-        return new IOEvent(category as 'output' | 'input', message, type as 'confirm_migration' | 'info' | 'insert_error', data);
+    private buildIOEvent(category: 'output' | 'input', message: string, type: IOEventType, data?: any) : IOEvent {
+        return new IOEvent(category, message, type, data);
     }
 
     public startingMigration(options: Options) {
@@ -60,7 +61,7 @@ class IO {
     }
 
     public async askForConfirmation(recordCountsBySObjectType: Record<string, any>) {
-        const confirmation = await this.onInput(this.buildIOEvent('input', 'Do you want to continue? (y/n)', 'confirm_migration', JSON.stringify(recordCountsBySObjectType)));
+        const confirmation = await this.onInput(this.buildIOEvent('input', 'Do you want to continue? (y/n)', 'confirm_migration', recordCountsBySObjectType));
         this.confirmation(confirmation);
         return confirmation;
     }
@@ -98,7 +99,7 @@ class IO {
     }
 
     public creatingRecord(recordId: string, sObjectName: string, record: Record<string, string>) {
-        this.onOutput(this.buildIOEvent('output', `creating record ${recordId} of type ${sObjectName} with fields ${JSON.stringify(record)}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `creating record ${recordId} of type ${sObjectName} with fields ${JSON.stringify(record)}`, 'creating_record', { recordId, sObjectName, record }));
     }
 
     public savingRecords(chunk: Record<string, SObjectRecord<Schema, string>>) {
@@ -117,8 +118,8 @@ class IO {
         this.onOutput(this.buildIOEvent('output', `skipping previously used solvers: ${JSON.stringify(usedSolvers)}`, 'info'));
     }
 
-    public fixingUsingSolver(solver: string) {
-        this.onOutput(this.buildIOEvent('output', `fixing using solver: ${solver}`, 'info'));
+    public fixingUsingSolver(error: string, solverMessage: string, solverAction: string) {
+        this.onOutput(this.buildIOEvent('output', `fixing using solver: ${solverMessage}`, 'using_solver', { error, solverMessage, solverAction }));
     }
 
     public savedOldFieldsInToUpdateLater(oldFields: Record<string, string>) {
@@ -133,8 +134,8 @@ class IO {
         this.onOutput(this.buildIOEvent('output', `skipping record ${recordId} using solver: ${solver}`, 'info'));
     }
 
-    public extractingColumnFromError(error: string) {
-        this.onOutput(this.buildIOEvent('output', `extracting column name from error: ${error}`, 'info'));
+    public extractingColumnFromError(error: string, solverMessage: string) {
+        this.onOutput(this.buildIOEvent('output', `extracting column name from error: ${error}`, 'using_solver', { error, solverMessage, solverAction: 'extract_column' }));
     }
 
     public appendingRandomToRecord(recordId: string, solver: string) {
@@ -156,7 +157,7 @@ class IO {
             { key: 's', label: 'Skip' }
         ];
         const optionsList = options.map(opt => `- ${opt.label} (${opt.key})`).join('\n');
-        return await this.onInput(this.buildIOEvent('input', `recordId: ${recordId}, no solver found for error: ${message}\nPlease provide input to resolve the error:\nAvailable options:\n${optionsList}:`, 'insert_error'));
+        return await this.onInput(this.buildIOEvent('input', `recordId: ${recordId}, no solver found for error: ${message}\nPlease provide input to resolve the error:\nAvailable options:\n${optionsList}:`, 'insert_error', { recordId, error: message }));
     }
 
     public async askForFieldsToUpdate(): Promise<string> {
@@ -196,7 +197,7 @@ class IO {
     }
 
     public updatingRecord(recordId: string, sObjectName: string, record: Record<string, string>) {
-        this.onOutput(this.buildIOEvent('output', `updating record ${recordId} of type ${sObjectName} to ${JSON.stringify(record)}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `updating record ${recordId} of type ${sObjectName} to ${JSON.stringify(record)}`, 'updating_record'));
     }
 
     public errorUpdatingRecord(recordId: string, sObjectName: string, error: any) {

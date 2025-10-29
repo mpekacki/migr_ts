@@ -366,7 +366,7 @@ test('migrate record - complex', async () => {
         if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
             sendInput('y');
             // event data should contain record counts by sobject type
-            const recordCounts = JSON.parse(ioEvent.data!);
+            const recordCounts = ioEvent.data!;
             expect(recordCounts).toHaveProperty('Account');
             expect(recordCounts).toHaveProperty('Contact');
             expect(recordCounts).toHaveProperty('Opportunity');
@@ -900,8 +900,11 @@ test('migrate record with error - fixed automatically, remove field if new value
     expect(newCustObj).toBeDefined();
     expect(newCustObj.Name).toEqual(name);
 
-    expect(capturedOutput.find(e => e.message.includes('extracting column name from error: Field \'Fussy_Field_1__c\'  can\'t be'))).toBeDefined();
-    expect(capturedOutput.map(e => e.message).filter(e => e.includes('updating record'))).toHaveLength(0);
+    const usingSolver = capturedOutput.find(e => e.type === 'using_solver');
+    expect(usingSolver).toBeDefined();
+    expect(usingSolver?.data?.solverMessage).toEqual('Field \'(\\w+)\'  can\'t be');
+    expect(usingSolver?.data?.error?.includes('Field \'Fussy_Field_1__c\'  can\'t be')).toBeTruthy();
+    expect(capturedOutput.find(e => e.type === 'updating_record')).toBeUndefined();
 });
 
 test('migrate record with error - fixed manually, remove field if new value is null', async () => {
@@ -931,8 +934,8 @@ test('migrate record with error - fixed manually, remove field if new value is n
     expect(newCustObj).toBeDefined();
     expect(newCustObj.Name).toEqual(name);
 
-    expect(capturedOutput.find(e => e.message.includes('recordId: ' + custObj.id + ', no solver found for error: Field \'Fussy_Field_1__c\'  can\'t be'))).toBeDefined();
-    expect(capturedOutput.map(e => e.message).filter(e => e.includes('updating record'))).toHaveLength(0);
+    expect(capturedOutput.find(e => e.type === 'insert_error' && e.data?.recordId === custObj.id && e.data?.error?.includes('Field \'Fussy_Field_1__c\'  can\'t be' ))).toBeDefined();
+    expect(capturedOutput.find(e => e.type === 'updating_record')).toBeUndefined();
 });
 
 test('migrate record with error - automatically extract column name to update', async () => {
@@ -1065,7 +1068,7 @@ test('migrate record with error - manually add new solver', async () => {
     expect(newCustObj2.Fussy_Field_2__c).toEqual('dupa');
 
 
-    expect(capturedOutput.find(e => e.message.includes('extracting column name from error: Field \'Fussy_Field_1__c\'  can\'t be'))).toBeDefined();
+    expect(capturedOutput.find(e => e.type === 'using_solver' && e.data?.solverAction === 'extract_column' && e.data?.error?.includes('Field \'Fussy_Field_1__c\'  can\'t be'))).toBeDefined();
 });
 
 test('migrate record with error - manually add new solver, invalid solver', async () => {
@@ -1108,7 +1111,8 @@ test('migrate record with error - manually add new solver, invalid solver', asyn
     expect(newCustObj2).toBeDefined();
     expect(newCustObj2.Name).toEqual(name2);
 
-    expect(capturedOutput.map(e => e.message)).toContain('fixing using solver: Field \'Fussy_Field_1__c\'  can\'t be');
+    // expect(capturedOutput.map(e => e.message)).toContain('fixing using solver: Field \'Fussy_Field_1__c\'  can\'t be');
+    expect(capturedOutput.find(e => e.type === 'using_solver' && e.data?.solverAction === 'fix' && e.data?.error?.includes('Field \'Fussy_Field_1__c\'  can\'t be'))).toBeDefined();
 });
 
 test('migrate record with error - automatically skip record', async () => {
@@ -1302,7 +1306,8 @@ test('migrate record with error - manually retry insert', async () => {
         if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
             sendInput('y');
         } else if (ioEvent.category === 'input' && ioEvent.type === 'insert_error') {
-            expect(ioEvent.message).toContain('duplicate value found: External_Id__c duplicates value on record with id:');
+            // expect(ioEvent.message).toContain('duplicate value found: External_Id__c duplicates value on record with id:');
+            expect(ioEvent.data.error).toContain('duplicate value found: External_Id__c duplicates value on record with id:');
             // delete record from Org B
             await conn2.sobject('Custom_Object_C__c').delete(custObjCorgB.id!);
             // retry insert
@@ -1363,7 +1368,7 @@ test('manually retry all records', async () => {
         } else if (ioEvent.category === 'input' && ioEvent.type === 'insert_error') {
             retryCount++;
             expect(retryCount).toBe(1);
-            expect(ioEvent.message).toContain('duplicate value found: External_Id__c duplicates value on record with id:');
+            expect(ioEvent.data.error).toContain('duplicate value found: External_Id__c duplicates value on record with id:');
             // delete records from Org B
             for (const record of records2) {
                 await conn2.sobject('Custom_Object_C__c').delete(record.id!);
@@ -1955,9 +1960,14 @@ test('write output to log file', async () => {
 
     const newAccountId = assertRecordMigrated(parsedOutput, account.id!);
 
-    const logFile = fs.readFileSync('test-output.log', 'utf8');
-    expect(logFile).toContain(`creating record ${account.id}`);
-
+    const linesParsed = fs.readFileSync('test-output.log', 'utf8').split('\n').map(line => {
+        try {
+            return JSON.parse(line);
+        } catch (error) {
+            return null;
+        }
+    }).filter(line => line !== null);
+    expect(linesParsed.some(line => line.type === 'creating_record' && line.data.recordId === account.id)).toBe(true);
     // run another migration to check that the log file is overwritten
     const account2 = await conn1.sobject('Account').create({ Name: 'Ebola Cola 2' });
     expect(account2.id).toBeDefined();
@@ -1972,9 +1982,15 @@ test('write output to log file', async () => {
     const { parsedOutput: parsedOutput2 } = await runMigration(config2, ['y'], 'test-output.log');
     const newAccountId2 = assertRecordMigrated(parsedOutput2, account2.id!);
 
-    const logFile2 = fs.readFileSync('test-output.log', 'utf8');
-    expect(logFile2).toContain(`creating record ${account2.id}`);
-    expect(logFile2).not.toContain(`creating record ${account.id}`);
+    const linesParsed2 = fs.readFileSync('test-output.log', 'utf8').split('\n').map(line => {
+        try {
+            return JSON.parse(line);
+        } catch (error) {
+            return null;
+        }
+    }).filter(line => line !== null);
+    expect(linesParsed2.some(line => line.type === 'creating_record' && line.data.recordId === account2.id)).toBe(true);
+    expect(linesParsed2.some(line => line.type === 'creating_record' && line.data.recordId === account.id)).toBe(false);
 });
 
 test('malformed id', async () => {
