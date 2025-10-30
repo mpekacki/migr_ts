@@ -9,13 +9,11 @@ class IOEvent {
     ) {}
 
     toString(): string {
-        let data;
-        try {
-            data = JSON.stringify(this.data, null, 2);
-        } catch {
-            data = this.data;
+        let data = this.data;
+        if (typeof data === 'object') {
+            data = JSON.stringify(data, null, 2);
         }
-        return data ? `${JSON.stringify(data, null, 2)}\n${this.message}` : this.message;
+        return data ? `${data}\n${this.message}` : this.message;
     }
 }
 

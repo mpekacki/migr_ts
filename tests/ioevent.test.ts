@@ -13,7 +13,7 @@ describe('IOEvent', () => {
         });
 
         it('should pretty print data if it is an object', () => {
-            const event = new IOEvent('output', 'test message', 'info', JSON.stringify({ test: 'data' }));
+            const event = new IOEvent('output', 'test message', 'info', { test: 'data' });
             expect(event.toString()).toBe(`${JSON.stringify({ test: 'data' }, null, 2)}\ntest message`);
         });
     });

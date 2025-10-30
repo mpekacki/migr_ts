@@ -24,9 +24,6 @@ if (program.opts().outputFile) {
 }
 
 const formatMessage = (event: IOEvent) => {
-    if (program.opts().debug) {
-        event.message = '';
-    }
     return program.opts().debug ? 
         JSON.stringify(event) : 
         event.toString();

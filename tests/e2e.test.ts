@@ -2376,7 +2376,7 @@ test('report record reason counts', async () => {
     const { parsedOutput } = await runMigration(config, async (ioEvent, sendInput) => {
         if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
             sendInput('y');
-            const recordCounts = JSON.parse(ioEvent.data!);
+            const recordCounts = ioEvent.data!;
             expect(recordCounts).toHaveProperty('Account');
             expect(recordCounts).toHaveProperty('Contact');
             expect(recordCounts.Account).toBe(1);
