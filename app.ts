@@ -636,7 +636,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                     recordReady = false;
                                     // output({ category: 'output', message: `record ${recordId} of type ${sObjectName} is not ready because lookup field ${field} (${match}) is not migrated`, type: 'info' });
                                 } else if (match in old2new) {
-                                    io.mapping(field, match, recordId, sObjectName, old2new[match]);
+                                    // io.mapping(field, match, recordId, sObjectName, old2new[match]);
                                     record[field] = record[field].replace(match, old2new[match]);
                                     if (record[field] === '') {
                                         delete record[field];
