@@ -485,7 +485,9 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         for (const relatedRecord of relatedRecords) {
                             if (!(relatedRecord.Id in recordsByIds) && !newIds.includes(relatedRecord.Id!)) {
                                 newIds.push(relatedRecord.Id!);
-                                recordAddedReasons[relatedRecord.Id!] = `${sObjectName}.${relationship.name}`;
+                                // Propagate the root reason if the current record was added due to a relationship
+                                // Otherwise, use the current relationship as the reason
+                                recordAddedReasons[relatedRecord.Id!] = recordAddedReasons[recordId] || `${sObjectName}.${relationship.name}`;
                             }
                         }
                     }

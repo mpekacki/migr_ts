@@ -2363,11 +2363,21 @@ test('report record reason counts', async () => {
         ReportsToId: contact.id!
     });
 
+    const caseRecord = await conn1.sobject('Case').create({
+        Subject: 'Test Case',
+        ContactId: contact.id!
+    });
+
     const config = createBasicConfig([account.id!], {
         relationships: {
             "Account": [
                 {
                     "name": "Contacts"
+                }
+            ],
+            "Contact": [
+                {
+                    "name": "Cases"
                 }
             ]
         }
@@ -2386,10 +2396,13 @@ test('report record reason counts', async () => {
             expect(recordCounts.recordReasons).toHaveProperty(['Account.Contacts']);
             expect(recordCounts.recordReasons['Account.Contacts']).toHaveProperty('Contact');
             expect(recordCounts.recordReasons['Account.Contacts'].Contact).toBe(2);
+            expect(recordCounts.recordReasons['Account.Contacts']).toHaveProperty('Case');
+            expect(recordCounts.recordReasons['Account.Contacts'].Case).toBe(1);
         }
     });
 
     assertRecordMigrated(parsedOutput, account.id!);
     assertRecordMigrated(parsedOutput, contact.id!);
     assertRecordMigrated(parsedOutput, contact2.id!);
+    assertRecordMigrated(parsedOutput, caseRecord.id!);
 });
