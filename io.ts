@@ -103,7 +103,27 @@ class IO {
     }
 
     public savingRecords(chunk: Record<string, SObjectRecord<Schema, string>>) {
-        this.onOutput(this.buildIOEvent('output', `saving ${Object.keys(chunk).length} records: ${JSON.stringify(Object.values(chunk))}`, 'info'));
+        const records = Object.values(chunk);
+        const recordCountsByType: Record<string, number> = {};
+
+        // Count records by type
+        records.forEach(record => {
+            const type = (record as any).attributes?.type || 'Unknown';
+            recordCountsByType[type] = (recordCountsByType[type] || 0) + 1;
+        });
+
+        // Format type counts (e.g., "1 Account, 2 Contact")
+        const typeCounts = Object.entries(recordCountsByType)
+            .map(([type, count]) => `${count} ${type}`)
+            .join(', ');
+
+        // Trim JSON to 1000 characters
+        let jsonStr = JSON.stringify(records);
+        if (jsonStr.length > 1000) {
+            jsonStr = jsonStr.substring(0, 1000) + '...';
+        }
+
+        this.onOutput(this.buildIOEvent('output', `saving ${records.length} records (${typeCounts}): ${jsonStr}`, 'info'));
     }
 
     public savedRecords(savedRecords: Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>) {

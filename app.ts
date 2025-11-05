@@ -703,7 +703,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                             attributes: record.attributes,
                                 ...record
                             } as SObjectRecord<Schema, string>;
-                        io.creatingRecord(recordId, sObjectName, record);
+                        // io.creatingRecord(recordId, sObjectName, record);
                     } else {
                         setNewRecordId(recordId, migratedRecordId!);
                     }
