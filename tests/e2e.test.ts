@@ -17,6 +17,9 @@ afterEach(async () => {
     if (fs.existsSync(`${targetOrgAlias}__history.json`)) {
         fs.unlinkSync(`${targetOrgAlias}__history.json`);
     }
+    if (fs.existsSync('./custom_history_test.json')) {
+        fs.unlinkSync('./custom_history_test.json');
+    }
 });
 
 let cachedConn1: Connection | undefined;
@@ -2405,4 +2408,35 @@ test('report record reason counts', async () => {
     assertRecordMigrated(parsedOutput, contact.id!);
     assertRecordMigrated(parsedOutput, contact2.id!);
     assertRecordMigrated(parsedOutput, caseRecord.id!);
+});
+
+test('custom history file path', async () => {
+    console.log('starting test: custom history file path');
+
+    const { conn1 } = await setupTestConnections();
+
+    console.log('creating records');
+    const account = await createAccount(conn1, 'Custom History Test Account');
+    console.log(account);
+
+    const customHistoryPath = './custom_history_test.json';
+    const config = createBasicConfig([account.id!], {
+        historyFilePath: customHistoryPath
+    });
+
+    const { parsedOutput } = await runMigration(config);
+
+    // Verify record was migrated
+    const newAccountId = assertRecordMigrated(parsedOutput, account.id!);
+
+    // Verify custom history file was created
+    expect(fs.existsSync(customHistoryPath)).toBe(true);
+
+    // Verify custom history file contains the mapping
+    const historyContent = JSON.parse(fs.readFileSync(customHistoryPath, 'utf8'));
+    expect(historyContent).toHaveProperty(account.id!);
+    expect(historyContent[account.id!]).toBe(newAccountId);
+
+    // Verify default history file was NOT created
+    expect(fs.existsSync(`${targetOrgAlias}__history.json`)).toBe(false);
 });

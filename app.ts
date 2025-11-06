@@ -20,6 +20,7 @@ interface Options {
     targetOrgUrl?: string;
     targetOrgToken?: string;
     targetFile?: string;
+    historyFilePath?: string;
     recordIds: string[];
     relatedRecordDepthLimit: number;
     maxConcurrentRequests?: number;
@@ -268,7 +269,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
 
     // check if history file exists for target org
-    const historyFilePath = path.join(process.cwd(), `${options.targetOrg}__history.json`);
+    const historyFilePath = options.historyFilePath || path.join(process.cwd(), `${options.targetOrg}__history.json`);
     let history: Record<string, string> = {};
     if (!isMigrateToFile && fs.existsSync(historyFilePath)) {
         history = JSON.parse(fs.readFileSync(historyFilePath, 'utf8'));
