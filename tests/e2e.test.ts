@@ -1970,7 +1970,7 @@ test('write output to log file', async () => {
             return null;
         }
     }).filter(line => line !== null);
-    expect(linesParsed.some(line => line.type === 'creating_record' && line.data.recordId === account.id)).toBe(true);
+    expect(linesParsed.some(line => line.type === 'saved_records' && line.data.some((record: any) => record.id === newAccountId && record.success))).toBe(true);
     // run another migration to check that the log file is overwritten
     const account2 = await conn1.sobject('Account').create({ Name: 'Ebola Cola 2' });
     expect(account2.id).toBeDefined();
@@ -1992,8 +1992,8 @@ test('write output to log file', async () => {
             return null;
         }
     }).filter(line => line !== null);
-    expect(linesParsed2.some(line => line.type === 'creating_record' && line.data.recordId === account2.id)).toBe(true);
-    expect(linesParsed2.some(line => line.type === 'creating_record' && line.data.recordId === account.id)).toBe(false);
+    expect(linesParsed2.some(line => line.type === 'saved_records' && line.data.some((record: any) => record.id === newAccountId2 && record.success))).toBe(true);
+    expect(linesParsed2.some(line => line.type === 'saved_records' && line.data.some((record: any) => record.id === newAccountId && record.success))).toBe(false);
 });
 
 test('malformed id', async () => {

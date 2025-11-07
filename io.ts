@@ -127,7 +127,7 @@ class IO {
     }
 
     public savedRecords(savedRecords: Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>) {
-        this.onOutput(this.buildIOEvent('output', `saved records: ${JSON.stringify(savedRecords)}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `saved records: ${JSON.stringify(savedRecords)}`, 'saved_records', savedRecords));
     }
 
     public createdRecord(recordId: string) {

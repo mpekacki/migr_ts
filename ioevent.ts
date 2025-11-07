@@ -1,4 +1,4 @@
-export type IOEventType = 'confirm_migration' | 'info' | 'insert_error' | 'creating_record' | 'updating_record' | 'using_solver';
+export type IOEventType = 'confirm_migration' | 'info' | 'insert_error' | 'creating_record' | 'updating_record' | 'using_solver' | 'saved_records';
 
 class IOEvent {
     constructor(
