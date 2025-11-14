@@ -74,6 +74,7 @@ interface MatchSolver extends Solver {
 interface ExtractSolver extends Solver {
     action: 'extract_column';
     replaceWith: string | null;
+    fromFields?: boolean;
 }
 
 interface AppendRandomSolver extends Solver {
@@ -292,7 +293,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             io.describeSObject(sObjectName);
             sObjectDescribes.cache[sObjectName] = targetClient!.describeSObject(sObjectName);
         }
-        return await sObjectDescribes.cache[sObjectName];
+            return await sObjectDescribes.cache[sObjectName];
     };
     const getSObjectType = async (recordId: string, record?: any): Promise<string> => {
         if (record && record.attributes && record.attributes.type) {
@@ -801,7 +802,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                             }
                                         } else if (solver.action === 'extract_column') {
                                             io.extractingColumnFromError(e.message, solver.message);
-                                            const columnName = new RegExp(solver.message).exec(e.message)?.[1];
+                                            let columnName;
+                                            if (solver.fromFields) {
+                                                columnName = e.fields[0];
+                                            } else {
+                                                columnName = new RegExp(solver.message).exec(e.message)?.[1];
+                                            }
                                             if (columnName) {
                                                 setFieldWithLaterUpdate(recordId, record, columnName, solver.replaceWith);
                                                 errorFixed = true;

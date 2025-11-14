@@ -216,6 +216,13 @@ const defaultMatchers = [
         fieldMappings: [
             { sourceField: 'Name', targetField: 'Name' }
         ]
+    },
+    {
+        sObjectType: 'RecordType',
+        fieldMappings: [
+            { sourceField: 'DeveloperName', targetField: 'DeveloperName' },
+            { sourceField: 'SobjectType', targetField: 'SobjectType' }
+        ]
     }
 ];
 
@@ -2439,4 +2446,48 @@ test('custom history file path', async () => {
 
     // Verify default history file was NOT created
     expect(fs.existsSync(`${targetOrgAlias}__history.json`)).toBe(false);
+});
+
+test('solver with additional info from error', async () => {
+    console.log('starting test: solver with additional info from error');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    const rtEnhanced = await conn1.sobject('RecordType').findOne({
+        sObjectType: 'Custom_Object_E__c',
+        DeveloperName: 'Enhanced'
+    }, 'Id');
+    expect(rtEnhanced).toBeDefined();
+    const custObjE = await conn1.sobject('Custom_Object_E__c').create({ RecordTypeId: rtEnhanced!.Id, Some_picklist__c: 'Enhanced value' });
+    expect(custObjE.id).toBeDefined();
+
+    const config = createBasicConfig([custObjE.id!], {
+        solvers: [
+            {
+                action: 'fix',
+                message: 'Record Type ID: this ID value isn\'t valid for the user',
+                changeFields: [
+                    {
+                        field: 'RecordTypeId',
+                        value: null
+                    }
+                ]
+            },
+            {
+                action: 'extract_column',
+                message: 'bad value for restricted picklist field: [\\w ]+',
+                fromFields: true,
+                replaceWith: 'Normal value'
+            }
+        ]
+    });
+
+    const { parsedOutput } = await runMigration(config);
+
+    const newCustObjEId = assertRecordMigrated(parsedOutput, custObjE.id!);
+    expect(newCustObjEId).not.toBe(custObjE.id!);
+    const newCustObjE: any = await conn2.sobject('Custom_Object_E__c').retrieve(newCustObjEId);
+    expect(newCustObjE).toBeDefined();
+    expect(newCustObjE.Some_picklist__c).toBe('Normal value');
 });
