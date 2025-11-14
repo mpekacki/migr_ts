@@ -91,6 +91,11 @@ jobs:
               --target-org "$TEST_ORG_A_ALIAS" \
               --sobject Custom_Setting_1__c \
               --values "Is_Org_A__c=true"
+
+            # Assign Enhanced E Permission Set
+            sf org assign permset \
+              --target-org "$TEST_ORG_A_ALIAS" \
+              --name "Enhanced_E"
           fi
         }
 
