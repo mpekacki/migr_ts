@@ -16,8 +16,26 @@
         <field>Custom_Object_D__c.Fussy_Field_2__c</field>
         <readable>true</readable>
     </fieldPermissions>
+    <fieldPermissions>
+        <editable>false</editable>
+        <field>Custom_Object_D__c.Org_A_Only_Field__c</field>
+        <readable>false</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
+        <field>Custom_Object_E__c.Some_picklist__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
     <layoutAssignments>
-        <layout>Custom_Object_D__c-Custom Object D Layout</layout>
+        <layout>Custom_Object_E__c-Custom Object E Layout</layout>
+    </layoutAssignments>
+    <layoutAssignments>
+        <layout>Custom_Object_E__c-Custom Object E Layout</layout>
+        <recordType>Custom_Object_E__c.Enhanced</recordType>
+    </layoutAssignments>
+    <layoutAssignments>
+        <layout>Custom_Object_E__c-Custom Object E Layout</layout>
+        <recordType>Custom_Object_E__c.Normal</recordType>
     </layoutAssignments>
     <objectPermissions>
         <allowCreate>true</allowCreate>
@@ -55,10 +73,34 @@
         <object>Custom_Object_D__c</object>
         <viewAllRecords>true</viewAllRecords>
     </objectPermissions>
+    <objectPermissions>
+        <allowCreate>true</allowCreate>
+        <allowDelete>true</allowDelete>
+        <allowEdit>true</allowEdit>
+        <allowRead>true</allowRead>
+        <modifyAllRecords>true</modifyAllRecords>
+        <object>Custom_Object_E__c</object>
+        <viewAllRecords>true</viewAllRecords>
+    </objectPermissions>
+    <recordTypeVisibilities>
+        <default>false</default>
+        <recordType>Custom_Object_E__c.Enhanced</recordType>
+        <visible>false</visible>
+    </recordTypeVisibilities>
+    <recordTypeVisibilities>
+        <default>true</default>
+        <personAccountDefault>true</personAccountDefault>
+        <recordType>Custom_Object_E__c.Normal</recordType>
+        <visible>true</visible>
+    </recordTypeVisibilities>
     <userLicense>Salesforce</userLicense>
     <userPermissions>
         <enabled>true</enabled>
         <name>AIViewInsightObjects</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>AccessOrchestrationObjects</name>
     </userPermissions>
     <userPermissions>
         <enabled>true</enabled>
@@ -94,6 +136,22 @@
     </userPermissions>
     <userPermissions>
         <enabled>true</enabled>
+        <name>AppFrameworkManageApp</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>AppFrameworkManageTemplate</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>ApprovalAdmin</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>ApprovalDesigner</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
         <name>AssignPermissionSets</name>
     </userPermissions>
     <userPermissions>
@@ -111,6 +169,10 @@
     <userPermissions>
         <enabled>true</enabled>
         <name>CanAccessCE</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>CanApproveUninstalledApps</name>
     </userPermissions>
     <userPermissions>
         <enabled>true</enabled>
@@ -418,6 +480,10 @@
     </userPermissions>
     <userPermissions>
         <enabled>true</enabled>
+        <name>ManageContentTaxonomy</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
         <name>ManageContentTypes</name>
     </userPermissions>
     <userPermissions>
@@ -634,6 +700,10 @@
     </userPermissions>
     <userPermissions>
         <enabled>true</enabled>
+        <name>QrCodeGeneratorMobilePublisherPlayground</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
         <name>RemoveDirectMessageMembers</name>
     </userPermissions>
     <userPermissions>
@@ -710,6 +780,10 @@
     </userPermissions>
     <userPermissions>
         <enabled>true</enabled>
+        <name>TerritoryOperations</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
         <name>TransactionalEmailSend</name>
     </userPermissions>
     <userPermissions>
@@ -738,6 +812,10 @@
     </userPermissions>
     <userPermissions>
         <enabled>true</enabled>
+        <name>UserInteractionInsights</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
         <name>ViewAllData</name>
     </userPermissions>
     <userPermissions>
@@ -751,6 +829,10 @@
     <userPermissions>
         <enabled>true</enabled>
         <name>ViewClientSecret</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>ViewContentTaxonomy</name>
     </userPermissions>
     <userPermissions>
         <enabled>true</enabled>
@@ -807,6 +889,10 @@
     <userPermissions>
         <enabled>true</enabled>
         <name>ViewRoles</name>
+    </userPermissions>
+    <userPermissions>
+        <enabled>true</enabled>
+        <name>ViewSALifecycle</name>
     </userPermissions>
     <userPermissions>
         <enabled>true</enabled>

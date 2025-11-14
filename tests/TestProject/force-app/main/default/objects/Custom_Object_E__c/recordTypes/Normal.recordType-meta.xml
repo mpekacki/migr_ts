@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RecordType xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Normal</fullName>
+    <active>true</active>
+    <label>Normal</label>
+    <picklistValues>
+        <picklist>Some_picklist__c</picklist>
+        <values>
+            <fullName>Normal value</fullName>
+            <default>false</default>
+        </values>
+    </picklistValues>
+</RecordType>
