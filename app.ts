@@ -270,7 +270,17 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
 
     // check if history file exists for target org
-    const historyFilePath = options.historyFilePath || path.join(process.cwd(), `${options.targetOrg}__history.json`);
+    let historyFilePath: string;
+    if (options.historyFilePath) {
+        const stats = fs.existsSync(options.historyFilePath) ? fs.statSync(options.historyFilePath) : null;
+        if ((stats && stats.isDirectory()) || (!stats && options.historyFilePath.endsWith(path.sep))) {
+            historyFilePath = path.join(options.historyFilePath, `${options.targetOrg}__history.json`);
+        } else {
+            historyFilePath = options.historyFilePath;
+        }
+    } else {
+        historyFilePath = path.join(process.cwd(), `${options.targetOrg}__history.json`);
+    }
     let history: Record<string, string> = {};
     if (!isMigrateToFile && fs.existsSync(historyFilePath)) {
         history = JSON.parse(fs.readFileSync(historyFilePath, 'utf8'));
@@ -293,7 +303,12 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             io.describeSObject(sObjectName);
             sObjectDescribes.cache[sObjectName] = targetClient!.describeSObject(sObjectName);
         }
+        try {
             return await sObjectDescribes.cache[sObjectName];
+        } catch (ex) {
+            console.log('error fetching ' + sObjectName + ' SObject describe');
+            throw ex;
+        }
     };
     const getSObjectType = async (recordId: string, record?: any): Promise<string> => {
         if (record && record.attributes && record.attributes.type) {
