@@ -1,5 +1,5 @@
 import { Connection, AuthInfo } from '@salesforce/core';
-import { DescribeSObjectResult, DescribeGlobalResult, SObjectRecord, Schema, SObjectUpdateRecord, Query } from 'jsforce';
+import { DescribeSObjectResult, DescribeGlobalResult } from 'jsforce';
 
 export interface AuthConfig {
     orgAlias?: string;
