@@ -182,7 +182,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         io.error(`Retrying ${context} (attempt ${attempt}/${maxAttempts})`);
                         const result = await retryOperation!();
                         return { success: true, result };
-                    } catch (retryError) {
+                    } catch {
                         if (attempt === maxAttempts) {
                             return { success: false };
                         }
@@ -203,7 +203,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         io.error(`Retrying ${context} with backoff (attempt ${attempt}/${maxAttempts}, delay: ${delay}ms)`);
                         const result = await retryOperation!();
                         return { success: true, result };
-                    } catch (retryError) {
+                    } catch {
                         if (attempt === maxAttempts) {
                             return { success: false };
                         }
@@ -489,7 +489,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                         } else {
                             throw jsforceError;
                         }
-                    } catch (unhandledError) {
+                    } catch {
                         io.error(`Unhandled jsforce error in related records query: ${jsforceError.message}`);
                         relsResults = [];
                     }
@@ -701,7 +701,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 } else {
                                     throw jsforceError;
                                 }
-                            } catch (unhandledError) {
+                            } catch {
                                 io.error(`Unhandled jsforce error in find operation: ${jsforceError.message}`);
                                 migratedRecord = [];
                             }
@@ -760,7 +760,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                                 // Re-throw if not handled by solver
                                 throw jsforceError;
                             }
-                        } catch (unhandledError) {
+                        } catch {
                             // If error handling fails, mark all records in chunk as failed
                             savedRecords = Object.keys(chunk).map(() => ({
                                 id: '',
@@ -1000,7 +1000,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                     } else if (errorResult.shouldSkip) {
                         io.error(`Skipping update for ${recordId} due to jsforce error: ${jsforceError.message}`);
                     }
-                } catch (unhandledError) {
+                } catch {
                     io.errorUpdatingRecord(recordId, record.attributes!.type, jsforceError);
                 }
             }
