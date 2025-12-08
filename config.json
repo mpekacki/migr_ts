@@ -1,8 +1,8 @@
 {
-  "sourceOrg": "tesrMigrationOrgA",
-  "targetOrg": "tesrMigrationOrgB",
+  "sourceOrg": "testMigrationOrgA",
+  "targetOrg": "testMigrationOrgB",
   "recordIds": [
-    "001KO000008VaWiYAK"
+    "001RR00000tyjwbYAA"
   ],
   "matchers": [
     {
@@ -163,15 +163,6 @@
       ]
     },
     {
-      "sObjectType": "Territory",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
       "sObjectType": "Group",
       "fieldMappings": [
         {
@@ -253,15 +244,6 @@
       ]
     },
     {
-      "sObjectType": "CampaignInfluenceModel",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
       "sObjectType": "ContentAsset",
       "fieldMappings": [
         {
@@ -307,96 +289,6 @@
       ]
     },
     {
-      "sObjectType": "LiveChatUserConfig",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
-      "sObjectType": "LiveChatDeployment",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
-      "sObjectType": "LiveChatButton",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
-      "sObjectType": "LiveChatBlockingRule",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
-      "sObjectType": "LiveChatSensitiveDataRule",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
-      "sObjectType": "ServicePresenceStatus",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
-      "sObjectType": "ServiceChannel",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
-      "sObjectType": "QueueRoutingConfig",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
-      "sObjectType": "PresenceUserConfig",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
-      "sObjectType": "PresenceDeclineReason",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
       "sObjectType": "AuraDefinitionBundle",
       "fieldMappings": [
         {
@@ -434,15 +326,6 @@
     },
     {
       "sObjectType": "AppDefinition",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
-      "sObjectType": "ExternalSocialAccount",
       "fieldMappings": [
         {
           "sourceField": "DeveloperName",
@@ -523,15 +406,6 @@
       ]
     },
     {
-      "sObjectType": "SecureAgentsCluster",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
       "sObjectType": "ExternalDataSource",
       "fieldMappings": [
         {
@@ -595,25 +469,7 @@
       ]
     },
     {
-      "sObjectType": "CaseSubjectParticle",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
       "sObjectType": "PermissionSetGroup",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
-      "sObjectType": "DuplicateJobDefinition",
       "fieldMappings": [
         {
           "sourceField": "DeveloperName",
@@ -676,15 +532,6 @@
       ]
     },
     {
-      "sObjectType": "AppleDomainVerification",
-      "fieldMappings": [
-        {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
-        }
-      ]
-    },
-    {
       "sObjectType": "LightningOnboardingConfig",
       "fieldMappings": [
         {
@@ -715,8 +562,8 @@
       "sObjectType": "PermissionSet",
       "fieldMappings": [
         {
-          "sourceField": "DeveloperName",
-          "targetField": "DeveloperName"
+          "sourceField": "Label",
+          "targetField": "Label"
         }
       ]
     },

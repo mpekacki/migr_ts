@@ -11,9 +11,7 @@
     "test:parallel": "jest --maxWorkers=3 --verbose",
     "test:parallel:max": "jest --maxWorkers=50% --verbose",
     "test:sequential": "jest --runInBand --verbose",
-    "start": "node bundle.js",
-    "deps": "npx ts-node simple-deps.ts",
-    "deps:advanced": "npx ts-node generate-deps.ts"
+    "start": "node build/bundle.js"
   },
   "keywords": [],
   "author": "",
