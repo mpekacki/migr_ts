@@ -69,7 +69,7 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
     const capturedOutput: IOEvent[] = [];
     let capturedError = '';
 
-    let command = `npm start -- --config-json ./config_test.json --debug`;
+    let command = `npm run start:test -- --config-json ./config_test.json --debug`;
     if (outputFile) {
         command += ` --output-file ${outputFile}`;
     }

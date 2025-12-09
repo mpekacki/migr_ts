@@ -16,48 +16,48 @@ class IO {
     }
 
     public startingMigration(options: Options) {
-        this.onOutput(this.buildIOEvent('output', `starting migration: ${JSON.stringify(options)}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `starting migration: ${JSON.stringify(options)}`, 'info', { options }));
     }
 
     public describeSObject(sObjectName: string) {
-        this.onOutput(this.buildIOEvent('output', `describing SObject ${sObjectName}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `describing SObject ${sObjectName}`, 'info', { sObjectName }));
     }
 
     public checkingMatchers() {
-        this.onOutput(this.buildIOEvent('output', `checking matchers`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `checking matchers`, 'info', {}));
     }
 
     public recordsSoFar(count: number) {
-        this.onOutput(this.buildIOEvent('output', `records so far: ${count}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `records so far: ${count}`, 'info', { count }));
     }
 
     public fetchingRecord(recordId: string, sObjectName: string, reason?: string) {
         const reasonText = reason ? ` (via ${reason})` : '';
-        this.onOutput(this.buildIOEvent('output', `fetching record ${recordId} of type ${sObjectName}${reasonText}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `fetching record ${recordId} of type ${sObjectName}${reasonText}`, 'info', { recordId, sObjectName, reason }));
     }
 
     public recordNotFound(recordId: string, sObjectName: string) {
-        this.onOutput(this.buildIOEvent('output', `record ${recordId} of type ${sObjectName} does not exist in the source org`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `record ${recordId} of type ${sObjectName} does not exist in the source org`, 'info', { recordId, sObjectName }));
     }
 
     public recordNotQueryable(recordId: string, sObjectName: string) {
-        this.onOutput(this.buildIOEvent('output', `record ${recordId} of type ${sObjectName} is not queryable`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `record ${recordId} of type ${sObjectName} is not queryable`, 'info', { recordId, sObjectName }));
     }
 
     public malformedId(recordId: string, sObjectName: string) {
-        this.onOutput(this.buildIOEvent('output', `record ${recordId} of type ${sObjectName} is malformed`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `record ${recordId} of type ${sObjectName} is malformed`, 'info', { recordId, sObjectName }));
     }
 
     public queryingForRelatedRecords(soql: string) {
-        this.onOutput(this.buildIOEvent('output', `querying for related records: ${soql}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `querying for related records: ${soql}`, 'info', { soql }));
     }
 
     public relatedRecords(relationshipName: string, count: number) {
-        this.onOutput(this.buildIOEvent('output', `related records of ${relationshipName}: ${count}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `related records of ${relationshipName}: ${count}`, 'info', { relationshipName, count }));
     }
 
     public fetchedRecords(count: number) {
-        this.onOutput(this.buildIOEvent('output', `fetched ${count} records`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `fetched ${count} records`, 'info', { count }));
     }
 
     public async askForConfirmation(recordCountsBySObjectType: Record<string, any>) {
@@ -67,11 +67,11 @@ class IO {
     }
 
     public aborted() {
-        this.onOutput(this.buildIOEvent('output', 'aborted', 'info'));
+        this.onOutput(this.buildIOEvent('output', 'aborted', 'info', {}));
     }
 
     public confirmation(confirmation: string) {
-        this.onOutput(this.buildIOEvent('output', `confirmation: ${confirmation}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `confirmation: ${confirmation}`, 'info', { confirmation }));
     }
 
     public finished(data: string) {
@@ -79,23 +79,23 @@ class IO {
     }
 
     public remainingRecords(count: number) {
-        this.onOutput(this.buildIOEvent('output', `remaining records: ${count}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `remaining records: ${count}`, 'info', { count }));
     }
 
     public queryingForExistingRecord(soql: string) {
-        this.onOutput(this.buildIOEvent('output', `querying for existing record: ${soql}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `querying for existing record: ${soql}`, 'info', { soql }));
     }
 
     public foundExistingRecord(recordId: string, sObjectName: string) {
-        this.onOutput(this.buildIOEvent('output', `found existing record ${recordId} of type ${sObjectName}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `found existing record ${recordId} of type ${sObjectName}`, 'info', { recordId, sObjectName }));
     }
 
     public skippingRecord(recordId: string, sObjectName: string) {
-        this.onOutput(this.buildIOEvent('output', `skipping record ${recordId} of type ${sObjectName} because no existing record was found`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `skipping record ${recordId} of type ${sObjectName} because no existing record was found`, 'info', { recordId, sObjectName }));
     }
 
     public mapping(field: string, match: string, newRecordId: string, sObjectName: string, newValue: string) {
-        this.onOutput(this.buildIOEvent('output', `mapping ${field} to ${match} for record ${newRecordId} of type ${sObjectName} - new value: ${newValue}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `mapping ${field} to ${match} for record ${newRecordId} of type ${sObjectName} - new value: ${newValue}`, 'info', { field, match, newRecordId, sObjectName, newValue }));
     }
 
     public creatingRecord(recordId: string, sObjectName: string, record: Record<string, string>) {
@@ -123,7 +123,7 @@ class IO {
             jsonStr = jsonStr.substring(0, 1000) + '...';
         }
 
-        this.onOutput(this.buildIOEvent('output', `saving ${records.length} records (${typeCounts}): ${jsonStr}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `saving ${records.length} records (${typeCounts}): ${jsonStr}`, 'info', { recordCountsByType }));
     }
 
     public savedRecords(savedRecords: Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>) {
@@ -131,11 +131,11 @@ class IO {
     }
 
     public createdRecord(recordId: string) {
-        this.onOutput(this.buildIOEvent('output', `created record ${recordId}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `created record ${recordId}`, 'info', { recordId }));
     }
 
     public skippingPreviouslyUsedSolvers(usedSolvers: any[]) {
-        this.onOutput(this.buildIOEvent('output', `skipping previously used solvers: ${JSON.stringify(usedSolvers)}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `skipping previously used solvers: ${JSON.stringify(usedSolvers)}`, 'info', { usedSolvers }));
     }
 
     public fixingUsingSolver(error: string, solverMessage: string, solverAction: string) {
@@ -143,15 +143,15 @@ class IO {
     }
 
     public savedOldFieldsInToUpdateLater(oldFields: Record<string, string>) {
-        this.onOutput(this.buildIOEvent('output', `saved old fields in toUpdateLater: ${JSON.stringify(oldFields)}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `saved old fields in toUpdateLater: ${JSON.stringify(oldFields)}`, 'info', { oldFields }));
     }
 
     public matchingRecordUsingSolver(recordId: string, solver: string) {
-        this.onOutput(this.buildIOEvent('output', `matching record ${recordId} using solver: ${solver}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `matching record ${recordId} using solver: ${solver}`, 'info', { recordId, solver }));
     }
 
     public skippingRecordUsingSolver(recordId: string, solver: string) {
-        this.onOutput(this.buildIOEvent('output', `skipping record ${recordId} using solver: ${solver}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `skipping record ${recordId} using solver: ${solver}`, 'info', { recordId, solver }));
     }
 
     public extractingColumnFromError(error: string, solverMessage: string) {
@@ -159,11 +159,11 @@ class IO {
     }
 
     public appendingRandomToRecord(recordId: string, solver: string) {
-        this.onOutput(this.buildIOEvent('output', `appending random to record ${recordId} using solver: ${solver}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `appending random to record ${recordId} using solver: ${solver}`, 'info', { recordId, solver }));
     }
 
     public error(message: string) {
-        this.onOutput(this.buildIOEvent('output', `error: ${message}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `error: ${message}`, 'info', { message }));
     }
 
     public async askForInput(recordId: string, message: string): Promise<string> {
@@ -181,47 +181,47 @@ class IO {
     }
 
     public async askForFieldsToUpdate(): Promise<string> {
-        return await this.onInput(this.buildIOEvent('input', `Enter the fields to update in JSON format:`, 'insert_error'));
+        return await this.onInput(this.buildIOEvent('input', `Enter the fields to update in JSON format:`, 'insert_error', {}));
     }
 
     public invalidJson() {
-        this.onOutput(this.buildIOEvent('output', `invalid JSON, please try again`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `invalid JSON, please try again`, 'info', {}));
     }
 
     public async askForMatch(): Promise<string> {
-        return await this.onInput(this.buildIOEvent('input', `Enter the ID of the record to match:`, 'insert_error'));
+        return await this.onInput(this.buildIOEvent('input', `Enter the ID of the record to match:`, 'insert_error', {}));
     }
 
     public async askForSolver(): Promise<string> {
-        return await this.onInput(this.buildIOEvent('input', 'Enter the solver in JSON format:', 'insert_error'));
+        return await this.onInput(this.buildIOEvent('input', 'Enter the solver in JSON format:', 'insert_error', {}));
     }
 
     public invalidRegex() {
-        this.onOutput(this.buildIOEvent('output', `invalid regex, please try again`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `invalid regex, please try again`, 'info', {}));
     }
 
     public invalidInput(input: string) {
-        this.onOutput(this.buildIOEvent('output', `invalid input: ${input}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `invalid input: ${input}`, 'info', { input }));
     }
 
     public lookingForCircularDependencies(requiredLookupFieldsBySObjectType: Record<string, string[]>, records: any[]) {
-        this.onOutput(this.buildIOEvent('output', `looking for circular dependencies with ${JSON.stringify(requiredLookupFieldsBySObjectType)} for records ${JSON.stringify(records)}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `looking for circular dependencies with ${JSON.stringify(requiredLookupFieldsBySObjectType)} for records ${JSON.stringify(records)}`, 'info', { requiredLookupFieldsBySObjectType, records }));
     }
 
     public foundCircularDependency(toClear: { recordId: string, field: string }[]) {
-        this.onOutput(this.buildIOEvent('output', `found circular dependency: ${JSON.stringify(toClear)}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `found circular dependency: ${JSON.stringify(toClear)}`, 'info', { toClear }));
     }
 
     public recordNoId(recordId: string) {
-        this.onOutput(this.buildIOEvent('output', `record ${recordId} has no ID, skipping update`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `record ${recordId} has no ID, skipping update`, 'info', { recordId }));
     }
 
     public updatingRecord(recordId: string, sObjectName: string, record: Record<string, string>) {
-        this.onOutput(this.buildIOEvent('output', `updating record ${recordId} of type ${sObjectName} to ${JSON.stringify(record)}`, 'updating_record'));
+        this.onOutput(this.buildIOEvent('output', `updating record ${recordId} of type ${sObjectName} to ${JSON.stringify(record)}`, 'updating_record', { recordId, sObjectName, record }));
     }
 
     public errorUpdatingRecord(recordId: string, sObjectName: string, error: any) {
-        this.onOutput(this.buildIOEvent('output', `error updating record ${recordId} of type ${sObjectName}: ${error}`, 'info'));
+        this.onOutput(this.buildIOEvent('output', `error updating record ${recordId} of type ${sObjectName}: ${error}`, 'info', { recordId, sObjectName, error }));
     }
 
 }
