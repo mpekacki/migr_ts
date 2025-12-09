@@ -10,7 +10,7 @@ describe('IO', () => {
 
         io.checkingMatchers();
         expect(output).toEqual([
-            'checking matchers'
+            '{}\nchecking matchers'
         ]);
     });
 
