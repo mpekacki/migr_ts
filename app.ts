@@ -964,6 +964,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         }
 
         // update the fields that were cleared
+        const recordsToUpdate: Record<string, any> = {};
         for (const recordId of Object.keys(toUpdateLater)) {
             const record = toUpdateLater[recordId];
             for (const field of Object.keys(record)) {
@@ -984,24 +985,45 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
                 io.recordNoId(recordId);
                 continue;
             }
-            io.updatingRecord(recordId, record.attributes!.type, record);
-            try {
-                await targetClient!.update(record.attributes!.type, record);
-            } catch (jsforceError) {
+            recordsToUpdate[recordId] = record;
+        }
+
+        // Bulk update records using chunking
+        if (Object.keys(recordsToUpdate).length > 0) {
+            const chunks: Record<string, any>[] = chunking.getChunks(recordsToUpdate);
+            for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i];
+                io.updatingRecord(Object.keys(chunk)[0], Object.values(chunk)[0].attributes!.type, chunk);
                 try {
-                    const errorResult = await handleJsforceError(
-                        jsforceError,
-                        `update record ${recordId} of type ${record.attributes!.type}`,
-                        () => targetClient!.update(record.attributes!.type, record)
-                    );
-                    
-                    if (!errorResult.success && !errorResult.shouldSkip) {
-                        io.errorUpdatingRecord(recordId, record.attributes!.type, jsforceError);
-                    } else if (errorResult.shouldSkip) {
-                        io.error(`Skipping update for ${recordId} due to jsforce error: ${jsforceError.message}`);
+                    const updateResults = await targetClient!.bulkUpdate(Object.values(chunk));
+                    // Handle update results
+                    for (let j = 0; j < updateResults.length; j++) {
+                        const recordId = Object.keys(chunk)[j];
+                        const result = updateResults[j];
+                        if (!result.success) {
+                            io.errorUpdatingRecord(recordId, recordsToUpdate[recordId].attributes!.type, { message: result.errors.map(e => e.message).join(', ') });
+                        }
                     }
-                } catch {
-                    io.errorUpdatingRecord(recordId, record.attributes!.type, jsforceError);
+                } catch (jsforceError) {
+                    try {
+                        const errorResult = await handleJsforceError(
+                            jsforceError,
+                            `bulk update ${Object.keys(chunk).length} records`,
+                            () => targetClient!.bulkUpdate(Object.values(chunk))
+                        );
+
+                        if (!errorResult.success && !errorResult.shouldSkip) {
+                            for (const recordId of Object.keys(chunk)) {
+                                io.errorUpdatingRecord(recordId, recordsToUpdate[recordId].attributes!.type, jsforceError);
+                            }
+                        } else if (errorResult.shouldSkip) {
+                            io.error(`Skipping bulk update for ${Object.keys(chunk).length} records due to jsforce error: ${jsforceError.message}`);
+                        }
+                    } catch {
+                        for (const recordId of Object.keys(chunk)) {
+                            io.errorUpdatingRecord(recordId, recordsToUpdate[recordId].attributes!.type, jsforceError);
+                        }
+                    }
                 }
             }
         }

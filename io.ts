@@ -216,8 +216,28 @@ class IO {
         this.onOutput(this.buildIOEvent('output', `record ${recordId} has no ID, skipping update`, 'info', { recordId }));
     }
 
-    public updatingRecord(recordId: string, sObjectName: string, record: Record<string, string>) {
-        this.onOutput(this.buildIOEvent('output', `updating record ${recordId} of type ${sObjectName} to ${JSON.stringify(record)}`, 'updating_record', { recordId, sObjectName, record }));
+    public updatingRecord(recordId: string, sObjectName: string, chunk: Record<string, any>) {
+        const records = Object.values(chunk);
+        const recordCountsByType: Record<string, number> = {};
+
+        // Count records by type
+        records.forEach(record => {
+            const type = (record as any).attributes?.type || 'Unknown';
+            recordCountsByType[type] = (recordCountsByType[type] || 0) + 1;
+        });
+
+        // Format type counts (e.g., "1 Account, 2 Contact")
+        const typeCounts = Object.entries(recordCountsByType)
+            .map(([type, count]) => `${count} ${type}`)
+            .join(', ');
+
+        // Trim JSON to 1000 characters
+        let jsonStr = JSON.stringify(records);
+        if (jsonStr.length > 1000) {
+            jsonStr = jsonStr.substring(0, 1000) + '...';
+        }
+
+        this.onOutput(this.buildIOEvent('output', `updating ${records.length} records (${typeCounts}): ${jsonStr}`, 'updating_record', { recordCountsByType }));
     }
 
     public errorUpdatingRecord(recordId: string, sObjectName: string, error: any) {

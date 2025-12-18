@@ -82,7 +82,13 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
             if (line.trim() === '' || !line.trim().startsWith('{')) {
                 continue;
             }
-            const event = JSON.parse(line) as IOEvent;
+            let event;
+            try {
+                event = JSON.parse(line) as IOEvent;
+            } catch {
+                console.error(`Error parsing line: ${line}`);
+                continue;
+            }
             capturedOutput.push(event);
             if (event.category === 'input') {
                 if (typeof inputHandler === 'function') {
@@ -2522,4 +2528,83 @@ test('solver with additional info from error', async () => {
     const newCustObjE: any = await conn2.sobject('Custom_Object_E__c').retrieve(newCustObjEId);
     expect(newCustObjE).toBeDefined();
     expect(newCustObjE.Some_picklist__c).toBe('Normal value');
+});
+
+test('bulk update records', async () => {
+    console.log('starting test: bulk update records');
+
+    const { conn1, conn2 } = await setupTestConnections();
+
+    console.log('creating records');
+    // Prepare all records to create
+    const recordsToCreate = [];
+    for (let i = 0; i < 211; i++) {
+        const name = `ext-${Math.random()}`;
+        recordsToCreate.push({ Name: name });
+    }
+
+    // Bulk create all records in chunks of 200
+    const createChunkSize = 200;
+    const allCreateResults = [];
+    for (let i = 0; i < recordsToCreate.length; i += createChunkSize) {
+        const chunk = recordsToCreate.slice(i, i + createChunkSize);
+        console.log(`bulk creating chunk ${Math.floor(i / createChunkSize) + 1} (${chunk.length} records)`);
+        const createResults = await conn1.sobject('Custom_Object_D__c').create(chunk);
+        allCreateResults.push(...(Array.isArray(createResults) ? createResults : [createResults]));
+    }
+    expect(allCreateResults).toHaveLength(211);
+
+    // Prepare updates for all created records
+    const recordsToUpdate = [];
+    const recordIds = [];
+    for (const result of allCreateResults) {
+        expect(result.success).toBe(true);
+        expect(result.id).toBeDefined();
+        recordIds.push(result.id!);
+        recordsToUpdate.push({
+            Id: result.id!,
+            Fussy_Field_1__c: 'dupa',
+            Fussy_Field_2__c: 'dupa'
+        });
+    }
+
+    // Bulk update all records in chunks of 200
+    const updateChunkSize = 200;
+    const allUpdateResults = [];
+    for (let i = 0; i < recordsToUpdate.length; i += updateChunkSize) {
+        const chunk = recordsToUpdate.slice(i, i + updateChunkSize);
+        console.log(`bulk updating chunk ${Math.floor(i / updateChunkSize) + 1} (${chunk.length} records)`);
+        const updateResults = await conn1.sobject('Custom_Object_D__c').update(chunk);
+        allUpdateResults.push(...(Array.isArray(updateResults) ? updateResults : [updateResults]));
+    }
+    expect(allUpdateResults).toHaveLength(211);
+    for (const result of allUpdateResults) {
+        expect(result.success).toBe(true);
+    }
+
+    const config = {
+        sourceOrg: sourceOrgAlias,
+        targetOrg: targetOrgAlias,
+        recordIds: recordIds,
+        matchers: defaultMatchers,
+        solvers: [
+            {
+                action: 'extract_column',
+                message: 'Field \'(\\w+)\'  can\'t be',
+                replaceWith: "asdf",
+                hideError: true
+            }
+        ]
+    };
+
+    const { parsedOutput, capturedOutput } = await runMigration(config);
+    for (const recordId of recordIds) {
+        const newRecordId = assertRecordMigrated(parsedOutput, recordId!);
+        // check if the record was updated
+        const record = await conn2.sobject('Custom_Object_D__c').retrieve(newRecordId);
+        expect(record).toBeDefined();
+        expect(record.Fussy_Field_1__c).toBe('dupa');
+        expect(record.Fussy_Field_2__c).toBe('dupa');
+    }
+    expect(capturedOutput.filter(e => e.type === 'updating_record')).toHaveLength(2);
 });

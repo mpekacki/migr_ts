@@ -15,6 +15,7 @@ export interface SalesforceClient {
     select(sObjectName: string): any;
     query(soql: string): Promise<any>;
     bulkCreate(records: any[]): Promise<Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>>;
+    bulkUpdate(records: any[]): Promise<Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>>;
     update(sObjectName: string, record: any): Promise<void>;
     getVersion(): string;
 }
@@ -77,6 +78,17 @@ export class DefaultSalesforceClient implements SalesforceClient {
     async bulkCreate(records: any[]): Promise<Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>> {
         return (await this.connection.request({
             method: 'POST',
+            url: `/services/data/v${this.connection.version}/composite/sobjects`,
+            body: JSON.stringify({
+                allOrNone: false,
+                records: records
+            })
+        })) as Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>;
+    }
+
+    async bulkUpdate(records: any[]): Promise<Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>> {
+        return (await this.connection.request({
+            method: 'PATCH',
             url: `/services/data/v${this.connection.version}/composite/sobjects`,
             body: JSON.stringify({
                 allOrNone: false,
