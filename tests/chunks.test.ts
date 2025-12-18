@@ -97,6 +97,18 @@ describe('Chunks', () => {
         ]);
     });
 
+    it('should create 2 chunks for 211 records of the same type with chunk size 200', () => {
+        const chunks = new Chunks([], 200, 10);
+        const records: any = {};
+        for (let i = 1; i <= 211; i++) {
+            records[`record${i}`] = { "Name": `Record ${i}`, "attributes": { "type": "Custom_Object_D__c" } as any };
+        }
+        const result = chunks.getChunks(records);
+        expect(result.length).toBe(2);
+        expect(Object.keys(result[0]).length).toBe(200);
+        expect(Object.keys(result[1]).length).toBe(11);
+    });
+
     it('should separate system objects from other objects', () => {
         const chunks = new Chunks(['User', 'Profile', 'Role', 'PermissionSet'], 5, 3);
         const records = {

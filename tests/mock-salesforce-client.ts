@@ -2,7 +2,7 @@ import { SalesforceClient, DefaultSalesforceClient, AuthConfig } from '../salesf
 
 interface ErrorConfig {
     recordId: string;
-    operation: 'bulkCreate' | 'retrieve' | 'query' | 'update' | 'describeSObject' | 'describeGlobal' | 'find' | 'select';
+    operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'query' | 'update' | 'describeSObject' | 'describeGlobal' | 'find' | 'select';
     error: Error;
 }
 
@@ -26,7 +26,7 @@ export class MockSalesforceClient implements SalesforceClient {
     /**
      * Configure the client to throw an error for a specific record ID and operation
      */
-    configureError(recordId: string, operation: 'bulkCreate' | 'retrieve' | 'query' | 'update' | 'describeSObject' | 'describeGlobal' | 'find' | 'select', error: Error): void {
+    configureError(recordId: string, operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'query' | 'update' | 'describeSObject' | 'describeGlobal' | 'find' | 'select', error: Error): void {
         this.errorConfigs.push({ recordId, operation, error });
     }
 
@@ -38,11 +38,11 @@ export class MockSalesforceClient implements SalesforceClient {
     }
 
     private shouldThrowError(operation: string, data?: any): Error | null {
-        // For bulkCreate, check if any record in the array matches our error config
-        if (operation === 'bulkCreate' && Array.isArray(data)) {
+        // For bulkCreate and bulkUpdate, check if any record in the array matches our error config
+        if ((operation === 'bulkCreate' || operation === 'bulkUpdate') && Array.isArray(data)) {
             for (const record of data) {
                 for (const config of this.errorConfigs) {
-                    if (config.operation === 'bulkCreate') {
+                    if (config.operation === operation) {
                         // Check if this is a Contact record and we have a Contact error configured
                         if (record.attributes?.type === 'Contact' && config.recordId.includes('Contact')) {
                             return config.error;
@@ -106,6 +106,12 @@ export class MockSalesforceClient implements SalesforceClient {
         const error = this.shouldThrowError('bulkCreate', records);
         if (error) throw error;
         return this.defaultClient.bulkCreate(records);
+    }
+
+    async bulkUpdate(records: any[]): Promise<Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>> {
+        const error = this.shouldThrowError('bulkUpdate', records);
+        if (error) throw error;
+        return this.defaultClient.bulkUpdate(records);
     }
 
     async update(sObjectName: string, record: any): Promise<void> {
