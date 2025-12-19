@@ -993,7 +993,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
             const chunks: Record<string, any>[] = chunking.getChunks(recordsToUpdate);
             for (let i = 0; i < chunks.length; i++) {
                 const chunk = chunks[i];
-                io.updatingRecord(Object.keys(chunk)[0], Object.values(chunk)[0].attributes!.type, chunk);
+                io.updatingRecord(chunk);
                 try {
                     const updateResults = await targetClient!.bulkUpdate(Object.values(chunk));
                     // Handle update results

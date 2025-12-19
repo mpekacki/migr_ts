@@ -216,7 +216,7 @@ class IO {
         this.onOutput(this.buildIOEvent('output', `record ${recordId} has no ID, skipping update`, 'info', { recordId }));
     }
 
-    public updatingRecord(recordId: string, sObjectName: string, chunk: Record<string, any>) {
+    public updatingRecord(chunk: Record<string, any>) {
         const records = Object.values(chunk);
         const recordCountsByType: Record<string, number> = {};
 
