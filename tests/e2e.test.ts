@@ -1483,7 +1483,19 @@ test('match not found, create new record', async () => {
         }]
     };
 
-    const { parsedOutput } = await runMigration(config);
+    const { parsedOutput } = await runMigration(config, async (ioEvent, sendInput) => {
+        if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
+            sendInput('y');
+            const recordCounts = ioEvent.data!;
+            expect(recordCounts).toHaveProperty('Account');
+            expect(recordCounts.Account).toBe(2);
+
+            expect(recordCounts).toHaveProperty('matchers');
+            const matchers = recordCounts.matchers;
+            expect(matchers).toHaveProperty('Account');
+            expect(matchers.Account.whenMissing).toBe('create');
+        }
+    });
 
     const newAccount1Id = assertRecordMigrated(parsedOutput, account1.id!);
     expect(newAccount1Id).toEqual(account1B.id);
@@ -1530,7 +1542,19 @@ test('match not found, skip record', async () => {
         }]
     };
 
-    const { parsedOutput } = await runMigration(config);
+    const { parsedOutput } = await runMigration(config, async (ioEvent, sendInput) => {
+        if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
+            sendInput('y');
+            const recordCounts = ioEvent.data!;
+            expect(recordCounts).toHaveProperty('Account');
+            expect(recordCounts.Account).toBe(2);
+
+            expect(recordCounts).toHaveProperty('matchers');
+            const matchers = recordCounts.matchers;
+            expect(matchers).toHaveProperty('Account');
+            expect(matchers.Account.whenMissing).toBe('skip');
+        }
+    });
 
     const newAccount1Id = assertRecordMigrated(parsedOutput, account1.id!);
     expect(newAccount1Id).toEqual(account1B.id);
