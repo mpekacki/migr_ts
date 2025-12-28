@@ -2,11 +2,22 @@ import IO from "../io";
 import { IOEvent } from "../app";
 
 describe('IO', () => {
-    it('should print to terminal', () => {
+    const createIO = () => {
         const output: string[] = [];
+        const input: string[] = [];
         const io = new IO((event: IOEvent) => {
+            console.log(JSON.stringify(event));
             output.push(event.toString());
-        }, (input: IOEvent) => Promise.resolve(''));
+        }, (event: IOEvent) => {
+            console.log(JSON.stringify(event));
+            input.push(event.toString());
+            return Promise.resolve('');
+        });
+        return {io, output, input};
+    };
+
+    it('should print to terminal', () => {
+        const {io, output} = createIO();
 
         io.checkingMatchers();
         expect(output).toEqual([
@@ -15,10 +26,7 @@ describe('IO', () => {
     });
 
     it('should show how many records are being saved and of which type, and trim the JSON to 1000 characters', () => {
-        const output: string[] = [];
-        const io = new IO((event: IOEvent) => {
-            output.push(event.toString());
-        }, (input: IOEvent) => Promise.resolve(''));
+        const {io, output} = createIO();
 
         const chunk = {
             '001xx000003DGb0AAG': {
@@ -56,5 +64,19 @@ describe('IO', () => {
             const jsonPart = match[1];
             expect(jsonPart.length).toBeLessThanOrEqual(1003); // 1000 + "..."
         }
+    });
+
+    it('should show the record counts and matchers when confirming the migration', async () => {
+        const {io, output, input} = createIO();
+        await io.askForConfirmation({
+            Account: 1,
+            Contact: 2,
+            matchers: {
+                Account: {
+                    whenMissing: 'create'
+                }
+            }
+        });
+        expect(input[0]).toContain('matchers');
     });
 });
