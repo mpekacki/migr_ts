@@ -584,7 +584,11 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
 
     if (!options.fullAuto?.enabled) {
         // ask for confirmation
-        const confirmationData = { recordReasons: await countRecordReasons(), ...recordCountsBySObjectType };
+        const matchersBySObjectType: Record<string, { whenMissing: string }> = {};
+        for (const matcher of options.matchers) {
+            matchersBySObjectType[matcher.sObjectType] = { whenMissing: matcher.whenMissing };
+        }
+        const confirmationData = { recordReasons: await countRecordReasons(), matchers: matchersBySObjectType, ...recordCountsBySObjectType };
         const confirmation = await io.askForConfirmation(confirmationData);
         if (confirmation !== 'y') {
             io.aborted();
