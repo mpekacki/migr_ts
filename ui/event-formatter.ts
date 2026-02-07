@@ -28,7 +28,7 @@ function formatEvent(event: IOEvent): string {
         case 'fetched_records':
             return `fetched ${d?.count} records`;
         case 'confirm_migration':
-            return `Do you want to continue? (y/n)\n${JSON.stringify(d, null, 2)}`;
+            return formatConfirmMigration(d);
         case 'aborted':
             return 'aborted';
         case 'confirmation':
@@ -124,6 +124,53 @@ function formatEvent(event: IOEvent): string {
             return data ? `${data}\n${event.type}` : event.type;
         }
     }
+}
+
+function formatConfirmMigration(d: any): string {
+    const lines: string[] = [];
+    lines.push('=== Migration Summary ===');
+    lines.push('');
+
+    // Collect SObject type counts (top-level numeric properties)
+    const typeCounts: Record<string, number> = {};
+    for (const key of Object.keys(d || {})) {
+        if (key !== 'recordReasons' && key !== 'matchers' && typeof d[key] === 'number') {
+            typeCounts[key] = d[key];
+        }
+    }
+
+    // Records by type with matcher action
+    const matchers: Record<string, { whenMissing: string }> = d?.matchers || {};
+    if (Object.keys(typeCounts).length > 0) {
+        lines.push('Records to migrate:');
+        const total = Object.values(typeCounts).reduce((sum, n) => sum + n, 0);
+        const entries = Object.entries(typeCounts).sort((a, b) => b[1] - a[1]);
+        const maxTypeLen = Math.max(...entries.map(([k]) => k.length));
+        const maxCountLen = Math.max(...entries.map(([, v]) => String(v).length));
+        for (const [type, count] of entries) {
+            const matcher = matchers[type];
+            let action = 'create';
+            if (matcher) {
+                action = matcher.whenMissing === 'skip' ? 'match or skip' : 'match or create';
+            }
+            lines.push(`  ${type.padEnd(maxTypeLen)}  ${String(count).padStart(maxCountLen)}  (${action})`);
+        }
+        lines.push(`  ${'Total'.padEnd(maxTypeLen)}  ${String(total).padStart(maxCountLen)}`);
+        lines.push('');
+    }
+
+    // Record reasons
+    if (d?.recordReasons && Object.keys(d.recordReasons).length > 0) {
+        lines.push('Reasons:');
+        for (const [reason, typeMap] of Object.entries(d.recordReasons) as [string, Record<string, number>][]) {
+            const parts = Object.entries(typeMap).map(([type, count]) => `${count} ${type}`).join(', ');
+            lines.push(`  ${reason}: ${parts}`);
+        }
+        lines.push('');
+    }
+
+    lines.push('Do you want to continue? (y/n)');
+    return lines.join('\n');
 }
 
 function formatTypeCounts(recordCountsByType: Record<string, number> | undefined): string {
