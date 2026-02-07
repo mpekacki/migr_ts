@@ -170,8 +170,8 @@ test('simulate network error during Contact creation in full E2E migration', asy
                 }
                 // For any errors, we'll handle them based on the error type
                 if (question.category === 'input' && question.type === 'insert_error') {
-                    console.log('Insert error encountered:', question.message);
-                    expect(question.message).toContain('ECONNRESET');
+                    console.log('Insert error encountered:', question.data?.error);
+                    expect(question.data?.error).toContain('ECONNRESET');
                     return 's'; // Skip the failing Contact
                 }
                 return 'y'; // Default confirmation
@@ -191,10 +191,10 @@ test('simulate network error during Contact creation in full E2E migration', asy
     // Check that we got the expected outputs
     expect(capturedOutput.length).toBeGreaterThan(0);
     
-    // Find the final output with results (finished message has type 'info' and message 'finished')
-    const finalOutput = capturedOutput.find(output => 
-        output.category === 'output' && 
-        output.message === 'finished' && 
+    // Find the final output with results
+    const finalOutput = capturedOutput.find(output =>
+        output.category === 'output' &&
+        output.type === 'finished' &&
         output.data !== undefined
     );
     
@@ -328,7 +328,7 @@ test('jsforce error handling with retry solver', async () => {
         await main(
             options,
             (output: IOEvent) => {
-                console.log('Migration output:', output.message);
+                console.log('Migration output:', output.type, output.data);
                 capturedOutput.push(output);
             },
             async (question: IOEvent) => {
@@ -337,7 +337,7 @@ test('jsforce error handling with retry solver', async () => {
                     return 'y';
                 }
                 if (question.category === 'input' && question.type === 'insert_error') {
-                    console.log('Insert error encountered:', question.message);
+                    console.log('Insert error encountered:', question.data?.error);
                     return 's'; // Skip the failing record if not handled by solver
                 }
                 return 'y';
@@ -355,25 +355,25 @@ test('jsforce error handling with retry solver', async () => {
     console.log('Migration error:', migrationError);
 
     // Check that jsforce error handling messages appeared in output
-    const jsforceErrorMessages = capturedOutput.filter(output => 
-        output.message && output.message.includes('Jsforce error:')
+    const jsforceErrorMessages = capturedOutput.filter(output =>
+        output.type === 'error' && output.data?.message?.includes('Jsforce error:')
     );
-    
+
     console.log('Jsforce error messages found:', jsforceErrorMessages.length);
     expect(jsforceErrorMessages.length).toBeGreaterThan(0);
-    
+
     // Check that the errors are now properly integrated into the solver framework
-    const unhandledJsforceMessages = capturedOutput.filter(output => 
-        output.message && output.message.includes('Unhandled jsforce error')
+    const unhandledJsforceMessages = capturedOutput.filter(output =>
+        output.type === 'error' && output.data?.message?.includes('Unhandled jsforce error')
     );
     
     console.log('Unhandled jsforce error messages found:', unhandledJsforceMessages.length);
     expect(unhandledJsforceMessages.length).toBeGreaterThan(0);
 
     // Find the final output with results
-    const finalOutput = capturedOutput.find(output => 
-        output.category === 'output' && 
-        output.message === 'finished' && 
+    const finalOutput = capturedOutput.find(output =>
+        output.category === 'output' &&
+        output.type === 'finished' &&
         output.data !== undefined
     );
     

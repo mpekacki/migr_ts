@@ -3,29 +3,27 @@ import { IOEvent } from "../app";
 
 describe('IO', () => {
     const createIO = () => {
-        const output: string[] = [];
-        const input: string[] = [];
+        const output: IOEvent[] = [];
+        const input: IOEvent[] = [];
         const io = new IO((event: IOEvent) => {
-            console.log(JSON.stringify(event));
-            output.push(event.toString());
+            output.push(event);
         }, (event: IOEvent) => {
-            console.log(JSON.stringify(event));
-            input.push(event.toString());
+            input.push(event);
             return Promise.resolve('');
         });
         return {io, output, input};
     };
 
-    it('should print to terminal', () => {
+    it('should emit checking_matchers event', () => {
         const {io, output} = createIO();
 
         io.checkingMatchers();
-        expect(output).toEqual([
-            '{}\nchecking matchers'
-        ]);
+        expect(output).toHaveLength(1);
+        expect(output[0].type).toBe('checking_matchers');
+        expect(output[0].category).toBe('output');
     });
 
-    it('should show how many records are being saved and of which type, and trim the JSON to 1000 characters', () => {
+    it('should emit saving_records with record counts by type', () => {
         const {io, output} = createIO();
 
         const chunk = {
@@ -48,26 +46,14 @@ describe('IO', () => {
 
         io.savingRecords(chunk);
 
-        expect(output.length).toBe(1);
-        const outputStr = output[0];
-
-        // Should show record count
-        expect(outputStr).toContain('saving 3 records');
-
-        // Should show types with counts
-        expect(outputStr).toContain('1 Account');
-        expect(outputStr).toContain('2 Contact');
-
-        // Find the JSON part and verify it's trimmed to 1000 characters or less
-        const match = outputStr.match(/: (.+)$/);
-        if (match) {
-            const jsonPart = match[1];
-            expect(jsonPart.length).toBeLessThanOrEqual(1003); // 1000 + "..."
-        }
+        expect(output).toHaveLength(1);
+        expect(output[0].type).toBe('saving_records');
+        expect(output[0].data.recordCountsByType).toEqual({ Account: 1, Contact: 2 });
+        expect(output[0].data.records).toHaveLength(3);
     });
 
-    it('should show the record counts and matchers when confirming the migration', async () => {
-        const {io, output, input} = createIO();
+    it('should include matchers data in confirm_migration event', async () => {
+        const {io, input} = createIO();
         await io.askForConfirmation({
             Account: 1,
             Contact: 2,
@@ -77,6 +63,7 @@ describe('IO', () => {
                 }
             }
         });
-        expect(input[0]).toContain('matchers');
+        expect(input[0].type).toBe('confirm_migration');
+        expect(input[0].data.matchers).toBeDefined();
     });
 });
