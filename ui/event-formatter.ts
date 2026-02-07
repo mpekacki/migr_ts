@@ -62,18 +62,22 @@ function formatEvent(event: IOEvent): string {
             return `created record ${d?.recordId}`;
         case 'skipping_previously_used_solvers':
             return `skipping previously used solvers: ${JSON.stringify(d?.usedSolvers)}`;
-        case 'using_solver':
-            return `fixing using solver: ${d?.solverMessage}`;
+        case 'using_solver': {
+            switch (d?.solverAction) {
+                case 'match':
+                    return `matching record ${d?.recordId} using solver: ${d?.solver}`;
+                case 'skip':
+                    return `skipping record ${d?.recordId} using solver: ${d?.solver}`;
+                case 'extract_column':
+                    return `extracting column name from error: ${d?.error}`;
+                case 'append_random':
+                    return `appending random to record ${d?.recordId} using solver: ${d?.solver}`;
+                default:
+                    return `fixing using solver: ${d?.solverMessage}`;
+            }
+        }
         case 'saved_old_fields':
             return `saved old fields in toUpdateLater: ${JSON.stringify(d?.oldFields)}`;
-        case 'matching_record_using_solver':
-            return `matching record ${d?.recordId} using solver: ${d?.solver}`;
-        case 'skipping_record_using_solver':
-            return `skipping record ${d?.recordId} using solver: ${d?.solver}`;
-        case 'extracting_column':
-            return `extracting column name from error: ${d?.error}`;
-        case 'appending_random':
-            return `appending random to record ${d?.recordId} using solver: ${d?.solver}`;
         case 'error':
             return `error: ${d?.message}`;
         case 'insert_error': {

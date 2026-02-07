@@ -134,19 +134,19 @@ class IO {
     }
 
     public matchingRecordUsingSolver(recordId: string, solver: string) {
-        this.onOutput(this.buildIOEvent('output', 'matching_record_using_solver', { recordId, solver }));
+        this.onOutput(this.buildIOEvent('output', 'using_solver', { recordId, solver, solverAction: 'match' }));
     }
 
     public skippingRecordUsingSolver(recordId: string, solver: string) {
-        this.onOutput(this.buildIOEvent('output', 'skipping_record_using_solver', { recordId, solver }));
+        this.onOutput(this.buildIOEvent('output', 'using_solver', { recordId, solver, solverAction: 'skip' }));
     }
 
     public extractingColumnFromError(error: string, solverMessage: string) {
-        this.onOutput(this.buildIOEvent('output', 'extracting_column', { error, solverMessage, solverAction: 'extract_column' }));
+        this.onOutput(this.buildIOEvent('output', 'using_solver', { error, solverMessage, solverAction: 'extract_column' }));
     }
 
     public appendingRandomToRecord(recordId: string, solver: string) {
-        this.onOutput(this.buildIOEvent('output', 'appending_random', { recordId, solver }));
+        this.onOutput(this.buildIOEvent('output', 'using_solver', { recordId, solver, solverAction: 'append_random' }));
     }
 
     public error(message: string) {

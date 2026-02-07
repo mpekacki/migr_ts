@@ -93,9 +93,29 @@ describe('event-formatter', () => {
             expect(format(event)).toBe('aborted');
         });
 
-        it('should format using_solver', () => {
+        it('should format using_solver with fix action', () => {
             const event = new IOEvent('output', 'using_solver', { error: 'err', solverMessage: 'fix it', solverAction: 'fix' });
             expect(format(event)).toBe('fixing using solver: fix it');
+        });
+
+        it('should format using_solver with match action', () => {
+            const event = new IOEvent('output', 'using_solver', { recordId: '001', solver: 'mySolver', solverAction: 'match' });
+            expect(format(event)).toBe('matching record 001 using solver: mySolver');
+        });
+
+        it('should format using_solver with skip action', () => {
+            const event = new IOEvent('output', 'using_solver', { recordId: '001', solver: 'mySolver', solverAction: 'skip' });
+            expect(format(event)).toBe('skipping record 001 using solver: mySolver');
+        });
+
+        it('should format using_solver with extract_column action', () => {
+            const event = new IOEvent('output', 'using_solver', { error: 'bad field', solverMessage: 'extract', solverAction: 'extract_column' });
+            expect(format(event)).toBe('extracting column name from error: bad field');
+        });
+
+        it('should format using_solver with append_random action', () => {
+            const event = new IOEvent('output', 'using_solver', { recordId: '001', solver: 'mySolver', solverAction: 'append_random' });
+            expect(format(event)).toBe('appending random to record 001 using solver: mySolver');
         });
 
         it('should format updating_record with type counts', () => {
