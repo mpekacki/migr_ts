@@ -1,20 +1,52 @@
-export type IOEventType = 'confirm_migration' | 'info' | 'insert_error' | 'creating_record' | 'updating_record' | 'using_solver' | 'saved_records';
+export type IOEventType =
+    | 'confirm_migration'
+    | 'insert_error'
+    | 'creating_record'
+    | 'updating_record'
+    | 'using_solver'
+    | 'saved_records'
+    | 'saving_records'
+    | 'starting_migration'
+    | 'describing_sobject'
+    | 'checking_matchers'
+    | 'records_so_far'
+    | 'fetching_record'
+    | 'record_not_found'
+    | 'record_not_queryable'
+    | 'malformed_id'
+    | 'querying_related_records'
+    | 'related_records'
+    | 'fetched_records'
+    | 'aborted'
+    | 'confirmation'
+    | 'finished'
+    | 'remaining_records'
+    | 'querying_existing_record'
+    | 'found_existing_record'
+    | 'skipping_record'
+    | 'mapping'
+    | 'created_record'
+    | 'skipping_previously_used_solvers'
+    | 'matching_record_using_solver'
+    | 'skipping_record_using_solver'
+    | 'extracting_column'
+    | 'appending_random'
+    | 'error'
+    | 'saved_old_fields'
+    | 'invalid_json'
+    | 'invalid_regex'
+    | 'invalid_input'
+    | 'looking_for_circular_dependencies'
+    | 'found_circular_dependency'
+    | 'record_no_id'
+    | 'error_updating_record';
 
 class IOEvent {
     constructor(
         public category: 'output' | 'input',
-        public message: string,
         public type: IOEventType,
         public data?: any
     ) {}
-
-    toString(): string {
-        let data = this.data;
-        if (typeof data === 'object') {
-            data = JSON.stringify(data, null, 2);
-        }
-        return data ? `${data}\n${this.message}` : this.message;
-    }
 }
 
 export default IOEvent;

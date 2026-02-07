@@ -1,20 +1,21 @@
 import IOEvent from '../ioevent';
 
 describe('IOEvent', () => {
-    describe('toString', () => {
-        it('should return message when no data is present', () => {
-            const event = new IOEvent('output', 'test message', 'info');
-            expect(event.toString()).toBe('test message');
-        });
+    it('should store category, type, and data', () => {
+        const event = new IOEvent('output', 'error', { message: 'test' });
+        expect(event.category).toBe('output');
+        expect(event.type).toBe('error');
+        expect(event.data).toEqual({ message: 'test' });
+    });
 
-        it('should return data and message when data is present', () => {
-            const event = new IOEvent('output', 'test message', 'info', 'test data');
-            expect(event.toString()).toBe('test data\ntest message');
-        });
+    it('should allow data to be undefined', () => {
+        const event = new IOEvent('output', 'aborted');
+        expect(event.data).toBeUndefined();
+    });
 
-        it('should pretty print data if it is an object', () => {
-            const event = new IOEvent('output', 'test message', 'info', { test: 'data' });
-            expect(event.toString()).toBe(`${JSON.stringify({ test: 'data' }, null, 2)}\ntest message`);
-        });
+    it('should not have a toString method that formats for display', () => {
+        const event = new IOEvent('output', 'error', { message: 'test' });
+        // toString should be the default Object.prototype.toString, not a custom formatter
+        expect(event.toString()).toBe('[object Object]');
     });
 });

@@ -103,7 +103,7 @@ async function runMigration(config: any, inputHandler: ((event: IOEvent, sendInp
                 } else {
                     const input = inputHandler.shift();
                     if (!input) {
-                        capturedError = `Unexpected input request: "${event.message}"`;
+                        capturedError = `Unexpected input request: type="${event.type}", data=${JSON.stringify(event.data)}`;
                         child.kill();
                         return;
                     }
@@ -991,7 +991,7 @@ test('migrate record with error - automatically extract column name to update', 
     expect(newCustObj).toBeDefined();
     expect(newCustObj.Name).toEqual(name);
 
-    expect(capturedOutput.map(e => e.message).filter(e => e.includes('updating record'))).toHaveLength(0);
+    expect(capturedOutput.filter(e => e.type === 'updating_record')).toHaveLength(0);
 });
 
 test('skip solver only if messages were the same', async () => {
@@ -2632,3 +2632,45 @@ test('bulk update records', async () => {
     }
     expect(capturedOutput.filter(e => e.type === 'updating_record')).toHaveLength(2);
 });
+
+// test('more than 1 record matches', async () => {
+//     console.log('starting test: more than 1 record matches')
+//     const { conn1, conn2 } = await setupTestConnections();
+
+//     console.log('creating records');
+//     const campaignA = await conn1.sobject('Campaign').create({ Name: 'Ebola Cola Campaign' });
+//     expect(campaignA.id).toBeDefined();
+
+//     const campaignB1 = await conn2.sobject('Campaign').create({ Name: 'Ebola Cola Campaign' });
+//     expect(campaignB1.id).toBeDefined();
+
+//     const campaignB2 = await conn2.sobject('Campaign').create({ Name: 'Ebola Cola Campaign' });
+//     expect(campaignB2.id).toBeDefined();
+
+//     const config = createBasicConfig([campaignA.id!], {
+//         matchers: [
+//             ...defaultMatchers,
+//             {
+//                 sObjectType: 'Campaign',
+//                 fieldMappings: [
+//                     { 
+//                         sourceField: 'Name', 
+//                         targetField: 'Name',
+//                         enforceUnique: true
+//                     }
+//                 ]
+//             }
+//         ]
+//     });
+
+//     let errorCount = 0;
+//     const { parsedOutput } = await runMigration(config, async (ioEvent, sendInput) => {
+//         if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
+//             sendInput('y');
+//         } else if (ioEvent.category === 'input' && ioEvent.type === 'not_unique_match') {
+//             errorCount++;
+//             expect(errorCount).toBe(1);
+//         }
+//     });
+//     assertRecordMigrated(parsedOutput, campaignA.id!);
+// });
