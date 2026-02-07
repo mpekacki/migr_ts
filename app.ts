@@ -588,7 +588,9 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         for (const matcher of options.matchers) {
             matchersBySObjectType[matcher.sObjectType] = { whenMissing: matcher.whenMissing };
         }
-        const confirmationData = { recordReasons: await countRecordReasons(), matchers: matchersBySObjectType, ...recordCountsBySObjectType };
+        const source = options.sourceFile ?? options.sourceOrgUrl ?? options.sourceOrg;
+        const target = options.targetFile ?? options.targetOrgUrl ?? options.targetOrg;
+        const confirmationData = { source, target, recordReasons: await countRecordReasons(), matchers: matchersBySObjectType, ...recordCountsBySObjectType };
         const confirmation = await io.askForConfirmation(confirmationData);
         if (confirmation !== 'y') {
             io.aborted();

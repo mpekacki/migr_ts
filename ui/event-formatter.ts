@@ -131,10 +131,20 @@ function formatConfirmMigration(d: any): string {
     lines.push('=== Migration Summary ===');
     lines.push('');
 
+    if (d?.source) {
+        lines.push(`Source: ${d.source}`);
+    }
+    if (d?.target) {
+        lines.push(`Target: ${d.target}`);
+    }
+    if (d?.source || d?.target) {
+        lines.push('');
+    }
+
     // Collect SObject type counts (top-level numeric properties)
     const typeCounts: Record<string, number> = {};
     for (const key of Object.keys(d || {})) {
-        if (key !== 'recordReasons' && key !== 'matchers' && typeof d[key] === 'number') {
+        if (key !== 'recordReasons' && key !== 'matchers' && key !== 'source' && key !== 'target' && typeof d[key] === 'number') {
             typeCounts[key] = d[key];
         }
     }
