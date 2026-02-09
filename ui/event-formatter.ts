@@ -34,7 +34,7 @@ function formatEvent(event: IOEvent): string {
         case 'confirmation':
             return `confirmation: ${d?.confirmation}`;
         case 'finished':
-            return 'finished';
+            return formatFinished(d);
         case 'remaining_records':
             return `remaining records: ${d?.count}`;
         case 'querying_existing_record':
@@ -131,10 +131,20 @@ function formatConfirmMigration(d: any): string {
     lines.push('=== Migration Summary ===');
     lines.push('');
 
+    if (d?.source) {
+        lines.push(`Source: ${d.source}`);
+    }
+    if (d?.target) {
+        lines.push(`Target: ${d.target}`);
+    }
+    if (d?.source || d?.target) {
+        lines.push('');
+    }
+
     // Collect SObject type counts (top-level numeric properties)
     const typeCounts: Record<string, number> = {};
     for (const key of Object.keys(d || {})) {
-        if (key !== 'recordReasons' && key !== 'matchers' && typeof d[key] === 'number') {
+        if (key !== 'recordReasons' && key !== 'matchers' && key !== 'source' && key !== 'target' && typeof d[key] === 'number') {
             typeCounts[key] = d[key];
         }
     }
@@ -170,6 +180,60 @@ function formatConfirmMigration(d: any): string {
     }
 
     lines.push('Do you want to continue? (y/n)');
+    return lines.join('\n');
+}
+
+function formatFinished(d: any): string {
+    let data: any;
+    try {
+        data = typeof d === 'string' ? JSON.parse(d) : d;
+    } catch {
+        return 'finished';
+    }
+    if (!data) return 'finished';
+
+    const lines: string[] = [];
+    lines.push('');
+    lines.push('=== Migration Complete ===');
+    lines.push('');
+
+    // Errors section
+    const errors: Record<string, { message: string, fixed: boolean, solver?: { action: string, message: string } }[]> = data.errors || {};
+    const allErrors: { recordId: string, message: string, fixed: boolean, solver?: { action: string, message: string } }[] = [];
+    for (const [recordId, errs] of Object.entries(errors)) {
+        for (const err of errs) {
+            allErrors.push({ recordId, ...err });
+        }
+    }
+
+    if (allErrors.length > 0) {
+        lines.push('Errors:');
+        for (const err of allErrors) {
+            let status: string;
+            if (err.fixed) {
+                const solverInfo = err.solver ? ` (${err.solver.action}: ${err.solver.message})` : '';
+                status = `[fixed${solverInfo}]`;
+            } else {
+                status = '[unresolved]';
+            }
+            lines.push(`  ${err.recordId}: ${err.message} ${status}`);
+        }
+        lines.push('');
+    } else {
+        lines.push('No errors.');
+        lines.push('');
+    }
+
+    // Requested records section (at the end for visibility)
+    const requestedRecords: Record<string, string> = data.requestedRecords || {};
+    if (Object.keys(requestedRecords).length > 0) {
+        lines.push('Requested records:');
+        const maxIdLen = Math.max(...Object.keys(requestedRecords).map(k => k.length));
+        for (const [oldId, newId] of Object.entries(requestedRecords)) {
+            lines.push(`  ${oldId.padEnd(maxIdLen)}  ->  ${newId || '(not migrated)'}`);
+        }
+    }
+
     return lines.join('\n');
 }
 
