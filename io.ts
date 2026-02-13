@@ -209,6 +209,14 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'error_updating_record', { recordId, sObjectName, error }));
     }
 
+    public progressBarInit(total: number) {
+        this.onOutput(this.buildIOEvent('output', 'progress_bar_init', { total }));
+    }
+
+    public progressBarUpdate(done: number, total: number) {
+        this.onOutput(this.buildIOEvent('output', 'progress_bar_update', { done, total }));
+    }
+
 }
 
 export default IO;

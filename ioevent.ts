@@ -35,7 +35,9 @@ export type IOEventType =
     | 'looking_for_circular_dependencies'
     | 'found_circular_dependency'
     | 'record_no_id'
-    | 'error_updating_record';
+    | 'error_updating_record'
+    | 'progress_bar_init'
+    | 'progress_bar_update';
 
 class IOEvent {
     constructor(

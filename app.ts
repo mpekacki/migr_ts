@@ -384,12 +384,16 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
         recordIdsToFetch = []; // No need to fetch from org when reading from file
     }
     
+    let totalRecordsToMigrate = 0;
     const setNewRecordId = (recordId: string, newRecordId: string) => {
         old2new[recordId] = newRecordId;
         delete recordsByIds[recordId];
         delete fetchedRecordsByIds[recordId];
         migratedRecords[recordId] = newRecordId;
         saveHistoryFile();
+        if (totalRecordsToMigrate > 0) {
+            io.progressBarUpdate(totalRecordsToMigrate - Object.keys(recordsByIds).length, totalRecordsToMigrate);
+        }
     }
     
     for (const recordId of Object.keys(history)) {
@@ -638,6 +642,8 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     }
     
     if (!isMigrateToFile) {
+        totalRecordsToMigrate = Object.keys(recordsByIds).length;
+        io.progressBarInit(totalRecordsToMigrate);
         while (Object.keys(recordsByIds).length > 0) {
             io.remainingRecords(Object.keys(recordsByIds).length);
             let anyRecordProcessed = false;

@@ -119,6 +119,10 @@ function formatEvent(event: IOEvent): string {
         }
         case 'error_updating_record':
             return `error updating record ${d?.recordId} of type ${d?.sObjectName}: ${d?.error}`;
+        case 'progress_bar_init':
+            return `migration progress: 0/${d?.total}`;
+        case 'progress_bar_update':
+            return `migration progress: ${d?.done}/${d?.total}`;
         default: {
             const data = typeof d === 'object' ? JSON.stringify(d, null, 2) : d;
             return data ? `${data}\n${event.type}` : event.type;
