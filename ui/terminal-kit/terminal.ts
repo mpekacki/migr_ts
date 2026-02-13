@@ -4,6 +4,13 @@ import { UI } from '../ui';
 import { getFormatter } from '../event-formatter';
 import readline from 'readline';
 
+const GREEN_TYPES = new Set(['created_record', 'finished', 'saved_records', 'found_existing_record']);
+const RED_TYPES = new Set(['error', 'error_updating_record', 'record_not_found', 'record_not_queryable', 'malformed_id']);
+const YELLOW_TYPES = new Set(['skipping_record', 'found_circular_dependency', 'record_no_id', 'invalid_json', 'invalid_regex', 'invalid_input', 'aborted']);
+const CYAN_TYPES = new Set(['fetching_record', 'querying_related_records', 'querying_existing_record', 'describing_sobject', 'checking_matchers']);
+const MAGENTA_TYPES = new Set(['using_solver', 'skipping_previously_used_solvers', 'saved_old_fields']);
+const BOLD_TYPES = new Set(['confirm_migration', 'starting_migration']);
+
 export class TerminalKitUI implements UI {
     private readonly rl = readline.createInterface({
         input: process.stdin,
@@ -54,10 +61,20 @@ export class TerminalKitUI implements UI {
                 this.stopProgressBar();
             }
         } else {
-            terminal(message);
-            terminal('\n');
+            const colorFn = this.getColorFn(event.type);
+            colorFn(message + '\n');
         }
         return message;
+    }
+
+    private getColorFn(type: string): typeof terminal {
+        if (GREEN_TYPES.has(type)) return terminal.green;
+        if (RED_TYPES.has(type)) return terminal.red;
+        if (YELLOW_TYPES.has(type)) return terminal.yellow;
+        if (CYAN_TYPES.has(type)) return terminal.cyan;
+        if (MAGENTA_TYPES.has(type)) return terminal.magenta;
+        if (BOLD_TYPES.has(type)) return terminal.bold;
+        return terminal;
     }
 
     private stopProgressBar(): void {
