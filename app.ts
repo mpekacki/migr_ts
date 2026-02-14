@@ -402,7 +402,7 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
 
     let depth = 0;
     while (recordIdsToFetch.length > 0) {
-        console.log('depth', depth);
+        io.depth(depth);
         depth++;
         io.recordsSoFar(Object.keys(recordsByIds).length);
         // Create fetch functions for each record (wrapped to control concurrency)

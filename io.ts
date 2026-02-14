@@ -31,6 +31,10 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'records_so_far', { count }));
     }
 
+    public depth(depth: number) {
+        this.onOutput(this.buildIOEvent('output', 'depth', { depth }));
+    }
+
     public fetchingRecord(recordId: string, sObjectName: string, reason?: string) {
         this.onOutput(this.buildIOEvent('output', 'fetching_record', { recordId, sObjectName, reason }));
     }
@@ -102,15 +106,22 @@ class IO {
     }
 
     public savingRecords(chunk: Record<string, SObjectRecord<Schema, string>>) {
-        const records = Object.values(chunk);
-        const recordCountsByType: Record<string, number> = {};
+        const records = Object.values(chunk).map(record => ({
+            type: (record as any).attributes?.type || 'Unknown',
+            name: this.getRecordDisplayName(record)
+        }));
 
-        records.forEach(record => {
-            const type = (record as any).attributes?.type || 'Unknown';
-            recordCountsByType[type] = (recordCountsByType[type] || 0) + 1;
-        });
+        this.onOutput(this.buildIOEvent('output', 'saving_records', { records }));
+    }
 
-        this.onOutput(this.buildIOEvent('output', 'saving_records', { recordCountsByType, records }));
+    private getRecordDisplayName(record: SObjectRecord<Schema, string>): string {
+        const r = record as any;
+        if (r.Name) return r.Name;
+        const type = r.attributes?.type;
+        if (type === 'Contact' && (r.FirstName || r.LastName)) {
+            return [r.FirstName, r.LastName].filter(Boolean).join(' ');
+        }
+        return '*';
     }
 
     public savedRecords(savedRecords: Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>) {

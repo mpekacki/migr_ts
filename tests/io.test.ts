@@ -48,8 +48,65 @@ describe('IO', () => {
 
         expect(output).toHaveLength(1);
         expect(output[0].type).toBe('saving_records');
-        expect(output[0].data.recordCountsByType).toEqual({ Account: 1, Contact: 2 });
-        expect(output[0].data.records).toHaveLength(3);
+        expect(output[0].data.records).toEqual([
+            { type: 'Account', name: 'Test Account with a very long name that should be truncated because it exceeds the 100 character limit for the JSON representation and we need to make sure it actually gets cut off properly' },
+            { type: 'Contact', name: 'Test Contact with another very long name that also should be truncated' },
+            { type: 'Contact', name: 'Another Test Contact' }
+        ]);
+    });
+
+    it('should use FirstName and LastName for Contact without Name', () => {
+        const {io, output} = createIO();
+
+        const chunk = {
+            '003xx000003DGb1AAG': {
+                attributes: { type: 'Contact' },
+                Id: '003xx000003DGb1AAG',
+                FirstName: 'John',
+                LastName: 'Smith'
+            }
+        } as any;
+
+        io.savingRecords(chunk);
+
+        expect(output[0].data.records).toEqual([
+            { type: 'Contact', name: 'John Smith' }
+        ]);
+    });
+
+    it('should use LastName only for Contact with no FirstName', () => {
+        const {io, output} = createIO();
+
+        const chunk = {
+            '003xx000003DGb1AAG': {
+                attributes: { type: 'Contact' },
+                Id: '003xx000003DGb1AAG',
+                LastName: 'Smith'
+            }
+        } as any;
+
+        io.savingRecords(chunk);
+
+        expect(output[0].data.records).toEqual([
+            { type: 'Contact', name: 'Smith' }
+        ]);
+    });
+
+    it('should use * for records without Name', () => {
+        const {io, output} = createIO();
+
+        const chunk = {
+            '001xx000003DGb0AAG': {
+                attributes: { type: 'CustomObject__c' },
+                Id: '001xx000003DGb0AAG'
+            }
+        } as any;
+
+        io.savingRecords(chunk);
+
+        expect(output[0].data.records).toEqual([
+            { type: 'CustomObject__c', name: '*' }
+        ]);
     });
 
     it('should include matchers data in confirm_migration event', async () => {

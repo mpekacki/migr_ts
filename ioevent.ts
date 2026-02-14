@@ -37,7 +37,8 @@ export type IOEventType =
     | 'record_no_id'
     | 'error_updating_record'
     | 'progress_bar_init'
-    | 'progress_bar_update';
+    | 'progress_bar_update'
+    | 'depth';
 
 class IOEvent {
     constructor(

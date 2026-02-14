@@ -25,6 +25,11 @@ describe('event-formatter', () => {
             expect(format(event)).toBe('records so far: 5');
         });
 
+        it('should format depth', () => {
+            const event = new IOEvent('output', 'depth', { depth: 3 });
+            expect(format(event)).toBe('depth 3');
+        });
+
         it('should format fetching_record with reason', () => {
             const event = new IOEvent('output', 'fetching_record', { recordId: '001', sObjectName: 'Account', reason: 'lookup' });
             expect(format(event)).toBe('fetching record 001 of type Account (via lookup)');
@@ -40,33 +45,25 @@ describe('event-formatter', () => {
             expect(format(event)).toBe('record 001 of type Account does not exist in the source org');
         });
 
-        it('should format saving_records with type counts and trimmed JSON', () => {
+        it('should format saving_records grouped by type', () => {
             const records = [
-                { attributes: { type: 'Account' }, Id: '001', Name: 'Test' },
-                { attributes: { type: 'Contact' }, Id: '003', Name: 'Contact1' }
+                { type: 'Account', name: 'ACME' },
+                { type: 'Contact', name: 'John Smith' },
+                { type: 'Account', name: 'Anthropic' },
+                { type: 'Contact', name: 'Jane Doe' }
             ];
-            const event = new IOEvent('output', 'saving_records', {
-                recordCountsByType: { Account: 1, Contact: 1 },
-                records
-            });
+            const event = new IOEvent('output', 'saving_records', { records });
             const result = format(event);
-            expect(result).toContain('saving 2 records');
-            expect(result).toContain('1 Account');
-            expect(result).toContain('1 Contact');
+            expect(result).toBe('saving 4 records:\nAccount (2): ACME, Anthropic\nContact (2): John Smith, Jane Doe');
         });
 
-        it('should trim saving_records JSON to 1000 characters', () => {
-            const records = Array.from({ length: 50 }, (_, i) => ({
-                attributes: { type: 'Account' },
-                Id: `001xx00000${i}`,
-                Name: 'A'.repeat(100)
-            }));
-            const event = new IOEvent('output', 'saving_records', {
-                recordCountsByType: { Account: 50 },
-                records
-            });
+        it('should format saving_records with * for nameless records', () => {
+            const records = [
+                { type: 'CustomObject__c', name: '*' }
+            ];
+            const event = new IOEvent('output', 'saving_records', { records });
             const result = format(event);
-            expect(result).toContain('...');
+            expect(result).toBe('saving 1 records:\nCustomObject__c (1): *');
         });
 
         it('should format insert_error with options', () => {

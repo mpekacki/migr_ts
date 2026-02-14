@@ -5,7 +5,7 @@ import { getFormatter } from '../event-formatter';
 
 const GREEN_TYPES = new Set(['created_record', 'finished', 'saved_records', 'found_existing_record']);
 const RED_TYPES = new Set(['error', 'error_updating_record', 'record_not_found', 'record_not_queryable', 'malformed_id']);
-const YELLOW_TYPES = new Set(['skipping_record', 'found_circular_dependency', 'record_no_id', 'invalid_json', 'invalid_regex', 'invalid_input', 'aborted']);
+const YELLOW_TYPES = new Set(['skipping_record', 'found_circular_dependency', 'record_no_id', 'invalid_json', 'invalid_regex', 'invalid_input', 'aborted', 'depth']);
 const CYAN_TYPES = new Set(['fetching_record', 'querying_related_records', 'querying_existing_record', 'describing_sobject', 'checking_matchers']);
 const MAGENTA_TYPES = new Set(['using_solver', 'skipping_previously_used_solvers', 'saved_old_fields']);
 const BOLD_TYPES = new Set(['confirm_migration', 'starting_migration']);

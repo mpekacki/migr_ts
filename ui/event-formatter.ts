@@ -11,6 +11,8 @@ function formatEvent(event: IOEvent): string {
             return 'checking matchers';
         case 'records_so_far':
             return `records so far: ${d?.count}`;
+        case 'depth':
+            return `depth ${d?.depth}`;
         case 'fetching_record': {
             const reasonText = d?.reason ? ` (via ${d.reason})` : '';
             return `fetching record ${d?.recordId} of type ${d?.sObjectName}${reasonText}`;
@@ -49,12 +51,13 @@ function formatEvent(event: IOEvent): string {
             return `creating record ${d?.recordId} of type ${d?.sObjectName} with fields ${JSON.stringify(d?.record)}`;
         case 'saving_records': {
             const records = d?.records || [];
-            const typeCounts = formatTypeCounts(d?.recordCountsByType);
-            let jsonStr = JSON.stringify(records);
-            if (jsonStr.length > 1000) {
-                jsonStr = jsonStr.substring(0, 1000) + '...';
-            }
-            return `saving ${records.length} records (${typeCounts}): ${jsonStr}`;
+            const grouped: Record<string, string[]> = {};
+            records.forEach((r: any) => {
+                if (!grouped[r.type]) grouped[r.type] = [];
+                grouped[r.type].push(r.name);
+            });
+            const lines = Object.entries(grouped).map(([type, names]) => `${type} (${names.length}): ${names.join(', ')}`);
+            return `saving ${records.length} records:\n${lines.join('\n')}`;
         }
         case 'saved_records':
             return `saved records: ${JSON.stringify(d)}`;
