@@ -2,7 +2,6 @@ import { terminal } from 'terminal-kit';
 import { IOEvent } from '../../app';
 import { UI } from '../ui';
 import { getFormatter } from '../event-formatter';
-import readline from 'readline';
 
 const GREEN_TYPES = new Set(['created_record', 'finished', 'saved_records', 'found_existing_record']);
 const RED_TYPES = new Set(['error', 'error_updating_record', 'record_not_found', 'record_not_queryable', 'malformed_id']);
@@ -10,16 +9,14 @@ const YELLOW_TYPES = new Set(['skipping_record', 'found_circular_dependency', 'r
 const CYAN_TYPES = new Set(['fetching_record', 'querying_related_records', 'querying_existing_record', 'describing_sobject', 'checking_matchers']);
 const MAGENTA_TYPES = new Set(['using_solver', 'skipping_previously_used_solvers', 'saved_old_fields']);
 const BOLD_TYPES = new Set(['confirm_migration', 'starting_migration']);
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 export class TerminalKitUI implements UI {
-    private readonly rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
     private readonly formatter: (event: IOEvent) => string;
     private progressBar: any;
     private progressActive = false;
     private fixedPosition = false;
+    private spinnerTimer: ReturnType<typeof setInterval> | null = null;
 
     constructor(debug: boolean) {
         this.formatter = getFormatter(debug);
@@ -61,8 +58,19 @@ export class TerminalKitUI implements UI {
                 this.stopProgressBar();
             }
         } else {
+            this.stopSpinner();
             const colorFn = this.getColorFn(event.type);
-            colorFn(message + '\n');
+            if (CYAN_TYPES.has(event.type) && process.stdout.isTTY && !this.progressActive) {
+                colorFn(message + ' ');
+                terminal(SPINNER_FRAMES[0]);
+                let frame = 1;
+                this.spinnerTimer = setInterval(() => {
+                    terminal('\b' + SPINNER_FRAMES[frame]);
+                    frame = (frame + 1) % SPINNER_FRAMES.length;
+                }, 100);
+            } else {
+                colorFn(message + '\n');
+            }
         }
         return message;
     }
@@ -94,11 +102,25 @@ export class TerminalKitUI implements UI {
     }
 
     prompt(question: IOEvent): Promise<string> {
-        return new Promise((resolve) => this.rl.question(this.formatter(question), resolve));
+        const message = this.formatter(question);
+        terminal(message);
+        return terminal.inputField({ echo: true }).promise.then((input: string | undefined) => {
+            terminal('\n');
+            return input ?? '';
+        });
+    }
+
+    private stopSpinner(): void {
+        if (this.spinnerTimer) {
+            clearInterval(this.spinnerTimer);
+            this.spinnerTimer = null;
+            terminal('\b \n');
+        }
     }
 
     close(): void {
+        this.stopSpinner();
         this.stopProgressBar();
-        this.rl.close();
+        terminal.grabInput(false);
     }
 }

@@ -1,6 +1,7 @@
 import IOEvent from '../ioevent';
 
 // Mock terminal-kit
+const mockInputFieldPromise = { promise: Promise.resolve('user response') };
 const mockTerminal = jest.fn() as jest.Mock & {
     green: jest.Mock;
     red: jest.Mock;
@@ -8,6 +9,8 @@ const mockTerminal = jest.fn() as jest.Mock & {
     cyan: jest.Mock;
     magenta: jest.Mock;
     bold: jest.Mock;
+    inputField: jest.Mock;
+    grabInput: jest.Mock;
 };
 mockTerminal.green = jest.fn();
 mockTerminal.red = jest.fn();
@@ -15,18 +18,10 @@ mockTerminal.yellow = jest.fn();
 mockTerminal.cyan = jest.fn();
 mockTerminal.magenta = jest.fn();
 mockTerminal.bold = jest.fn();
+mockTerminal.inputField = jest.fn().mockReturnValue(mockInputFieldPromise);
+mockTerminal.grabInput = jest.fn();
 jest.mock('terminal-kit', () => ({
     terminal: mockTerminal
-}));
-
-// Mock readline
-const mockQuestion = jest.fn();
-const mockClose = jest.fn();
-jest.mock('readline', () => ({
-    createInterface: jest.fn(() => ({
-        question: mockQuestion,
-        close: mockClose
-    }))
 }));
 
 // Mock event formatter
@@ -38,10 +33,18 @@ jest.mock('../ui/event-formatter', () => ({
 
 import { TerminalKitUI } from '../ui/terminal-kit/terminal';
 
+const originalIsTTY = process.stdout.isTTY;
+
 describe('TerminalKitUI', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         getFormatter.mockReturnValue((event: IOEvent) => MESSAGE);
+        (process.stdout as any).isTTY = undefined;
+        mockTerminal.inputField.mockReturnValue({ promise: Promise.resolve('user response') });
+    });
+
+    afterEach(() => {
+        (process.stdout as any).isTTY = originalIsTTY;
     });
 
     describe('display', () => {
@@ -53,6 +56,51 @@ describe('TerminalKitUI', () => {
 
             expect(mockTerminal.cyan).toHaveBeenCalledWith('test message\n');
             expect(result).toBe('test message');
+        });
+
+        it('should start a spinner for cyan event types when TTY', () => {
+            jest.useFakeTimers();
+            (process.stdout as any).isTTY = true;
+            const ui = new TerminalKitUI(false);
+            const event = new IOEvent('output', 'fetching_record');
+
+            ui.display(event);
+
+            expect(mockTerminal.cyan).toHaveBeenCalledWith('test message ');
+            expect(mockTerminal).toHaveBeenCalledWith('⠋');
+            jest.advanceTimersByTime(100);
+            expect(mockTerminal).toHaveBeenCalledWith('\b⠙');
+            ui.close();
+            jest.useRealTimers();
+        });
+
+        it('should stop previous spinner when a new event arrives', () => {
+            jest.useFakeTimers();
+            (process.stdout as any).isTTY = true;
+            const ui = new TerminalKitUI(false);
+
+            ui.display(new IOEvent('output', 'fetching_record'));
+
+            mockTerminal.mockClear();
+            ui.display(new IOEvent('output', 'created_record'));
+            // stopSpinner erases spinner char and prints newline
+            expect(mockTerminal).toHaveBeenCalledWith('\b \n');
+            // Spinner should be stopped - advancing time should not produce backspace frames
+            mockTerminal.mockClear();
+            jest.advanceTimersByTime(200);
+            expect(mockTerminal).not.toHaveBeenCalledWith(expect.stringContaining('\b'));
+            ui.close();
+            jest.useRealTimers();
+        });
+
+        it('should not start a spinner in non-TTY mode', () => {
+            (process.stdout as any).isTTY = undefined;
+            const ui = new TerminalKitUI(false);
+            const event = new IOEvent('output', 'fetching_record');
+
+            ui.display(event);
+
+            expect(mockTerminal.cyan).toHaveBeenCalledWith('test message\n');
         });
 
         it('should display error message in red', () => {
@@ -130,24 +178,20 @@ describe('TerminalKitUI', () => {
         it('should prompt user with formatted question and return response', async () => {
             const ui = new TerminalKitUI(false);
             const event = new IOEvent('input', 'confirm_migration');
-            mockQuestion.mockImplementation((question: string, callback: (answer: string) => void) => {
-                callback('user response');
-            });
 
             const result = await ui.prompt(event);
 
-            expect(mockQuestion).toHaveBeenCalledWith('test message', expect.any(Function));
+            expect(mockTerminal).toHaveBeenCalledWith('test message');
+            expect(mockTerminal.inputField).toHaveBeenCalledWith({ echo: true });
             expect(result).toBe('user response');
         });
     });
 
     describe('close', () => {
-        it('should close the readline interface', () => {
+        it('should call close without errors', () => {
             const ui = new TerminalKitUI(false);
 
-            ui.close();
-
-            expect(mockClose).toHaveBeenCalled();
+            expect(() => ui.close()).not.toThrow();
         });
     });
 });
