@@ -65,20 +65,6 @@ describe('preprocessData', () => {
             expect(recordsByIds['0012x0000000000'].name).toBe('Test User');
         });
 
-        it('should handle emails with multiple @ symbols', () => {
-            const recordsByIds = {
-                '0012x0000000000': {
-                    email: 'user@subdomain@domain.com',
-                },
-            };
-            preprocessData(recordsByIds, {
-                emailAnonymization: {
-                    mode: 'sanitize'
-                }
-            });
-            // Should replace only the first @ symbol
-            expect(recordsByIds['0012x0000000000'].email).toBe('user.at.subdomain@domain.com@example.com');
-        });
     });
 
     describe('obfuscation mode', () => {

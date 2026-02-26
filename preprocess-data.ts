@@ -53,12 +53,14 @@ export const preprocessData = (recordsByIds: Record<string, SObjectRecord<Schema
             return; // Unknown mode, do nothing
         }
 
+        const emailRegex = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+
         for (const recordId in recordsByIds) {
             const record = recordsByIds[recordId];
             for (const field in record) {
-                // if value contains @, transform it
+                // if value contains an email address, replace only the email parts
                 if (record[field] && typeof record[field] === 'string' && record[field].includes('@')) {
-                    record[field] = transformer(record[field] as string);
+                    record[field] = (record[field] as string).replace(emailRegex, (match) => transformer(match));
                 }
             }
         }
