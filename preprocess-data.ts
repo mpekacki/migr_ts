@@ -60,7 +60,7 @@ export const preprocessData = (recordsByIds: Record<string, SObjectRecord<Schema
             for (const field in record) {
                 // if value contains an email address, replace only the email parts
                 if (record[field] && typeof record[field] === 'string' && record[field].includes('@')) {
-                    record[field] = (record[field] as string).replace(emailRegex, transformer);
+                    record[field] = (record[field] as string).replace(emailRegex, (match) => transformer(match));
                 }
             }
         }
