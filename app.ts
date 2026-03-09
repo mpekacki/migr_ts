@@ -770,12 +770,12 @@ class MigrationRunner {
                 }
             }
             if (!anyRecordProcessed) {
-                this.resolveCircularDependencies();
+                await this.resolveCircularDependencies();
             }
         }
     }
 
-    private resolveCircularDependencies(): void {
+    private async resolveCircularDependencies(): Promise<void> {
         const requiredLookupFieldsBySObjectType: Record<string, string[]> = {};
         const allLookupFieldsBySObjectType: Record<string, string[]> = {};
         const uniqueSObjectTypes = [...new Set(Object.values(this.recordsByIds).map(record => record.attributes!.type))];
@@ -790,7 +790,7 @@ class MigrationRunner {
                     .map(field => field.name);
             })());
         }
-        // Note: these are cached so they resolve synchronously, maintaining original behavior
+        await Promise.all(describePromises);
         const records = Object.values(this.recordsByIds).map(record => ({
             attributes: record.attributes,
             ...Object.fromEntries(Object.entries(record)),
