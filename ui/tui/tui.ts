@@ -1,13 +1,11 @@
-import readline from 'readline';
 import { IOEvent } from '../../app';
 import { UI } from '../ui';
 import { getFormatter } from '../event-formatter';
 import { ansi, screen } from './ansi';
-import { buildFrame } from './render';
+import { bodyHeightFor, buildFrame, inputCursorCol, maxScrollOffset } from './render';
 import { applyEvent, initialState, MigrationState, pushConsole } from './state';
 
 const SPINNER_MS = 90;
-const INPUT_PROMPT = `${ansi.green('>')} `;
 
 type ConsoleMethod = 'log' | 'info' | 'warn' | 'error' | 'debug';
 
@@ -25,8 +23,14 @@ export class TuiUI implements UI {
     private promptActive = false;
     private awaitingExit = false;
     private closed = false;
+    private inputBuffer = '';
+    private scrollOffset = 0;
     private readonly savedConsole: Partial<Record<ConsoleMethod, (...a: unknown[]) => void>> = {};
-    private readonly onResize = () => { this.prev = []; this.redraw(); };
+    private readonly onResize = () => {
+        this.prev = [];
+        this.scrollOffset = Math.min(this.scrollOffset, this.maxScroll());
+        this.redraw();
+    };
 
     constructor(debug: boolean) {
         // The log-file output still wants readable, stable lines.
@@ -51,28 +55,80 @@ export class TuiUI implements UI {
     }
 
     prompt(question: IOEvent): Promise<string> {
-        // Show the full question as an overlay in the body, then collect a line
-        // of input at the pinned input box.
+        // Show the full question as a scrollable overlay in the body, then collect
+        // a line of input at the pinned input box. Long prompts can be scrolled
+        // with ↑/↓ and PgUp/PgDn while typing the answer.
         this.state.overlay = this.formatter(question).split('\n');
         this.promptActive = true;
+        this.inputBuffer = '';
+        this.scrollOffset = 0; // start at the top of the summary
         this.stopSpinner();
+        this.write(screen.showCursor);
         this.redraw();
+        return this.readPromptLine();
+    }
 
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        const { col, row } = this.inputCursor();
-        this.write(screen.showCursor + screen.moveTo(col, row));
-
+    private readPromptLine(): Promise<string> {
         return new Promise<string>((resolve) => {
-            rl.question(INPUT_PROMPT, (answer) => {
-                rl.close();
-                this.write(screen.hideCursor);
-                this.promptActive = false;
-                this.state.overlay = null;
-                if (!this.state.done) this.startSpinner();
-                this.redraw();
-                resolve(answer);
-            });
+            const stdin = process.stdin;
+            const wasRaw = stdin.isRaw;
+            stdin.setRawMode?.(true);
+            stdin.resume();
+
+            const onData = (chunk: Buffer) => {
+                if (this.handlePromptKey(chunk)) {
+                    const answer = this.inputBuffer;
+                    stdin.removeListener('data', onData);
+                    stdin.setRawMode?.(wasRaw ?? false);
+                    stdin.pause();
+                    this.write(screen.hideCursor);
+                    this.promptActive = false;
+                    this.state.overlay = null;
+                    this.inputBuffer = '';
+                    this.scrollOffset = 0;
+                    if (!this.state.done) this.startSpinner();
+                    this.redraw();
+                    resolve(answer);
+                } else {
+                    this.redraw();
+                }
+            };
+            stdin.on('data', onData);
         });
+    }
+
+    /** Apply one key chunk to the prompt. Returns true when the line is submitted. */
+    private handlePromptKey(chunk: Buffer): boolean {
+        const s = chunk.toString('utf8');
+        if (s === '\x03') { this.close(); process.exit(130); }       // Ctrl+C
+        if (s === '\r' || s === '\n') return true;                   // Enter
+        if (s === '\x7f' || s === '\b') {                            // Backspace
+            this.inputBuffer = this.inputBuffer.slice(0, -1);
+            return false;
+        }
+        if (s.startsWith('\x1b')) {                                  // scroll keys
+            const max = this.maxScroll();
+            const page = this.pageSize();
+            if (s === '\x1b[A') this.scrollOffset = Math.max(0, this.scrollOffset - 1);
+            else if (s === '\x1b[B') this.scrollOffset = Math.min(max, this.scrollOffset + 1);
+            else if (s === '\x1b[5~') this.scrollOffset = Math.max(0, this.scrollOffset - page);
+            else if (s === '\x1b[6~') this.scrollOffset = Math.min(max, this.scrollOffset + page);
+            return false;
+        }
+        // Printable input (strip control chars so pastes stay on one line).
+        // eslint-disable-next-line no-control-regex
+        const printable = s.replace(/[\x00-\x1f]/g, '');
+        if (printable) this.inputBuffer += printable;
+        return false;
+    }
+
+    private maxScroll(): number {
+        const { width, height } = this.dims();
+        return maxScrollOffset(this.state.overlay, width, height);
+    }
+
+    private pageSize(): number {
+        return Math.max(1, bodyHeightFor(this.dims().height) - 1);
     }
 
     /**
@@ -127,16 +183,13 @@ export class TuiUI implements UI {
         };
     }
 
-    private inputCursor(): { col: number; row: number } {
-        const { height } = this.dims();
-        // Input line is the second-to-last row; cursor sits just inside "│ ".
-        return { col: 3, row: height - 1 };
-    }
-
     private redraw(): void {
         if (this.closed) return;
         const { width, height } = this.dims();
-        const frame = buildFrame(this.state, this.spinnerFrame, width, height, this.promptActive, this.awaitingExit);
+        const frame = buildFrame(
+            this.state, this.spinnerFrame, width, height,
+            this.promptActive, this.awaitingExit, this.inputBuffer, this.scrollOffset,
+        );
 
         let out = '';
         for (let i = 0; i < frame.length; i++) {
@@ -151,10 +204,10 @@ export class TuiUI implements UI {
         this.prev = frame;
         if (out) this.write(out + ansi.reset);
 
-        // Keep the cursor parked in the input box while prompting.
+        // Keep the cursor parked just after the typed input while prompting.
         if (this.promptActive) {
-            const { col, row } = this.inputCursor();
-            this.write(screen.moveTo(col + 2, row)); // +2 for the "> " readline prompt
+            const inputRow = Math.max(10, height) - 1; // second-to-last row
+            this.write(screen.moveTo(inputCursorCol(this.inputBuffer, width), inputRow));
         }
     }
 

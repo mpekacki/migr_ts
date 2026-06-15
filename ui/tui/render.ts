@@ -39,6 +39,24 @@ function glyphStr(glyph: Glyph, spinnerFrame: number, done: boolean): string {
  * Build the complete screen as an array of exactly `height` lines, each exactly
  * `width` visible columns wide. Pure: no I/O, fully testable.
  */
+/** Number of body (feed/overlay) rows for a given terminal height. */
+export function bodyHeightFor(height: number): number {
+    // top(1) + header(3) + sep(1) + sep(1) + input(1) + bottom(1) = 8 fixed rows.
+    return Math.max(1, Math.max(10, height) - 8);
+}
+
+/** Usable text width inside the box borders. */
+export function innerWidth(width: number): number {
+    return Math.max(24, width) - 4;
+}
+
+/** Largest valid overlay scroll offset (0 when everything fits). */
+export function maxScrollOffset(overlay: string[] | null, width: number, height: number): number {
+    if (!overlay) return 0;
+    const total = wrapToWidth(overlay, innerWidth(width)).length;
+    return Math.max(0, total - bodyHeightFor(height));
+}
+
 export function buildFrame(
     state: MigrationState,
     spinnerFrame: number,
@@ -46,6 +64,8 @@ export function buildFrame(
     height: number,
     promptActive: boolean,
     awaitingExit = false,
+    inputBuffer = '',
+    scrollOffset = 0,
 ): string[] {
     const w = Math.max(24, width);
     const h = Math.max(10, height);
@@ -88,24 +108,43 @@ export function buildFrame(
     lines.push(border(B.lt, B.rt));
 
     // ── Body: overlay (prompt/summary) or activity feed ─────────────────────
-    const bodyHeight = h - 8; // top(1)+header(3)+sep(1)+sep(1)+input(1)+bottom(1)
-    const bodyLines = state.overlay
-        ? renderOverlay(state.overlay, inner)
-        : renderFeed(state.feed, spinnerFrame, state.done, inner);
-    const tail = bodyLines.slice(-bodyHeight);
+    const bodyHeight = bodyHeightFor(h);
+    let visible: string[];
+    let overflow = false;
+    let winStart = 0;
+    let total = 0;
+    if (state.overlay) {
+        // Overlays (prompts/summaries) are scrolled: show a window into the
+        // wrapped content so nothing is lost off the top.
+        const bodyLines = wrapToWidth(state.overlay, inner);
+        total = bodyLines.length;
+        overflow = total > bodyHeight;
+        const maxOffset = Math.max(0, total - bodyHeight);
+        winStart = Math.max(0, Math.min(scrollOffset, maxOffset));
+        visible = bodyLines.slice(winStart, winStart + bodyHeight);
+    } else {
+        // The activity feed auto-follows: always show the latest lines.
+        const bodyLines = renderFeed(state.feed, spinnerFrame, state.done, inner);
+        visible = bodyLines.slice(-bodyHeight);
+    }
     for (let i = 0; i < bodyHeight; i++) {
-        lines.push(row(tail[i] ?? ''));
+        lines.push(row(visible[i] ?? ''));
     }
 
-    // ── Separator ───────────────────────────────────────────────────────────
-    lines.push(border(B.lt, B.rt));
+    // ── Separator (carries the scroll indicator when the overlay overflows) ──
+    if (overflow) {
+        const first = winStart + 1;
+        const last = Math.min(winStart + bodyHeight, total);
+        const indicator = ` ${ansi.gray(`↑↓ scroll · ${first}–${last} of ${total}`)} `;
+        const fill = w - 2 - visibleLength(indicator);
+        lines.push(B.lt + indicator + B.h.repeat(Math.max(0, fill)) + B.rt);
+    } else {
+        lines.push(border(B.lt, B.rt));
+    }
 
     // ── Input line ──────────────────────────────────────────────────────────
     if (promptActive) {
-        // Leave the interior to readline, which draws its own "> " prompt and the
-        // live input after the frame is painted. No right border so typed text
-        // can extend freely.
-        lines.push(`${B.v} `);
+        lines.push(row(`${ansi.green('>')} ${inputView(inputBuffer, inner)}`));
     } else {
         const hint = awaitingExit
             ? ansi.boldOn(ansi.green('Press any key to exit…'))
@@ -132,10 +171,10 @@ function renderFeed(feed: FeedEntry[], spinnerFrame: number, done: boolean, inne
     });
 }
 
-function renderOverlay(overlay: string[], inner: number): string[] {
-    // Overlay text is already plain; wrap long lines so nothing is silently cut.
+/** Wrap lines wider than `inner` so nothing is silently cut horizontally. */
+export function wrapToWidth(lines: string[], inner: number): string[] {
     const out: string[] = [];
-    for (const raw of overlay) {
+    for (const raw of lines) {
         if (visibleLength(raw) <= inner) {
             out.push(raw);
         } else {
@@ -148,6 +187,25 @@ function renderOverlay(overlay: string[], inner: number): string[] {
         }
     }
     return out;
+}
+
+/** Reserve room after the "> " prompt for the live input. */
+function inputCapacity(inner: number): number {
+    return Math.max(1, inner - 2);
+}
+
+/** The portion of the input buffer that fits, scrolled horizontally to the end. */
+function inputView(buffer: string, inner: number): string {
+    const cap = inputCapacity(inner);
+    return buffer.length <= cap ? buffer : buffer.slice(buffer.length - cap);
+}
+
+/** 1-based screen column where the input cursor should sit (just past the text). */
+export function inputCursorCol(buffer: string, width: number): number {
+    const inner = innerWidth(width);
+    const shown = Math.min(buffer.length, inputCapacity(inner));
+    // "│ " (2) + "> " (2) + shown chars, then cursor sits on the next column.
+    return 2 + 2 + shown + 1;
 }
 
 function progressPct(state: MigrationState): number {

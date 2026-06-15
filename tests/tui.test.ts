@@ -1,6 +1,6 @@
 import IOEvent, { IOEventType } from '../ioevent';
 import { applyEvent, initialState, MigrationState } from '../ui/tui/state';
-import { buildFrame } from '../ui/tui/render';
+import { buildFrame, maxScrollOffset, bodyHeightFor, inputCursorCol } from '../ui/tui/render';
 import { padTo, truncate, visibleLength, ansi } from '../ui/tui/ansi';
 
 function feed(state: MigrationState, type: IOEventType, data?: unknown) {
@@ -127,5 +127,58 @@ describe('frame renderer', () => {
         expect(frame[0]).toContain('migr_ts');
         expect(frame[frame.length - 1]).toContain('└');
         expect(frame[frame.length - 1]).toContain('┘');
+    });
+
+    it('renders the typed input after the "> " prompt', () => {
+        const s = initialState();
+        s.overlay = ['Continue? (y/n)'];
+        const frame = buildFrame(s, 0, 60, 22, true, false, 'yes', 0);
+        const inputLine = frame[frame.length - 2];
+        expect(inputLine).toContain('>');
+        expect(inputLine).toContain('yes');
+    });
+});
+
+describe('scrollable overlay', () => {
+    const tall = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`);
+
+    it('reports a non-zero max scroll only when content overflows the body', () => {
+        const small = ['only one line'];
+        expect(maxScrollOffset(small, 60, 22)).toBe(0);
+        const max = maxScrollOffset(tall, 60, 22);
+        expect(max).toBe(40 - bodyHeightFor(22));
+        expect(max).toBeGreaterThan(0);
+    });
+
+    it('shows a window into the overlay and moves it with the scroll offset', () => {
+        const s = initialState();
+        s.overlay = tall;
+        const top = buildFrame(s, 0, 60, 22, true, false, '', 0).join('\n');
+        expect(top).toContain('line 1');
+        expect(top).not.toContain('line 40');
+
+        const scrolled = buildFrame(s, 0, 60, 22, true, false, '', 5).join('\n');
+        expect(scrolled).not.toContain('line 5'); // offset 5 -> first visible is line 6
+        expect(scrolled).toContain('line 6');
+    });
+
+    it('embeds a scroll indicator in the lower separator when overflowing', () => {
+        const s = initialState();
+        s.overlay = tall;
+        const frame = buildFrame(s, 0, 60, 22, true, false, '', 0);
+        const sep = frame.find(l => l.includes('scroll'));
+        expect(sep).toBeDefined();
+        expect(sep).toContain(`of ${tall.length}`);
+    });
+
+    it('clamps an out-of-range scroll offset to the last page', () => {
+        const s = initialState();
+        s.overlay = tall;
+        const frame = buildFrame(s, 0, 60, 22, true, false, '', 9999).join('\n');
+        expect(frame).toContain('line 40'); // last line visible, not blank
+    });
+
+    it('advances the cursor column as input grows', () => {
+        expect(inputCursorCol('ab', 60)).toBe(inputCursorCol('', 60) + 2);
     });
 });
