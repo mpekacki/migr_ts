@@ -2,7 +2,7 @@ import { IOEvent } from '../../app';
 import { UI } from '../ui';
 import { getFormatter } from '../event-formatter';
 import { ansi, screen } from './ansi';
-import { bodyHeightFor, buildFrame, inputCursorCol, maxScrollOffset } from './render';
+import { bodyHeightFor, buildFrame, inputCursorCol, maxFeedScrollOffset, maxScrollOffset } from './render';
 import { applyEvent, initialState, MigrationState, pushConsole } from './state';
 
 const SPINNER_MS = 90;
@@ -25,6 +25,8 @@ export class TuiUI implements UI {
     private closed = false;
     private inputBuffer = '';
     private scrollOffset = 0;
+    /** While prompting: show the activity feed instead of the question (Tab toggles). */
+    private feedView = false;
     private readonly savedConsole: Partial<Record<ConsoleMethod, (...a: unknown[]) => void>> = {};
     private readonly onResize = () => {
         this.prev = [];
@@ -57,11 +59,13 @@ export class TuiUI implements UI {
     prompt(question: IOEvent): Promise<string> {
         // Show the full question as a scrollable overlay in the body, then collect
         // a line of input at the pinned input box. Long prompts can be scrolled
-        // with ↑/↓ and PgUp/PgDn while typing the answer.
+        // with ↑/↓ and PgUp/PgDn while typing the answer; Tab flips the body to
+        // the activity feed so earlier output stays reachable.
         this.state.overlay = this.formatter(question).split('\n');
         this.promptActive = true;
         this.inputBuffer = '';
         this.scrollOffset = 0; // start at the top of the summary
+        this.feedView = false;
         this.stopSpinner();
         this.write(screen.showCursor);
         this.redraw();
@@ -86,6 +90,7 @@ export class TuiUI implements UI {
                     this.state.overlay = null;
                     this.inputBuffer = '';
                     this.scrollOffset = 0;
+                    this.feedView = false;
                     if (!this.state.done) this.startSpinner();
                     this.redraw();
                     resolve(answer);
@@ -106,6 +111,12 @@ export class TuiUI implements UI {
             this.inputBuffer = this.inputBuffer.slice(0, -1);
             return false;
         }
+        if (s === '\t') {                                            // Tab: question <-> feed
+            this.feedView = !this.feedView;
+            // Question opens at the top; the feed opens at its latest lines.
+            this.scrollOffset = this.feedView ? this.maxScroll() : 0;
+            return false;
+        }
         if (s.startsWith('\x1b')) {                                  // scroll keys
             const max = this.maxScroll();
             const page = this.pageSize();
@@ -124,6 +135,7 @@ export class TuiUI implements UI {
 
     private maxScroll(): number {
         const { width, height } = this.dims();
+        if (this.feedView) return maxFeedScrollOffset(this.state.feed.length, height);
         return maxScrollOffset(this.state.overlay, width, height);
     }
 
@@ -189,6 +201,7 @@ export class TuiUI implements UI {
         const frame = buildFrame(
             this.state, this.spinnerFrame, width, height,
             this.promptActive, this.awaitingExit, this.inputBuffer, this.scrollOffset,
+            this.feedView,
         );
 
         let out = '';
@@ -235,7 +248,9 @@ export class TuiUI implements UI {
             console[m] = (...args: unknown[]) => {
                 const text = args.map(a => typeof a === 'string' ? a : safeStringify(a)).join(' ');
                 pushConsole(this.state, text);
-                if (!this.promptActive) this.redraw();
+                // Repaint unless a prompt owns the body — except when the user
+                // has toggled the feed into view, where new lines should appear.
+                if (!this.promptActive || this.feedView) this.redraw();
             };
         }
     }

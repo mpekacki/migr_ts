@@ -57,6 +57,11 @@ export function maxScrollOffset(overlay: string[] | null, width: number, height:
     return Math.max(0, total - bodyHeightFor(height));
 }
 
+/** Largest valid scroll offset for the activity feed viewed under a prompt. */
+export function maxFeedScrollOffset(feedLength: number, height: number): number {
+    return Math.max(0, feedLength - bodyHeightFor(height));
+}
+
 export function buildFrame(
     state: MigrationState,
     spinnerFrame: number,
@@ -66,6 +71,7 @@ export function buildFrame(
     awaitingExit = false,
     inputBuffer = '',
     scrollOffset = 0,
+    feedView = false,
 ): string[] {
     const w = Math.max(24, width);
     const h = Math.max(10, height);
@@ -97,7 +103,7 @@ export function buildFrame(
 
     // ── Header: counters ────────────────────────────────────────────────────
     const counters = [
-        `${ansi.gray('Records')} ${ansi.boldOn(String(state.created))}`,
+        `${ansi.gray('Records')} ${ansi.boldOn(String(state.created))}${ansi.gray(`/${state.total}`)}`,
         `${ansi.gray('Errors')} ${state.errors > 0 ? ansi.red(String(state.errors)) : '0'}`,
         `${ansi.gray('Skipped')} ${state.skipped}`,
         `${ansi.gray('Remaining')} ${state.remaining}`,
@@ -114,9 +120,12 @@ export function buildFrame(
     let winStart = 0;
     let total = 0;
     if (state.overlay) {
-        // Overlays (prompts/summaries) are scrolled: show a window into the
-        // wrapped content so nothing is lost off the top.
-        const bodyLines = wrapToWidth(state.overlay, inner);
+        // While prompting, the body is a scrollable window: the question overlay,
+        // or — when toggled with Tab — the activity feed, so earlier output
+        // stays reachable while answering.
+        const bodyLines = feedView
+            ? renderFeed(state.feed, spinnerFrame, state.done, inner)
+            : wrapToWidth(state.overlay, inner);
         total = bodyLines.length;
         overflow = total > bodyHeight;
         const maxOffset = Math.max(0, total - bodyHeight);
@@ -131,11 +140,18 @@ export function buildFrame(
         lines.push(row(visible[i] ?? ''));
     }
 
-    // ── Separator (carries the scroll indicator when the overlay overflows) ──
+    // ── Separator (scroll indicator and, while prompting, the view toggle) ──
+    const hints: string[] = [];
     if (overflow) {
         const first = winStart + 1;
         const last = Math.min(winStart + bodyHeight, total);
-        const indicator = ` ${ansi.gray(`↑↓ scroll · ${first}–${last} of ${total}`)} `;
+        hints.push(`↑↓ scroll · ${first}–${last} of ${total}`);
+    }
+    if (state.overlay) {
+        hints.push(feedView ? 'Tab: question' : 'Tab: activity log');
+    }
+    if (hints.length > 0) {
+        const indicator = ` ${ansi.gray(hints.join(' · '))} `;
         const fill = w - 2 - visibleLength(indicator);
         lines.push(B.lt + indicator + B.h.repeat(Math.max(0, fill)) + B.rt);
     } else {

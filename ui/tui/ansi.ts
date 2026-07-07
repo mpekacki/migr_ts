@@ -35,9 +35,14 @@ export const screen = {
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;?]*[a-zA-Z]/g;
 
+/** Remove ANSI escape sequences, leaving only visible characters. */
+export function stripAnsi(s: string): string {
+    return s.replace(ANSI_RE, '');
+}
+
 /** Length of a string ignoring ANSI escape sequences. */
 export function visibleLength(s: string): number {
-    return s.replace(ANSI_RE, '').length;
+    return stripAnsi(s).length;
 }
 
 /** Truncate to `max` visible columns, preserving escape codes, adding an ellipsis. */

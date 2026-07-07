@@ -94,6 +94,7 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             break;
         case 'records_so_far':
             state.phase = 'Fetching';
+            state.total = d.count ?? state.total;
             break;
         case 'fetching_record': {
             state.phase = 'Fetching';

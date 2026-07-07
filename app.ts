@@ -346,6 +346,7 @@ class MigrationRunner {
                 }
                 record.attributes = recordFields.attributes;
                 this.recordsByIds[recordId] = record;
+                this.io.recordsSoFar(Object.keys(this.recordsByIds).length);
                 const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
                 if (lookupFields.length > 0) {
                     this.lookupFieldsBySObjectType[sObjectName] = lookupFields;

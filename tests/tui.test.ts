@@ -1,7 +1,7 @@
 import IOEvent, { IOEventType } from '../ioevent';
 import { applyEvent, initialState, MigrationState } from '../ui/tui/state';
-import { buildFrame, maxScrollOffset, bodyHeightFor, inputCursorCol } from '../ui/tui/render';
-import { padTo, truncate, visibleLength, ansi } from '../ui/tui/ansi';
+import { buildFrame, maxScrollOffset, maxFeedScrollOffset, bodyHeightFor, inputCursorCol } from '../ui/tui/render';
+import { padTo, stripAnsi, truncate, visibleLength, ansi } from '../ui/tui/ansi';
 
 function feed(state: MigrationState, type: IOEventType, data?: unknown) {
     applyEvent(state, new IOEvent('output', type, data));
@@ -57,6 +57,15 @@ describe('migration state reducer', () => {
         expect(s.skipped).toBe(2);
     });
 
+    it('updates the running total from records_so_far while fetching', () => {
+        const s = initialState();
+        feed(s, 'records_so_far', { count: 7 });
+        expect(s.phase).toBe('Fetching');
+        expect(s.total).toBe(7);
+        feed(s, 'records_so_far', { count: 42 });
+        expect(s.total).toBe(42);
+    });
+
     it('marks done on finished and aborted', () => {
         const done = initialState();
         feed(done, 'finished', {});
@@ -101,6 +110,13 @@ describe('frame renderer', () => {
         for (const line of frame) {
             expect(visibleLength(line)).toBe(width);
         }
+    });
+
+    it('shows the growing record total in the header during fetching', () => {
+        const s = initialState();
+        feed(s, 'records_so_far', { count: 17 });
+        const frame = stripAnsi(build(s).join('\n'));
+        expect(frame).toContain('Records 0/17');
     });
 
     it('renders the overlay text in the body when prompting', () => {
@@ -180,5 +196,52 @@ describe('scrollable overlay', () => {
 
     it('advances the cursor column as input grows', () => {
         expect(inputCursorCol('ab', 60)).toBe(inputCursorCol('', 60) + 2);
+    });
+});
+
+describe('feed view during a prompt', () => {
+    function promptedState(): MigrationState {
+        const s = initialState();
+        feed(s, 'fetched_records', { count: 3 });
+        s.overlay = ['Do you want to continue? (y/n)'];
+        return s;
+    }
+
+    it('shows the question by default and the activity feed when toggled', () => {
+        const s = promptedState();
+        const question = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0).join('\n'));
+        expect(question).toContain('Do you want to continue?');
+        expect(question).not.toContain('Fetched 3 records');
+
+        const feedView = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0, true).join('\n'));
+        expect(feedView).toContain('Fetched 3 records');
+        expect(feedView).not.toContain('Do you want to continue?');
+    });
+
+    it('advertises the Tab toggle in the separator while prompting', () => {
+        const s = promptedState();
+        const question = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0).join('\n'));
+        expect(question).toContain('Tab: activity log');
+
+        const feedView = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0, true).join('\n'));
+        expect(feedView).toContain('Tab: question');
+    });
+
+    it('scrolls the feed view with the scroll offset', () => {
+        const s = initialState();
+        for (let i = 1; i <= 40; i++) {
+            feed(s, 'fetching_record', { sObjectName: 'Account', recordId: `id${i}` });
+        }
+        s.overlay = ['Continue?'];
+        const max = maxFeedScrollOffset(s.feed.length, 22);
+        expect(max).toBe(40 - bodyHeightFor(22));
+
+        const bottom = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', max, true).join('\n'));
+        expect(bottom).toContain('id40');
+        expect(bottom).not.toContain('id1 '); // earliest line scrolled off
+
+        const top = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0, true).join('\n'));
+        expect(top).toContain('id1 ');
+        expect(top).not.toContain('id40');
     });
 });
