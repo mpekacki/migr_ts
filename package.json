@@ -1,11 +1,12 @@
 {
   "name": "migr_ts",
-  "version": "1.16.0",
+  "version": "1.16.1",
   "bin": "main.js",
   "main": "main.js",
   "scripts": {
     "build": "npx esbuild main.ts --bundle --outfile=bundle.js --platform=node --packages=external && npx javascript-obfuscator bundle.js --output bundle.js",
     "release": "npx esbuild main.ts --bundle --outfile=build/bundle.js --platform=node --packages=external --minify && npx javascript-obfuscator build/bundle.js --output build/bundle.js && node -e \"const fs=require('fs');const p=require('./package.json');const d='build/v'+p.version;fs.mkdirSync(d,{recursive:true});fs.copyFileSync('build/bundle.js',d+'/bundle.js')\"",
+    "lint": "eslint .",
     "test": "jest",
     "test:ci": "jest --config=jest.config.ci.js --no-coverage --passWithNoTests",
     "test:parallel": "jest --maxWorkers=3 --verbose",
@@ -14,10 +15,20 @@
     "start": "node build/bundle.js",
     "start:test": "node bundle.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "salesforce",
+    "data-migration",
+    "sfdx",
+    "jsforce",
+    "cli"
+  ],
+  "author": "Marcel Pekacki",
   "license": "ISC",
-  "description": "",
+  "description": "CLI tool for migrating Salesforce records between orgs, with automatic relationship resolution, circular dependency handling, and configurable error solvers",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mpekacki/migr_ts.git"
+  },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
     "@types/jest": "^29.5.13",

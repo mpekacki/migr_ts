@@ -173,12 +173,6 @@ async function createContract(conn: any, accountId: string, status: string = 'Dr
     return contract;
 }
 
-async function createCustomObject(conn: any, objectType: string, fields: any = {}) {
-    const obj = await conn.sobject(objectType).create(fields);
-    expect(obj.id).toBeDefined();
-    return obj;
-}
-
 function createBasicConfig(recordIds: string[], additionalOptions: any = {}) {
     return {
         sourceOrg: sourceOrgAlias,
@@ -241,7 +235,7 @@ test('migrate record - single', async () => {
     const { conn1 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await createAccount(conn1, 'Ebola Cola');
+    const account = await createAccount(conn1, 'Cloud Kicks');
     console.log(account);
 
     const config = createBasicConfig([account.id!]);
@@ -256,7 +250,7 @@ test('url and token auth', async () => {
     const { conn1, conn2 } = await setupTestConnections();
     
     console.log('creating records');
-    const account = await createAccount(conn1, 'Ebola Cola');
+    const account = await createAccount(conn1, 'Cloud Kicks');
     console.log(account);
 
     const config = createTokenAuthConfig(conn1, conn2, [account.id!]);
@@ -268,10 +262,10 @@ test('url and token auth', async () => {
 test('source auth token, target auth alias', async () => {
     console.log('starting test: source auth token, target auth alias');
 
-    const { conn1, conn2 } = await setupTestConnections();
+    const { conn1 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await createAccount(conn1, 'Ebola Cola');
+    const account = await createAccount(conn1, 'Cloud Kicks');
     console.log(account);
     
     const config = {
@@ -293,7 +287,7 @@ test('source auth alias, target auth token', async () => {
     const { conn1, conn2 } = await setupTestConnections();
     
     console.log('creating records');
-    const account = await createAccount(conn1, 'Ebola Cola');
+    const account = await createAccount(conn1, 'Cloud Kicks');
     console.log(account);
 
     const config = {
@@ -315,7 +309,7 @@ test('migrate record - complex', async () => {
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await createAccount(conn1, 'Ebola Cola');
+    const account = await createAccount(conn1, 'Cloud Kicks');
     console.log(account);
 
     const contact = await createContact(conn1, 'Spider', 'Jerusalem', account.id!);
@@ -419,7 +413,7 @@ test('migrate record - complex', async () => {
     // should be able to query the new account record
     const newAccount: any = await conn2.sobject('Account').retrieve(newAccountId);
     expect(newAccount).toBeDefined();
-    expect(newAccount.Name).toEqual('Ebola Cola');
+    expect(newAccount.Name).toEqual('Cloud Kicks');
 
     // should be able to query the new contact record
     const newContact: any = await conn2.sobject('Contact').retrieve(newContactId);
@@ -568,7 +562,7 @@ test('migrate record with error - fixed automatically', async () => {
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await createAccount(conn1, 'Ebola Cola');
+    const account = await createAccount(conn1, 'Cloud Kicks');
     console.log(account);
 
     const contract = await createContract(conn1, account.id!);
@@ -622,7 +616,7 @@ test('hide error from output if solver says so', async () => {
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
     console.log(account);
     expect(account.id).toBeDefined();
 
@@ -678,7 +672,7 @@ test('migrate record with error - fixed automatically, solver does not work', as
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
     console.log(account);
     expect(account.id).toBeDefined();
 
@@ -744,7 +738,7 @@ test('migrate record with error - fixed manually', async () => {
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
     console.log(account);
     expect(account.id).toBeDefined();
 
@@ -793,7 +787,7 @@ test('migrate record with error - fixed manually, invalid response to solution c
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
     console.log(account);
     expect(account.id).toBeDefined();
 
@@ -815,7 +809,7 @@ test('migrate record with error - fixed manually, invalid response to solution c
         matchers: defaultMatchers
     };
 
-    const { parsedOutput } = await runMigration(config, ['y', 'dupa', 'f', '{"Status": "Draft"}']);
+    const { parsedOutput } = await runMigration(config, ['y', 'blocked', 'f', '{"Status": "Draft"}']);
 
     // Check if contract was migrated
     const newContractId = assertRecordMigrated(parsedOutput, contract.id!);
@@ -842,7 +836,7 @@ test('migrate record with error - fixed manually, invalid JSON', async () => {
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
     console.log(account);
     expect(account.id).toBeDefined();
 
@@ -893,7 +887,7 @@ test('migrate record with error - fixed automatically, remove field if new value
     console.log('creating records');
     const name = `ext-${Math.random()}`;
     const custObj = await conn1.sobject('Custom_Object_D__c').create({ Name: name });
-    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj.id!, Fussy_Field_1__c: 'dupa' });
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj.id!, Fussy_Field_1__c: 'blocked' });
     console.log(custObj);
     expect(custObj.id).toBeDefined();
 
@@ -934,7 +928,7 @@ test('migrate record with error - fixed manually, remove field if new value is n
     console.log('creating records');
     const name = `ext-${Math.random()}`;
     const custObj = await conn1.sobject('Custom_Object_D__c').create({ Name: name });
-    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj.id!, Fussy_Field_1__c: 'dupa' });
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj.id!, Fussy_Field_1__c: 'blocked' });
     console.log(custObj);
     expect(custObj.id).toBeDefined();
 
@@ -965,7 +959,7 @@ test('migrate record with error - automatically extract column name to update', 
     console.log('creating records');
     const name = `ext-${Math.random()}`;
     const custObj = await conn1.sobject('Custom_Object_D__c').create({ Name: name });
-    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj.id!, Fussy_Field_1__c: 'dupa' });
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj.id!, Fussy_Field_1__c: 'blocked' });
     console.log(custObj);
     expect(custObj.id).toBeDefined();
 
@@ -1006,7 +1000,7 @@ test('skip solver only if messages were the same', async () => {
     console.log(custObj);
     expect(custObj.id).toBeDefined();
 
-    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj.id!, Fussy_Field_1__c: 'dupa', Fussy_Field_2__c: 'dupa' });
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj.id!, Fussy_Field_1__c: 'blocked', Fussy_Field_2__c: 'blocked' });
 
     const config = {
         sourceOrg: sourceOrgAlias,
@@ -1045,13 +1039,13 @@ test('migrate record with error - manually add new solver', async () => {
     const custObj1 = await conn1.sobject('Custom_Object_D__c').create({ Name: name1 });
     console.log(custObj1);
     expect(custObj1.id).toBeDefined();
-    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj1.id!, Fussy_Field_1__c: 'dupa', Fussy_Field_2__c: 'dupa' });
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj1.id!, Fussy_Field_1__c: 'blocked', Fussy_Field_2__c: 'blocked' });
 
     const name2 = `ext-${Math.random()}`;
     const custObj2 = await conn1.sobject('Custom_Object_D__c').create({ Name: name2 });
     console.log(custObj2);
     expect(custObj2.id).toBeDefined();
-    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj2.id!, Fussy_Field_1__c: 'dupa', Fussy_Field_2__c: 'dupa' });
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj2.id!, Fussy_Field_1__c: 'blocked', Fussy_Field_2__c: 'blocked' });
 
     const config = {
         sourceOrg: sourceOrgAlias,
@@ -1077,14 +1071,14 @@ test('migrate record with error - manually add new solver', async () => {
     const newCustObj1: any = await conn2.sobject('Custom_Object_D__c').retrieve(newCustObjId1);
     expect(newCustObj1).toBeDefined();
     expect(newCustObj1.Name).toEqual(name1);
-    expect(newCustObj1.Fussy_Field_1__c).toEqual('dupa');
-    expect(newCustObj1.Fussy_Field_2__c).toEqual('dupa');
+    expect(newCustObj1.Fussy_Field_1__c).toEqual('blocked');
+    expect(newCustObj1.Fussy_Field_2__c).toEqual('blocked');
 
     const newCustObj2: any = await conn2.sobject('Custom_Object_D__c').retrieve(newCustObjId2);
     expect(newCustObj2).toBeDefined();
     expect(newCustObj2.Name).toEqual(name2);
-    expect(newCustObj2.Fussy_Field_1__c).toEqual('dupa');
-    expect(newCustObj2.Fussy_Field_2__c).toEqual('dupa');
+    expect(newCustObj2.Fussy_Field_1__c).toEqual('blocked');
+    expect(newCustObj2.Fussy_Field_2__c).toEqual('blocked');
 
 
     expect(capturedOutput.find(e => e.type === 'using_solver' && e.data?.solverAction === 'extract_column' && e.data?.error?.includes('Field \'Fussy_Field_1__c\'  can\'t be'))).toBeDefined();
@@ -1098,13 +1092,13 @@ test('migrate record with error - manually add new solver, invalid solver', asyn
     console.log('creating records');
     const name1 = `ext-${Math.random()}`;
     const custObj1 = await conn1.sobject('Custom_Object_D__c').create({ Name: name1 });
-    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj1.id!, Fussy_Field_1__c: 'dupa' });
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj1.id!, Fussy_Field_1__c: 'blocked' });
     console.log(custObj1);
     expect(custObj1.id).toBeDefined();
 
     const name2 = `ext-${Math.random()}`;
     const custObj2 = await conn1.sobject('Custom_Object_D__c').create({ Name: name2 });
-    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj2.id!, Fussy_Field_1__c: 'dupa' });
+    await conn1.sobject('Custom_Object_D__c').update({ Id: custObj2.id!, Fussy_Field_1__c: 'blocked' });
     console.log(custObj2);
     expect(custObj2.id).toBeDefined();
 
@@ -1140,7 +1134,7 @@ test('migrate record with error - automatically skip record', async () => {
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await createAccount(conn1, 'Ebola Cola');
+    const account = await createAccount(conn1, 'Cloud Kicks');
     console.log(account);
 
     const contract = await createContract(conn1, account.id!);
@@ -1171,7 +1165,7 @@ test('migrate record with error - automatically skip record', async () => {
     // should be able to query the new account record
     const newAccount: any = await conn2.sobject('Account').retrieve(newAccountId);
     expect(newAccount).toBeDefined();
-    expect(newAccount.Name).toEqual('Ebola Cola');
+    expect(newAccount.Name).toEqual('Cloud Kicks');
 });
 
 test('migrate record with error - manually skip record', async () => {
@@ -1180,7 +1174,7 @@ test('migrate record with error - manually skip record', async () => {
     const { conn1, conn2 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
     console.log(account);
     expect(account.id).toBeDefined();
 
@@ -1216,7 +1210,7 @@ test('migrate record with error - manually skip record', async () => {
     // should be able to query the new account record
     const newAccount: any = await conn2.sobject('Account').retrieve(newAccountId);
     expect(newAccount).toBeDefined();
-    expect(newAccount.Name).toEqual('Ebola Cola');
+    expect(newAccount.Name).toEqual('Cloud Kicks');
 });
 
 test('migrate record with error - automatically match duplicate record', async () => {
@@ -1407,10 +1401,10 @@ test('manually retry all records', async () => {
 test('migrate record with error - quit and save results so far', async () => {
     console.log('starting test: migrate record with error - quit and save results so far');
 
-    const { conn1, conn2 } = await setupTestConnections();
+    const { conn1 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
     console.log(account);
     expect(account.id).toBeDefined();
 
@@ -1454,7 +1448,7 @@ test('match not found, create new record', async () => {
 
     const { conn1, conn2 } = await setupTestConnections();
 
-    const account1Name = `Ebola Cola ${Math.random()}`;
+    const account1Name = `Cloud Kicks ${Math.random()}`;
     const account2Name = `ACME ${Math.random()}`;
 
     console.log('creating records');
@@ -1513,7 +1507,7 @@ test('match not found, skip record', async () => {
 
     const { conn1, conn2 } = await setupTestConnections();
 
-    const account1Name = `Ebola Cola ${Math.random()}`;
+    const account1Name = `Cloud Kicks ${Math.random()}`;
     const account2Name = `ACME ${Math.random()}`;
 
     console.log('creating records');
@@ -1574,7 +1568,7 @@ test('use history for both primary and secondary records', async () => {
 
     const { conn1, conn2 } = await setupTestConnections();
     
-    const account1Name = `Ebola Cola ${Math.random()}`;
+    const account1Name = `Cloud Kicks ${Math.random()}`;
     const contactName = `John Doe ${Math.random()}`;
 
     console.log('creating records');
@@ -1618,7 +1612,7 @@ test('use history for both primary and secondary records', async () => {
 
     const { parsedOutput: parsedOutput2 } = await runMigration(config);
 
-    const newContactId2 = assertRecordMigrated(parsedOutput2, contact2.id!);
+    assertRecordMigrated(parsedOutput2, contact2.id!);
 
     const newAccountId2 = assertRecordMigrated(parsedOutput2, account.id!);
     expect(newAccountId2).toEqual(newAccountId);
@@ -1678,36 +1672,36 @@ test('fix column automatically with modifying current value', async () => {
 test('more than 10 chunks', async () => {
     console.log('starting test: more than 10 chunks');
 
-    const { conn1, conn2 } = await setupTestConnections();
+    const { conn1 } = await setupTestConnections();
     
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
     expect(account.id).toBeDefined();
 
     const contact = await conn1.sobject('Contact').create({ FirstName: 'Spider', LastName: 'Jerusalem' });
     expect(contact.id).toBeDefined();
 
-    const campaign = await conn1.sobject('Campaign').create({ Name: 'Ebola Cola Campaign' });   
+    const campaign = await conn1.sobject('Campaign').create({ Name: 'Cloud Kicks Campaign' });   
     expect(campaign.id).toBeDefined();
 
-    const case1 = await conn1.sobject('Case').create({ Subject: 'Ebola Cola Case 1' });
+    const case1 = await conn1.sobject('Case').create({ Subject: 'Cloud Kicks Case 1' });
     expect(case1.id).toBeDefined();
 
-    const lead = await conn1.sobject('Lead').create({ FirstName: 'Spider', LastName: 'Jerusalem', Company: 'Ebola Cola' });
+    const lead = await conn1.sobject('Lead').create({ FirstName: 'Spider', LastName: 'Jerusalem', Company: 'Cloud Kicks' });
     expect(lead.id).toBeDefined();
 
-    const opportunity = await conn1.sobject('Opportunity').create({ Name: 'Ebola Cola Opportunity', StageName: 'Prospecting', CloseDate: new Date() });
+    const opportunity = await conn1.sobject('Opportunity').create({ Name: 'Cloud Kicks Opportunity', StageName: 'Prospecting', CloseDate: new Date() });
     expect(opportunity.id).toBeDefined();
 
-    const task = await conn1.sobject('Task').create({ Subject: 'Ebola Cola Task' });
+    const task = await conn1.sobject('Task').create({ Subject: 'Cloud Kicks Task' });
     expect(task.id).toBeDefined();
 
-    const event = await conn1.sobject('Event').create({ Subject: 'Ebola Cola Event', StartDateTime: new Date(), EndDateTime: new Date() });
+    const event = await conn1.sobject('Event').create({ Subject: 'Cloud Kicks Event', StartDateTime: new Date(), EndDateTime: new Date() });
     expect(event.id).toBeDefined();
 
-    const customObjC = await conn1.sobject('Custom_Object_C__c').create({ Name: 'Ebola Cola Custom Object C' });
+    const customObjC = await conn1.sobject('Custom_Object_C__c').create({ Name: 'Cloud Kicks Custom Object C' });
     expect(customObjC.id).toBeDefined();
 
-    const customObjD = await conn1.sobject('Custom_Object_D__c').create({ Name: 'Ebola Cola Custom Object D' });
+    const customObjD = await conn1.sobject('Custom_Object_D__c').create({ Name: 'Cloud Kicks Custom Object D' });
     expect(customObjD.id).toBeDefined();
 
     const workOrder = await conn1.sobject('WorkOrder').create({ });
@@ -1722,27 +1716,27 @@ test('more than 10 chunks', async () => {
 
     const { parsedOutput } = await runMigration(config);
     
-    const newAccountId = assertRecordMigrated(parsedOutput, account.id!);
+    assertRecordMigrated(parsedOutput, account.id!);
     
-    const newContactId = assertRecordMigrated(parsedOutput, contact.id!);
+    assertRecordMigrated(parsedOutput, contact.id!);
     
-    const newCampaignId = assertRecordMigrated(parsedOutput, campaign.id!);
+    assertRecordMigrated(parsedOutput, campaign.id!);
     
-    const newCase1Id = assertRecordMigrated(parsedOutput, case1.id!);
+    assertRecordMigrated(parsedOutput, case1.id!);
     
-    const newLeadId = assertRecordMigrated(parsedOutput, lead.id!);
+    assertRecordMigrated(parsedOutput, lead.id!);
     
-    const newOpportunityId = assertRecordMigrated(parsedOutput, opportunity.id!);
+    assertRecordMigrated(parsedOutput, opportunity.id!);
     
-    const newTaskId = assertRecordMigrated(parsedOutput, task.id!);
+    assertRecordMigrated(parsedOutput, task.id!);
     
-    const newEventId = assertRecordMigrated(parsedOutput, event.id!);
+    assertRecordMigrated(parsedOutput, event.id!);
     
-    const newCustomObjCId = assertRecordMigrated(parsedOutput, customObjC.id!);
+    assertRecordMigrated(parsedOutput, customObjC.id!);
 
-    const newCustomObjDId = assertRecordMigrated(parsedOutput, customObjD.id!);
+    assertRecordMigrated(parsedOutput, customObjD.id!);
 
-    const newWorkOrderId = assertRecordMigrated(parsedOutput, workOrder.id!);
+    assertRecordMigrated(parsedOutput, workOrder.id!);
 });
 
 test('failed later update', async () => {
@@ -1787,7 +1781,7 @@ test('match by wrong field', async () => {
 
     const { conn1, conn2 } = await setupTestConnections();
     
-    const accountName = `Ebola Cola ${Math.random()}`;
+    const accountName = `Cloud Kicks ${Math.random()}`;
     const account1 = await conn1.sobject('Account').create({ Name: accountName });
     expect(account1.id).toBeDefined();
 
@@ -1819,7 +1813,7 @@ test('find ids inside text', async () => {
 
     const { conn1, conn2 } = await setupTestConnections();
     
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
     expect(account.id).toBeDefined();
 
     const custObjD = await conn1.sobject('Custom_Object_D__c').create({ });
@@ -1879,7 +1873,7 @@ test('invalid record id in field', async () => {
 test('record references self', async () => {
     console.log('starting test: record references self');
 
-    const { conn1, conn2 } = await setupTestConnections();
+    const { conn1 } = await setupTestConnections();
     
     const case1 = await conn1.sobject('Case').create({});
     expect(case1.id).toBeDefined();
@@ -1898,7 +1892,7 @@ test('record references self', async () => {
 
     const { parsedOutput } = await runMigration(config);
     
-    const newCase1Id = assertRecordMigrated(parsedOutput, case1.id!);
+    assertRecordMigrated(parsedOutput, case1.id!);
 
     // const newCase1: any = await conn2.sobject('Case').retrieve(newCase1Id);
     // expect(newCase1).toBeDefined();
@@ -1959,7 +1953,7 @@ test('circular relationship in text fields', async () => {
 test('non-queryable and non-creatable object', async () => {
     console.log('starting test: non-queryable and non-creatable object');
 
-    const { conn1, conn2 } = await setupTestConnections();
+    const { conn1 } = await setupTestConnections();
 
     expect(true).toBe(true);
     
@@ -1979,7 +1973,7 @@ test('non-queryable and non-creatable object', async () => {
 
     const { parsedOutput } = await runMigration(config);
     
-    const newContentVersionId = assertRecordMigrated(parsedOutput, contentVersion.id!);
+    assertRecordMigrated(parsedOutput, contentVersion.id!);
 });
 
 test('write output to log file', async () => {
@@ -1988,7 +1982,7 @@ test('write output to log file', async () => {
     const { conn1 } = await setupTestConnections();
 
     console.log('creating records');
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
     console.log(account);
     expect(account.id).toBeDefined();
 
@@ -2006,13 +2000,13 @@ test('write output to log file', async () => {
     const linesParsed = fs.readFileSync('test-output.log', 'utf8').split('\n').map(line => {
         try {
             return JSON.parse(line);
-        } catch (error) {
+        } catch {
             return null;
         }
     }).filter(line => line !== null);
     expect(linesParsed.some(line => line.type === 'saved_records' && line.data.some((record: any) => record.id === newAccountId && record.success))).toBe(true);
     // run another migration to check that the log file is overwritten
-    const account2 = await conn1.sobject('Account').create({ Name: 'Ebola Cola 2' });
+    const account2 = await conn1.sobject('Account').create({ Name: 'Cloud Kicks 2' });
     expect(account2.id).toBeDefined();
 
     const config2 = {
@@ -2028,7 +2022,7 @@ test('write output to log file', async () => {
     const linesParsed2 = fs.readFileSync('test-output.log', 'utf8').split('\n').map(line => {
         try {
             return JSON.parse(line);
-        } catch (error) {
+        } catch {
             return null;
         }
     }).filter(line => line !== null);
@@ -2064,7 +2058,7 @@ test('malformed id', async () => {
 test('limit level of depth for querying related records', async () => {
     console.log('starting test: limit level of depth for querying related records');
 
-    const { conn1, conn2 } = await setupTestConnections();
+    const { conn1 } = await setupTestConnections();
 
     const HIERARCHY_LEVEL = 4;
 
@@ -2106,20 +2100,20 @@ test('limit level of depth for querying related records', async () => {
     const { parsedOutput } = await runMigration(config);
 
     for (let i = 0; i < HIERARCHY_LEVEL; i++) {
-        const newAccountId = assertRecordMigrated(parsedOutput, accounts[i].id!);
+        assertRecordMigrated(parsedOutput, accounts[i].id!);
     }
 
     expect(parsedOutput).not.toHaveProperty(contact.id!);
 
-    const newContact2Id = assertRecordMigrated(parsedOutput, contact2.id!);
+    assertRecordMigrated(parsedOutput, contact2.id!);
 });
 
 test('fetch related record for a record that is in history', async () => {
     console.log('starting test: fetch related record for a record that is in history');
 
-    const { conn1, conn2 } = await setupTestConnections();
+    const { conn1 } = await setupTestConnections();
 
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
     expect(account.id).toBeDefined();
     
     const config = {
@@ -2131,7 +2125,7 @@ test('fetch related record for a record that is in history', async () => {
 
     const { parsedOutput } = await runMigration(config);
 
-    const newAccountId = assertRecordMigrated(parsedOutput, account.id!);
+    assertRecordMigrated(parsedOutput, account.id!);
 
     // create contact
     const contact = await conn1.sobject('Contact').create({
@@ -2158,9 +2152,9 @@ test('fetch related record for a record that is in history', async () => {
     
     const { parsedOutput: parsedOutput2 } = await runMigration(config2);
 
-    const newAccountId2 = assertRecordMigrated(parsedOutput2, account.id!);
+    assertRecordMigrated(parsedOutput2, account.id!);
 
-    const newContactId2 = assertRecordMigrated(parsedOutput2, contact.id!);
+    assertRecordMigrated(parsedOutput2, contact.id!);
 });
 
 test('save history file even if app is closed unexpectedly', async () => {
@@ -2269,9 +2263,9 @@ test('migrate to file and from file', async () => {
 test('full auto mode - save and exit', async () => {
     console.log('starting test: full auto mode');
 
-    const { conn1, conn2 } = await setupTestConnections();
+    const { conn1 } = await setupTestConnections();
 
-    const account = await createAccount(conn1, 'Ebola Cola');
+    const account = await createAccount(conn1, 'Cloud Kicks');
     expect(account.id).toBeDefined();
 
     const childAccount = await conn1.sobject('Account').create({ 
@@ -2316,9 +2310,9 @@ test('full auto mode - save and exit', async () => {
 test('full auto mode - skip', async () => {
     console.log('starting test: full auto mode - skip');
 
-    const { conn1, conn2 } = await setupTestConnections();
+    const { conn1 } = await setupTestConnections();
 
-    const account = await createAccount(conn1, 'Ebola Cola');
+    const account = await createAccount(conn1, 'Cloud Kicks');
     expect(account.id).toBeDefined();
 
     const childAccount = await conn1.sobject('Account').create({ 
@@ -2390,9 +2384,9 @@ test('anonymize email fields', async () => {
 test('report record reason counts', async () => {
     console.log('starting test: report record reason counts');
 
-    const { conn1, conn2 } = await setupTestConnections();
+    const { conn1 } = await setupTestConnections();
 
-    const account = await conn1.sobject('Account').create({ Name: 'Ebola Cola' });
+    const account = await conn1.sobject('Account').create({ Name: 'Cloud Kicks' });
 
     const contact = await conn1.sobject('Contact').create({ 
         FirstName: 'John',
@@ -2587,8 +2581,8 @@ test('bulk update records', async () => {
         recordIds.push(result.id!);
         recordsToUpdate.push({
             Id: result.id!,
-            Fussy_Field_1__c: 'dupa',
-            Fussy_Field_2__c: 'dupa'
+            Fussy_Field_1__c: 'blocked',
+            Fussy_Field_2__c: 'blocked'
         });
     }
 
@@ -2627,50 +2621,8 @@ test('bulk update records', async () => {
         // check if the record was updated
         const record = await conn2.sobject('Custom_Object_D__c').retrieve(newRecordId);
         expect(record).toBeDefined();
-        expect(record.Fussy_Field_1__c).toBe('dupa');
-        expect(record.Fussy_Field_2__c).toBe('dupa');
+        expect(record.Fussy_Field_1__c).toBe('blocked');
+        expect(record.Fussy_Field_2__c).toBe('blocked');
     }
     expect(capturedOutput.filter(e => e.type === 'updating_record')).toHaveLength(2);
 });
-
-// test('more than 1 record matches', async () => {
-//     console.log('starting test: more than 1 record matches')
-//     const { conn1, conn2 } = await setupTestConnections();
-
-//     console.log('creating records');
-//     const campaignA = await conn1.sobject('Campaign').create({ Name: 'Ebola Cola Campaign' });
-//     expect(campaignA.id).toBeDefined();
-
-//     const campaignB1 = await conn2.sobject('Campaign').create({ Name: 'Ebola Cola Campaign' });
-//     expect(campaignB1.id).toBeDefined();
-
-//     const campaignB2 = await conn2.sobject('Campaign').create({ Name: 'Ebola Cola Campaign' });
-//     expect(campaignB2.id).toBeDefined();
-
-//     const config = createBasicConfig([campaignA.id!], {
-//         matchers: [
-//             ...defaultMatchers,
-//             {
-//                 sObjectType: 'Campaign',
-//                 fieldMappings: [
-//                     { 
-//                         sourceField: 'Name', 
-//                         targetField: 'Name',
-//                         enforceUnique: true
-//                     }
-//                 ]
-//             }
-//         ]
-//     });
-
-//     let errorCount = 0;
-//     const { parsedOutput } = await runMigration(config, async (ioEvent, sendInput) => {
-//         if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
-//             sendInput('y');
-//         } else if (ioEvent.category === 'input' && ioEvent.type === 'not_unique_match') {
-//             errorCount++;
-//             expect(errorCount).toBe(1);
-//         }
-//     });
-//     assertRecordMigrated(parsedOutput, campaignA.id!);
-// });

@@ -1,9 +1,14 @@
 #!/bin/bash
+# Creates the two scratch orgs used by the e2e tests.
+# Usage: ./create_scratch.sh [dev-hub-alias]
+set -e
 
-sf org create scratch --definition-file config/project-scratch-def.json --alias testMigrationOrgA --target-dev-hub pk_dev --duration-days 30
+DEV_HUB="${1:-devhub}"
+
+sf org create scratch --definition-file config/project-scratch-def.json --alias testMigrationOrgA --target-dev-hub "$DEV_HUB" --duration-days 30
 sf project deploy start --target-org testMigrationOrgA
 
-sf org create scratch --definition-file config/project-scratch-def.json --alias testMigrationOrgB --target-dev-hub pk_dev --duration-days 30
+sf org create scratch --definition-file config/project-scratch-def.json --alias testMigrationOrgB --target-dev-hub "$DEV_HUB" --duration-days 30
 sf project deploy start --target-org testMigrationOrgB
 
 # create org-default Custom_Setting_1__c in Org A

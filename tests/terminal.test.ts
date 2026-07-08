@@ -18,7 +18,7 @@ jest.mock('readline', () => ({
 
 // Mock event formatter
 const MESSAGE = 'test message';
-const getFormatter = jest.fn().mockReturnValue((event: IOEvent) => MESSAGE);
+const getFormatter = jest.fn().mockReturnValue((_event: IOEvent) => MESSAGE);
 jest.mock('../ui/event-formatter', () => ({
     getFormatter
 }));
@@ -28,7 +28,7 @@ import { TerminalKitUI } from '../ui/terminal-kit/terminal';
 describe('TerminalKitUI', () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        getFormatter.mockReturnValue((event: IOEvent) => MESSAGE);
+        getFormatter.mockReturnValue((_event: IOEvent) => MESSAGE);
     });
 
     describe('display', () => {

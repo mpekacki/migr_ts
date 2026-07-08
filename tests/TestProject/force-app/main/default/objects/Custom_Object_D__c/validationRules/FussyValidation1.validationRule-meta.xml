@@ -2,7 +2,7 @@
 <ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
     <fullName>FussyValidation1</fullName>
     <active>true</active>
-    <errorConditionFormula>ISNEW() &amp;&amp; Fussy_Field_1__c == &quot;dupa&quot;</errorConditionFormula>
+    <errorConditionFormula>ISNEW() &amp;&amp; Fussy_Field_1__c == &quot;blocked&quot;</errorConditionFormula>
     <errorDisplayField>Fussy_Field_1__c</errorDisplayField>
-    <errorMessage>Field &apos;Fussy_Field_1__c&apos;  can&apos;t be &quot;dupa&quot; on create, only on update.</errorMessage>
+    <errorMessage>Field &apos;Fussy_Field_1__c&apos;  can&apos;t be &quot;blocked&quot; on create, only on update.</errorMessage>
 </ValidationRule>

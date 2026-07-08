@@ -53,7 +53,7 @@ export const preprocessData = (recordsByIds: Record<string, SObjectRecord<Schema
             return; // Unknown mode, do nothing
         }
 
-        const emailRegex = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+        const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
         for (const recordId in recordsByIds) {
             const record = recordsByIds[recordId];

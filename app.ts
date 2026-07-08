@@ -1,4 +1,3 @@
-console.log('importing dependencies');
 import { DescribeSObjectResult, Field, Schema, SObjectRecord } from 'jsforce';
 import { SalesforceClient, DefaultSalesforceClient, AuthConfig } from './salesforce-client';
 import * as fs from 'fs';
@@ -9,7 +8,6 @@ import IOEvent from './ioevent';
 import IO from './io';
 import { preprocessData } from './preprocess-data';
 import { DescribeGlobalResult } from 'jsforce/lib/api/soap/schema';
-console.log('importing dependencies done');
 
 interface Options {
     sourceOrg?: string;
@@ -310,7 +308,6 @@ class MigrationRunner {
     private async fetchRecords(recordIdsToFetch: string[]): Promise<void> {
         let depth = 0;
         while (recordIdsToFetch.length > 0) {
-            console.log('depth', depth);
             depth++;
             this.io.recordsSoFar(Object.keys(this.recordsByIds).length);
 

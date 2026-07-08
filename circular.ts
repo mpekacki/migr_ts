@@ -123,7 +123,6 @@ export const scanForCircularDependency = (records: SfRecord[], requiredLookupsBy
 
         if (cycleInfo) {
             toClear.push(cycleInfo);
-            console.log('clearing', cycleInfo.recordId, cycleInfo.field);
             recordsById.get(cycleInfo.recordId)![cycleInfo.field] = null;
             foundCycle = true;
         }
