@@ -1,6 +1,28 @@
+# Dependencies
 node_modules/
-config/
-history/
+
+# Build outputs
 build/
 bundle.js
+
+# Local configs and run artifacts
+config/
+history/
+logs/
+*__history.json
+test-output.*
+*.log
+output.log
+coverage/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local notes
 CLAUDE.md

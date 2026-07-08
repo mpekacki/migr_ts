@@ -104,7 +104,7 @@ jobs:
         echo "Scratch orgs created successfully"
 
     - name: Run linter
-      run: npm run lint || true
+      run: npm run lint
 
     - name: Run build
       run: npm run build

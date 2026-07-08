@@ -1,6 +1,5 @@
 import { test, expect } from '@jest/globals';
 import { Connection, AuthInfo } from '@salesforce/core';
-import { exec } from 'child_process';
 import * as fs from 'fs';
 import { main, ClientFactory, Options, IOEvent } from '../app';
 import { MockSalesforceClient } from './mock-salesforce-client';
@@ -121,10 +120,10 @@ test('simulate network error during Contact creation in full E2E migration', asy
 
     // Create a client factory that returns normal source client and mock target client
     const clientFactory: ClientFactory = {
-        async createSourceClient(orgAlias, orgUrl, orgToken): Promise<SalesforceClient> {
+        async createSourceClient(_orgAlias, _orgUrl, _orgToken): Promise<SalesforceClient> {
             return new DefaultSalesforceClient(conn1);
         },
-        async createTargetClient(orgAlias, orgUrl, orgToken): Promise<SalesforceClient> {
+        async createTargetClient(_orgAlias, _orgUrl, _orgToken): Promise<SalesforceClient> {
             const targetClient = await MockSalesforceClient.createFromDefaultClient(new DefaultSalesforceClient(conn2));
             // Configure network error for Contact creation - use "Contact" as a pattern to match Contact records
             targetClient.configureError(
@@ -250,7 +249,7 @@ test('verify MockSalesforceClient functionality', async () => {
     try {
         await mockClient.bulkCreate([]);
         // Empty array should succeed
-    } catch (error) {
+    } catch {
         // Ignore actual Salesforce errors, we're just testing our mock doesn't interfere
     }
 });
@@ -270,10 +269,10 @@ test('jsforce error handling with retry solver', async () => {
 
     // Create a client factory that simulates network errors but allows retries
     const clientFactory: ClientFactory = {
-        async createSourceClient(orgAlias, orgUrl, orgToken): Promise<SalesforceClient> {
+        async createSourceClient(_orgAlias, _orgUrl, _orgToken): Promise<SalesforceClient> {
             return new DefaultSalesforceClient(conn1);
         },
-        async createTargetClient(orgAlias, orgUrl, orgToken): Promise<SalesforceClient> {
+        async createTargetClient(_orgAlias, _orgUrl, _orgToken): Promise<SalesforceClient> {
             const targetClient = await MockSalesforceClient.createFromDefaultClient(new DefaultSalesforceClient(conn2));
             // Configure network error for Contact creation that should be retried
             targetClient.configureError(

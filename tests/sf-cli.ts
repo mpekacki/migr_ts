@@ -21,13 +21,13 @@ class TestOrg {
     }
 
     public async createAccount() {
-        const account = await this.conn.sobject('Account').create({ Name: 'Ebola Cola' });
+        const account = await this.conn.sobject('Account').create({ Name: 'Cloud Kicks' });
         return account;
     }
 
     public async verifyAccount(newId: string) {
         const account = await this.conn.sobject('Account').retrieve(newId);
-        expect(account.Name).toBe('Ebola Cola');
+        expect(account.Name).toBe('Cloud Kicks');
     }
 }
 
