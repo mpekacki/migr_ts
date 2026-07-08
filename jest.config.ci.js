@@ -3,17 +3,14 @@ module.exports = {
   testEnvironment: 'node',
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   
-  // Minimal output for CI
-  verbose: false,
-  silent: false,
-  
-  // Custom reporter for clean CI output
+  // List each test with its pass/fail status as suites complete
+  verbose: true,
+  // Discard console output from test code so CI logs stay clean
+  silent: true,
+
   reporters: [
-    ['default', {
-      silent: false,
-      useCoverageReporter: false,
-      summaryThreshold: 0 // Don't show summary for individual test suites
-    }]
+    'default',
+    'github-actions' // PR annotations for failures + collapsible log groups
   ],
   
   testTimeout: 120000, // 2 minutes per test (for e2e tests)
@@ -27,7 +24,4 @@ module.exports = {
   workerIdleMemoryLimit: '512MB',
   detectOpenHandles: true,
   forceExit: true,
-  
-  // Reduce console output from tests
-  setupFilesAfterEnv: ['<rootDir>/jest.setup.ci.js']
 };
