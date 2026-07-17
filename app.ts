@@ -103,6 +103,17 @@ interface FallbackSolver extends Solver {
 
 type SolverType = FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver | RetrySolver | BackoffSolver | FallbackSolver;
 
+interface SaveError {
+    message: string;
+    fields: string[];
+}
+
+interface SaveResult {
+    id: string;
+    success: boolean;
+    errors: SaveError[];
+}
+
 export interface ClientFactory {
     createSourceClient(orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined): Promise<SalesforceClient>;
     createTargetClient(orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined): Promise<SalesforceClient>;
@@ -217,7 +228,10 @@ class MigrationRunner {
         }
 
         if (!this.isMigrateToFile) {
-            await this.migrateToOrg();
+            const completed = await this.migrateToOrg();
+            if (!completed) {
+                return;
+            }
             await this.updateClearedFields();
             await this.saveAndExit();
         } else {
@@ -311,113 +325,7 @@ class MigrationRunner {
             depth++;
             this.io.recordsSoFar(Object.keys(this.recordsByIds).length);
 
-            const fetchFunctions = recordIdsToFetch.map(recordId => async (): Promise<string[]> => {
-                const sObjectName = await this.getSObjectType(recordId);
-                const sobjectDescribe = await this.getSObjectDescribe(sObjectName);
-                const reason = this.recordAddedReasons[recordId];
-                this.io.fetchingRecord(recordId, sObjectName, reason);
-                let recordFields;
-                try {
-                    recordFields = await this.sourceClient!.retrieve(sObjectName, recordId);
-                } catch (error) {
-                    if (error.errorCode === 'NOT_FOUND' || error.message?.includes('resource does not exist')) {
-                        this.io.recordNotFound(recordId, sObjectName);
-                        return [];
-                    } else if (error.errorCode === 'INVALID_TYPE_FOR_OPERATION') {
-                        this.io.recordNotQueryable(recordId, sObjectName);
-                        this.old2new[recordId] = '';
-                        return [];
-                    } else if (error.errorCode === 'MALFORMED_ID') {
-                        this.io.malformedId(recordId, sObjectName);
-                        this.old2new[recordId] = recordId;
-                        return [];
-                    } else {
-                        throw error;
-                    }
-                }
-                this.fetchedRecordsByIds[recordId] = recordFields;
-                const creatableFields = (await this.getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
-                const record: SObjectRecord<Schema, string> = {};
-                for (const field of creatableFields) {
-                    record[field.name] = recordFields[field.name];
-                }
-                record.attributes = recordFields.attributes;
-                this.recordsByIds[recordId] = record;
-                this.io.recordsSoFar(Object.keys(this.recordsByIds).length);
-                const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
-                if (lookupFields.length > 0) {
-                    this.lookupFieldsBySObjectType[sObjectName] = lookupFields;
-                }
-                const newIds: string[] = [];
-                for (const field of creatableFields) {
-                    if (record[field.name]) {
-                        const matches = String(record[field.name])?.match(ID_REGEX);
-                        if (matches) {
-                            for (const match of matches) {
-                                if (!(match in this.recordsByIds) && !newIds.includes(match)) {
-                                    try {
-                                        await this.getSObjectType(match);
-                                        newIds.push(match);
-                                        if (recordId in this.recordAddedReasons) {
-                                            this.recordAddedReasons[match] = this.recordAddedReasons[recordId];
-                                        }
-                                    } catch {
-                                        // do nothing, it was some random string
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                const relationships = this.options.relationships?.[sObjectName];
-                if (relationships && (!this.options.relatedRecordDepthLimit || depth < this.options.relatedRecordDepthLimit)) {
-                    const selector = this.sourceClient!.select(sObjectName);
-                    for (const relationship of relationships) {
-                        selector.include(relationship.name).select('Id').end();
-                    }
-                    selector.where(`Id = '${recordId}'`);
-                    this.io.queryingForRelatedRecords(await selector.toSOQL());
-                    let relsResults: any[] = [];
-
-                    try {
-                        relsResults = await selector.execute();
-                    } catch (jsforceError) {
-                        try {
-                            const errorResult = await this.handleJsforceError(
-                                jsforceError,
-                                `query related records for ${recordId}`,
-                                () => selector.execute()
-                            );
-
-                            if (errorResult.success && errorResult.result) {
-                                relsResults = errorResult.result;
-                            } else if (errorResult.shouldSkip) {
-                                this.io.error(`Skipping related records query for ${recordId} due to jsforce error: ${jsforceError.message}`);
-                                relsResults = [];
-                            } else {
-                                throw jsforceError;
-                            }
-                        } catch {
-                            this.io.error(`Unhandled jsforce error in related records query: ${jsforceError.message}`);
-                            relsResults = [];
-                        }
-                    }
-                    const recordRelationships = relsResults[0];
-                    for (const relationship of relationships) {
-                        const relatedRecords = recordRelationships![relationship.name]?.records;
-                        this.io.relatedRecords(relationship.name, relatedRecords?.length);
-                        if (relatedRecords) {
-                            for (const relatedRecord of relatedRecords) {
-                                if (!(relatedRecord.Id in this.recordsByIds) && !newIds.includes(relatedRecord.Id!)) {
-                                    newIds.push(relatedRecord.Id!);
-                                    this.recordAddedReasons[relatedRecord.Id!] = this.recordAddedReasons[recordId] || `${sObjectName}.${relationship.name}`;
-                                }
-                            }
-                        }
-                    }
-                }
-                return newIds;
-            });
+            const fetchFunctions = recordIdsToFetch.map(recordId => () => this.fetchRecordAndDiscoverIds(recordId, depth));
 
             const maxConcurrency = this.options.maxConcurrentRequests || 10;
             const rawResults = await executeConcurrently(fetchFunctions, maxConcurrency);
@@ -436,6 +344,130 @@ class MigrationRunner {
             let newRecordIdsToFetch = newIdsArrays.flat().filter((id): id is string => id !== undefined);
             newRecordIdsToFetch = newRecordIdsToFetch.filter(id => !(id in this.fetchedRecordsByIds));
             recordIdsToFetch = [...new Set(newRecordIdsToFetch)];
+        }
+    }
+
+    private async fetchRecordAndDiscoverIds(recordId: string, depth: number): Promise<string[]> {
+        const sObjectName = await this.getSObjectType(recordId);
+        const sobjectDescribe = await this.getSObjectDescribe(sObjectName);
+        const reason = this.recordAddedReasons[recordId];
+        this.io.fetchingRecord(recordId, sObjectName, reason);
+        const recordFields = await this.retrieveRecord(recordId, sObjectName);
+        if (!recordFields) {
+            return [];
+        }
+        this.fetchedRecordsByIds[recordId] = recordFields;
+        const creatableFields = (await this.getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
+        const record: SObjectRecord<Schema, string> = {};
+        for (const field of creatableFields) {
+            record[field.name] = recordFields[field.name];
+        }
+        record.attributes = recordFields.attributes;
+        this.recordsByIds[recordId] = record;
+        this.io.recordsSoFar(Object.keys(this.recordsByIds).length);
+        const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
+        if (lookupFields.length > 0) {
+            this.lookupFieldsBySObjectType[sObjectName] = lookupFields;
+        }
+        const newIds = await this.discoverReferencedIds(recordId, record, creatableFields);
+        await this.collectRelatedRecordIds(recordId, sObjectName, depth, newIds);
+        return newIds;
+    }
+
+    private async retrieveRecord(recordId: string, sObjectName: string): Promise<any | null> {
+        try {
+            return await this.sourceClient!.retrieve(sObjectName, recordId);
+        } catch (error) {
+            if (error.errorCode === 'NOT_FOUND' || error.message?.includes('resource does not exist')) {
+                this.io.recordNotFound(recordId, sObjectName);
+                return null;
+            } else if (error.errorCode === 'INVALID_TYPE_FOR_OPERATION') {
+                this.io.recordNotQueryable(recordId, sObjectName);
+                this.old2new[recordId] = '';
+                return null;
+            } else if (error.errorCode === 'MALFORMED_ID') {
+                this.io.malformedId(recordId, sObjectName);
+                this.old2new[recordId] = recordId;
+                return null;
+            } else {
+                throw error;
+            }
+        }
+    }
+
+    private async discoverReferencedIds(recordId: string, record: SObjectRecord<Schema, string>, creatableFields: Field[]): Promise<string[]> {
+        const newIds: string[] = [];
+        for (const field of creatableFields) {
+            if (record[field.name]) {
+                const matches = String(record[field.name])?.match(ID_REGEX);
+                if (matches) {
+                    for (const match of matches) {
+                        if (!(match in this.recordsByIds) && !newIds.includes(match)) {
+                            try {
+                                await this.getSObjectType(match);
+                                newIds.push(match);
+                                if (recordId in this.recordAddedReasons) {
+                                    this.recordAddedReasons[match] = this.recordAddedReasons[recordId];
+                                }
+                            } catch {
+                                // do nothing, it was some random string
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return newIds;
+    }
+
+    private async collectRelatedRecordIds(recordId: string, sObjectName: string, depth: number, newIds: string[]): Promise<void> {
+        const relationships = this.options.relationships?.[sObjectName];
+        if (!relationships || (this.options.relatedRecordDepthLimit && depth >= this.options.relatedRecordDepthLimit)) {
+            return;
+        }
+        const selector = this.sourceClient!.select(sObjectName);
+        for (const relationship of relationships) {
+            selector.include(relationship.name).select('Id').end();
+        }
+        selector.where(`Id = '${recordId}'`);
+        this.io.queryingForRelatedRecords(await selector.toSOQL());
+        let relsResults: any[] = [];
+
+        try {
+            relsResults = await selector.execute();
+        } catch (jsforceError) {
+            try {
+                const errorResult = await this.handleJsforceError(
+                    jsforceError,
+                    `query related records for ${recordId}`,
+                    () => selector.execute()
+                );
+
+                if (errorResult.success && errorResult.result) {
+                    relsResults = errorResult.result;
+                } else if (errorResult.shouldSkip) {
+                    this.io.error(`Skipping related records query for ${recordId} due to jsforce error: ${jsforceError.message}`);
+                    relsResults = [];
+                } else {
+                    throw jsforceError;
+                }
+            } catch {
+                this.io.error(`Unhandled jsforce error in related records query: ${jsforceError.message}`);
+                relsResults = [];
+            }
+        }
+        const recordRelationships = relsResults[0];
+        for (const relationship of relationships) {
+            const relatedRecords = recordRelationships![relationship.name]?.records;
+            this.io.relatedRecords(relationship.name, relatedRecords?.length);
+            if (relatedRecords) {
+                for (const relatedRecord of relatedRecords) {
+                    if (!(relatedRecord.Id in this.recordsByIds) && !newIds.includes(relatedRecord.Id!)) {
+                        newIds.push(relatedRecord.Id!);
+                        this.recordAddedReasons[relatedRecord.Id!] = this.recordAddedReasons[recordId] || `${sObjectName}.${relationship.name}`;
+                    }
+                }
+            }
         }
     }
 
@@ -479,304 +511,392 @@ class MigrationRunner {
         return confirmation === 'y';
     }
 
-    private async migrateToOrg(): Promise<void> {
+    private async migrateToOrg(): Promise<boolean> {
         while (Object.keys(this.recordsByIds).length > 0) {
             this.io.remainingRecords(Object.keys(this.recordsByIds).length);
-            let anyRecordProcessed = false;
-            const toInsert: Record<string, SObjectRecord<Schema, string>> = {};
-            for (const recordId of Object.keys(this.recordsByIds)) {
-                const record = this.recordsByIds[recordId];
-                const sObjectName = await this.getSObjectType(recordId, record);
-                let recordReady = true;
-                for (const field of Object.keys(record)) {
-                    if (record[field]) {
-                        const matches = String(record[field])?.match(ID_REGEX);
-                        if (matches) {
-                            for (const match of matches) {
-                                try {
-                                    await this.getSObjectType(match);
-                                } catch {
-                                    // do nothing, it was some random string
-                                    continue;
-                                }
-                                if (!(match in this.old2new) && match in this.recordsByIds && match !== recordId) {
-                                    recordReady = false;
-                                } else if (match in this.old2new) {
-                                    record[field] = record[field].replace(match, this.old2new[match]);
-                                    if (record[field] === '') {
-                                        delete record[field];
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if (recordReady) {
-                    anyRecordProcessed = true;
-                    let migratedRecordId = '';
-                    let skipRecord = false;
-                    const matcher = this.options.matchers.find(matcher => matcher.sObjectType === sObjectName);
-                    if (matcher) {
-                        const conditions: Record<string, string> = {};
-                        for (const fieldMapping of matcher.fieldMappings) {
-                            conditions[fieldMapping.targetField] = this.fetchedRecordsByIds[recordId][fieldMapping.sourceField];
-                            if (conditions[fieldMapping.targetField] in this.old2new) {
-                                conditions[fieldMapping.targetField] = this.old2new[conditions[fieldMapping.targetField]];
-                            }
-                        }
-                        const selector = this.targetClient!.find(sObjectName, conditions).select('Id');
-                        this.io.queryingForExistingRecord('SELECT Id FROM ' + sObjectName + ' WHERE ' + Object.entries(conditions).map(([k, v]) => `${k} = '${v}'`).join(' AND '));
-                        let migratedRecord: any[] = [];
-
-                        try {
-                            migratedRecord = await selector.execute();
-                        } catch (jsforceError) {
-                            try {
-                                const errorResult = await this.handleJsforceError(
-                                    jsforceError,
-                                    `find existing record for ${sObjectName}`,
-                                    () => selector.execute()
-                                );
-
-                                if (errorResult.success && errorResult.result) {
-                                    migratedRecord = errorResult.result;
-                                } else if (errorResult.shouldSkip) {
-                                    this.io.error(`Skipping existing record search for ${recordId} due to jsforce error: ${jsforceError.message}`);
-                                    migratedRecord = [];
-                                } else {
-                                    throw jsforceError;
-                                }
-                            } catch {
-                                this.io.error(`Unhandled jsforce error in find operation: ${jsforceError.message}`);
-                                migratedRecord = [];
-                            }
-                        }
-                        if (migratedRecord.length > 0) {
-                            migratedRecordId = migratedRecord[0].Id!;
-                            this.io.foundExistingRecord(migratedRecordId, sObjectName);
-                        } else if (matcher.whenMissing === 'skip') {
-                            this.io.skippingRecord(recordId, sObjectName);
-                            skipRecord = true;
-                        }
-                    }
-                    const isObjectCreatable = (await this.getSObjectDescribe(sObjectName)).createable;
-                    if (!migratedRecordId && !skipRecord && isObjectCreatable) {
-                        toInsert[recordId] = {
-                            attributes: record.attributes,
-                                ...record
-                            } as SObjectRecord<Schema, string>;
-                    } else {
-                        this.setNewRecordId(recordId, migratedRecordId!);
-                    }
-                }
-            }
+            const { toInsert, anyRecordProcessed } = await this.collectRecordsReadyToInsert();
+            let recordProcessed = anyRecordProcessed;
             if (Object.keys(toInsert).length > 0) {
-                const chunks: Record<string, SObjectRecord<Schema, string>>[] = this.chunking.getChunks(toInsert);
-                let retryAll = false;
-                for (const chunk of chunks) {
-                    this.io.savingRecords(chunk);
-                    let savedRecords: Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>;
-
-                    try {
-                        savedRecords = await this.targetClient!.bulkCreate(Object.values(chunk));
-                        this.io.savedRecords(savedRecords);
-                    } catch (jsforceError) {
-                        try {
-                            const errorResult = await this.handleJsforceError(
-                                jsforceError,
-                                `bulkCreate for chunk with ${Object.keys(chunk).length} records`,
-                                () => this.targetClient!.bulkCreate(Object.values(chunk))
-                            );
-
-                            if (errorResult.success && errorResult.result) {
-                                savedRecords = errorResult.result;
-                                this.io.savedRecords(savedRecords);
-                            } else if (errorResult.shouldSkip) {
-                                savedRecords = Object.keys(chunk).map(() => ({
-                                    id: '',
-                                    success: false,
-                                    errors: [{ message: `Skipped due to jsforce error: ${jsforceError.message}`, fields: [] }]
-                                }));
-                                this.io.error(`Skipping chunk due to jsforce error: ${jsforceError.message}`);
-                            } else {
-                                throw jsforceError;
-                            }
-                        } catch {
-                            savedRecords = Object.keys(chunk).map(() => ({
-                                id: '',
-                                success: false,
-                                errors: [{ message: `Jsforce error: ${jsforceError.message}`, fields: [] }]
-                            }));
-                            this.io.error(`Unhandled jsforce error in bulkCreate: ${jsforceError.message}`);
-                        }
-                    }
-                    for (let i = 0; i < savedRecords.length; i++) {
-                        const recordId = Object.keys(chunk)[i];
-                        const record = this.recordsByIds[recordId];
-                        const savedRecord = savedRecords[i];
-                        let retryRecord = retryAll;
-                        let migratedRecordId = '';
-                        if (savedRecord.success) {
-                            migratedRecordId = savedRecord.id!;
-                            this.io.createdRecord(migratedRecordId);
-                            if (this.errors[recordId]) {
-                                this.errors[recordId].forEach(error => error.fixed = true);
-                            }
-                        } else if (!retryRecord) {
-                            const errs = savedRecord.errors
-                            let hiddenErrorCount = 0;
-                            for (const e of errs) {
-                                let errorFixed = false;
-                                let solver: SolverType | undefined;
-                                if (this.options.solvers) {
-                                    const usedSolvers = this.errors[recordId]?.filter(error => error.message === e.message).map(error => error.solver);
-                                    if (usedSolvers?.length > 0) {
-                                        this.io.skippingPreviouslyUsedSolvers(usedSolvers);
-                                    }
-                                    solver = this.options.solvers.find(solver => new RegExp(solver.message).test(e.message) && !usedSolvers?.includes(solver));
-                                    if (solver) {
-                                        if (solver.action === 'fix') {
-                                            for (const changeField of solver.changeFields) {
-                                                this.setFieldWithLaterUpdate(recordId, record, changeField.field, changeField.value);
-                                            }
-                                            this.io.fixingUsingSolver(e.message, solver.message, solver.action);
-                                            this.io.savedOldFieldsInToUpdateLater(this.toUpdateLater[recordId]);
-                                            errorFixed = true;
-                                            retryRecord = true;
-                                        } else if (solver.action === 'skip') {
-                                            this.io.skippingRecordUsingSolver(recordId, solver.message);
-                                            errorFixed = true;
-                                        } else if (solver.action === 'match') {
-                                            this.io.matchingRecordUsingSolver(recordId, solver.message);
-                                            const matchId = new RegExp(solver.message).exec(e.message)?.[1];
-                                            if (matchId) {
-                                                migratedRecordId = matchId;
-                                                errorFixed = true;
-                                            }
-                                        } else if (solver.action === 'extract_column') {
-                                            this.io.extractingColumnFromError(e.message, solver.message);
-                                            let columnName;
-                                            if (solver.fromFields) {
-                                                columnName = e.fields[0];
-                                            } else {
-                                                columnName = new RegExp(solver.message).exec(e.message)?.[1];
-                                            }
-                                            if (columnName) {
-                                                this.setFieldWithLaterUpdate(recordId, record, columnName, solver.replaceWith);
-                                                errorFixed = true;
-                                                retryRecord = true;
-                                            }
-                                        } else if (solver.action === 'append_random') {
-                                            this.io.appendingRandomToRecord(recordId, solver.message);
-                                            for (const changeField of solver.changeFields) {
-                                                record[changeField.field] = record[changeField.field] + '.' + Math.random().toString(36).substring(2, 2 + changeField.length);
-                                            }
-                                            errorFixed = true;
-                                            retryRecord = true;
-                                        }
-                                    }
-                                }
-                                if (!errorFixed) {
-                                    this.io.error(JSON.stringify(e));
-                                    let inputOk;
-                                    let solverAdded = false;
-                                    if (!this.options.fullAuto?.enabled) {
-                                        do {
-                                            inputOk = true;
-                                            const userInput = await this.io.askForInput(recordId, e.message);
-                                            if (userInput === USER_INPUTS.fix) {
-                                                let fieldsToUpdate;
-                                                while (!fieldsToUpdate) {
-                                                    const fieldsJson = await this.io.askForFieldsToUpdate();
-                                                    try {
-                                                        fieldsToUpdate = JSON.parse(fieldsJson);
-                                                    } catch {
-                                                        this.io.invalidJson();
-                                                    }
-                                                }
-                                                solver = {
-                                                    action: 'fix',
-                                                    message: e.message,
-                                                    changeFields: []
-                                                }
-                                                for (const field of Object.keys(fieldsToUpdate)) {
-                                                    this.setFieldWithLaterUpdate(recordId, record, field, fieldsToUpdate[field]);
-                                                    solver.changeFields.push({ field, value: fieldsToUpdate[field] });
-                                                }
-                                                retryRecord = true;
-                                                errorFixed = true;
-                                            } else if (userInput === USER_INPUTS.retry) {
-                                                retryRecord = true;
-                                            } else if (userInput === USER_INPUTS.retryAll) {
-                                                retryAll = true;
-                                                retryRecord = true;
-                                            } else if (userInput === USER_INPUTS.match) {
-                                                migratedRecordId = await this.io.askForMatch();
-                                            } else if (userInput === USER_INPUTS.saveAndExit) {
-                                                await this.saveAndExit();
-                                                return;
-                                            } else if (userInput === USER_INPUTS.addSolver) {
-                                                let newSolver;
-                                                while (!newSolver) {
-                                                    const solverJson = await this.io.askForSolver();
-                                                    try {
-                                                        newSolver = JSON.parse(solverJson);
-                                                        new RegExp(newSolver.message);
-                                                    } catch {
-                                                        newSolver = null;
-                                                        this.io.invalidJson();
-                                                    }
-                                                }
-                                                if (!this.options.solvers) {
-                                                    this.options.solvers = [];
-                                                }
-                                                this.options.solvers.push(newSolver);
-                                                anyRecordProcessed = true;
-                                                solverAdded = true;
-                                                retryRecord = true;
-                                            } else if (userInput === USER_INPUTS.skip) {
-                                                // skip record, don't do anything
-                                            } else {
-                                                this.io.invalidInput(userInput);
-                                                inputOk = false;
-                                            }
-                                        } while (!inputOk);
-                                        if (solverAdded) {
-                                            break;
-                                        }
-                                    } else {
-                                        if (this.options.fullAuto?.unhandledErrorBehavior === 'saveAndExit') {
-                                            await this.saveAndExit();
-                                            return;
-                                        } else {
-                                            // skip record, don't do anything
-                                        }
-                                    }
-                                }
-                                if (!solver?.hideError) {
-                                    if (!(recordId in this.errors)) {
-                                        this.errors[recordId] = [];
-                                    }
-                                    this.errors[recordId].push({ message: e.message, fixed: errorFixed, solver });
-                                } else {
-                                    hiddenErrorCount++;
-                                }
-                            }
-                            if (errs.length > 0 && hiddenErrorCount === errs.length) {
-                                this.io.hidingError(recordId);
-                            }
-                        }
-                        if (retryRecord) {
-                            continue;
-                        }
-                        this.setNewRecordId(recordId, migratedRecordId!);
-                    }
+                const { exit, solverAdded } = await this.insertRecords(toInsert);
+                if (exit) {
+                    return false;
                 }
+                recordProcessed = recordProcessed || solverAdded;
             }
-            if (!anyRecordProcessed) {
+            if (!recordProcessed) {
                 await this.resolveCircularDependencies();
             }
         }
+        return true;
+    }
+
+    private async collectRecordsReadyToInsert(): Promise<{ toInsert: Record<string, SObjectRecord<Schema, string>>, anyRecordProcessed: boolean }> {
+        let anyRecordProcessed = false;
+        const toInsert: Record<string, SObjectRecord<Schema, string>> = {};
+        for (const recordId of Object.keys(this.recordsByIds)) {
+            const record = this.recordsByIds[recordId];
+            const sObjectName = await this.getSObjectType(recordId, record);
+            const recordReady = await this.resolveRecordReferences(recordId, record);
+            if (recordReady) {
+                anyRecordProcessed = true;
+                const { migratedRecordId, skipRecord } = await this.findExistingRecordId(recordId, sObjectName);
+                const isObjectCreatable = (await this.getSObjectDescribe(sObjectName)).createable;
+                if (!migratedRecordId && !skipRecord && isObjectCreatable) {
+                    toInsert[recordId] = {
+                        attributes: record.attributes,
+                        ...record
+                    } as SObjectRecord<Schema, string>;
+                } else {
+                    this.setNewRecordId(recordId, migratedRecordId!);
+                }
+            }
+        }
+        return { toInsert, anyRecordProcessed };
+    }
+
+    private async resolveRecordReferences(recordId: string, record: SObjectRecord<Schema, string>): Promise<boolean> {
+        let recordReady = true;
+        for (const field of Object.keys(record)) {
+            if (record[field]) {
+                const matches = String(record[field])?.match(ID_REGEX);
+                if (matches) {
+                    for (const match of matches) {
+                        try {
+                            await this.getSObjectType(match);
+                        } catch {
+                            // do nothing, it was some random string
+                            continue;
+                        }
+                        if (!(match in this.old2new) && match in this.recordsByIds && match !== recordId) {
+                            recordReady = false;
+                        } else if (match in this.old2new) {
+                            record[field] = record[field].replace(match, this.old2new[match]);
+                            if (record[field] === '') {
+                                delete record[field];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return recordReady;
+    }
+
+    private async findExistingRecordId(recordId: string, sObjectName: string): Promise<{ migratedRecordId: string, skipRecord: boolean }> {
+        const matcher = this.options.matchers.find(matcher => matcher.sObjectType === sObjectName);
+        if (!matcher) {
+            return { migratedRecordId: '', skipRecord: false };
+        }
+        const conditions: Record<string, string> = {};
+        for (const fieldMapping of matcher.fieldMappings) {
+            conditions[fieldMapping.targetField] = this.fetchedRecordsByIds[recordId][fieldMapping.sourceField];
+            if (conditions[fieldMapping.targetField] in this.old2new) {
+                conditions[fieldMapping.targetField] = this.old2new[conditions[fieldMapping.targetField]];
+            }
+        }
+        const selector = this.targetClient!.find(sObjectName, conditions).select('Id');
+        this.io.queryingForExistingRecord('SELECT Id FROM ' + sObjectName + ' WHERE ' + Object.entries(conditions).map(([k, v]) => `${k} = '${v}'`).join(' AND '));
+        let migratedRecord: any[] = [];
+
+        try {
+            migratedRecord = await selector.execute();
+        } catch (jsforceError) {
+            try {
+                const errorResult = await this.handleJsforceError(
+                    jsforceError,
+                    `find existing record for ${sObjectName}`,
+                    () => selector.execute()
+                );
+
+                if (errorResult.success && errorResult.result) {
+                    migratedRecord = errorResult.result;
+                } else if (errorResult.shouldSkip) {
+                    this.io.error(`Skipping existing record search for ${recordId} due to jsforce error: ${jsforceError.message}`);
+                    migratedRecord = [];
+                } else {
+                    throw jsforceError;
+                }
+            } catch {
+                this.io.error(`Unhandled jsforce error in find operation: ${jsforceError.message}`);
+                migratedRecord = [];
+            }
+        }
+        if (migratedRecord.length > 0) {
+            const migratedRecordId = migratedRecord[0].Id!;
+            this.io.foundExistingRecord(migratedRecordId, sObjectName);
+            return { migratedRecordId, skipRecord: false };
+        }
+        if (matcher.whenMissing === 'skip') {
+            this.io.skippingRecord(recordId, sObjectName);
+            return { migratedRecordId: '', skipRecord: true };
+        }
+        return { migratedRecordId: '', skipRecord: false };
+    }
+
+    private async insertRecords(toInsert: Record<string, SObjectRecord<Schema, string>>): Promise<{ exit: boolean, solverAdded: boolean }> {
+        const chunks: Record<string, SObjectRecord<Schema, string>>[] = this.chunking.getChunks(toInsert);
+        let retryAll = false;
+        let solverAdded = false;
+        for (const chunk of chunks) {
+            this.io.savingRecords(chunk);
+            const savedRecords = await this.insertChunk(chunk);
+            for (let i = 0; i < savedRecords.length; i++) {
+                const recordId = Object.keys(chunk)[i];
+                const record = this.recordsByIds[recordId];
+                const result = await this.processSaveResult(recordId, record, savedRecords[i], retryAll);
+                if (result.exit) {
+                    return { exit: true, solverAdded };
+                }
+                retryAll = result.retryAll;
+                solverAdded = solverAdded || result.solverAdded;
+            }
+        }
+        return { exit: false, solverAdded };
+    }
+
+    private async insertChunk(chunk: Record<string, SObjectRecord<Schema, string>>): Promise<SaveResult[]> {
+        let savedRecords: SaveResult[];
+
+        try {
+            savedRecords = await this.targetClient!.bulkCreate(Object.values(chunk));
+            this.io.savedRecords(savedRecords);
+        } catch (jsforceError) {
+            try {
+                const errorResult = await this.handleJsforceError(
+                    jsforceError,
+                    `bulkCreate for chunk with ${Object.keys(chunk).length} records`,
+                    () => this.targetClient!.bulkCreate(Object.values(chunk))
+                );
+
+                if (errorResult.success && errorResult.result) {
+                    savedRecords = errorResult.result;
+                    this.io.savedRecords(savedRecords);
+                } else if (errorResult.shouldSkip) {
+                    savedRecords = Object.keys(chunk).map(() => ({
+                        id: '',
+                        success: false,
+                        errors: [{ message: `Skipped due to jsforce error: ${jsforceError.message}`, fields: [] }]
+                    }));
+                    this.io.error(`Skipping chunk due to jsforce error: ${jsforceError.message}`);
+                } else {
+                    throw jsforceError;
+                }
+            } catch {
+                savedRecords = Object.keys(chunk).map(() => ({
+                    id: '',
+                    success: false,
+                    errors: [{ message: `Jsforce error: ${jsforceError.message}`, fields: [] }]
+                }));
+                this.io.error(`Unhandled jsforce error in bulkCreate: ${jsforceError.message}`);
+            }
+        }
+        return savedRecords;
+    }
+
+    private async processSaveResult(recordId: string, record: SObjectRecord<Schema, string>, savedRecord: SaveResult, retryAll: boolean): Promise<{ exit: boolean, retryAll: boolean, solverAdded: boolean }> {
+        let retryRecord = retryAll;
+        let solverAdded = false;
+        let migratedRecordId = '';
+        if (savedRecord.success) {
+            migratedRecordId = savedRecord.id!;
+            this.io.createdRecord(migratedRecordId);
+            if (this.errors[recordId]) {
+                this.errors[recordId].forEach(error => error.fixed = true);
+            }
+        } else if (!retryRecord) {
+            const errs = savedRecord.errors;
+            let hiddenErrorCount = 0;
+            for (const e of errs) {
+                const outcome = await this.handleSaveError(recordId, record, e);
+                if (outcome.exit) {
+                    return { exit: true, retryAll, solverAdded };
+                }
+                retryRecord = retryRecord || outcome.retry;
+                retryAll = retryAll || outcome.retryAll;
+                if (outcome.matchedId !== undefined) {
+                    migratedRecordId = outcome.matchedId;
+                }
+                if (outcome.hidden) {
+                    hiddenErrorCount++;
+                }
+                if (outcome.solverAdded) {
+                    solverAdded = true;
+                    break;
+                }
+            }
+            if (errs.length > 0 && hiddenErrorCount === errs.length) {
+                this.io.hidingError(recordId);
+            }
+        }
+        if (!retryRecord) {
+            this.setNewRecordId(recordId, migratedRecordId!);
+        }
+        return { exit: false, retryAll, solverAdded };
+    }
+
+    private async handleSaveError(recordId: string, record: SObjectRecord<Schema, string>, e: SaveError): Promise<{ retry: boolean, retryAll: boolean, matchedId?: string, solverAdded: boolean, exit: boolean, hidden: boolean }> {
+        const applied = this.applySolver(recordId, record, e);
+        let solver = applied.solver;
+        let errorFixed = applied.errorFixed;
+        let retry = applied.retry;
+        let retryAll = false;
+        let matchedId = applied.matchedId;
+
+        if (!errorFixed) {
+            this.io.error(JSON.stringify(e));
+            if (!this.options.fullAuto?.enabled) {
+                const resolution = await this.handleErrorInteractively(recordId, record, e);
+                if (resolution.exit) {
+                    return { retry, retryAll, matchedId, solverAdded: false, exit: true, hidden: false };
+                }
+                if (resolution.solver) {
+                    solver = resolution.solver;
+                }
+                errorFixed = resolution.errorFixed;
+                retry = retry || resolution.retry;
+                retryAll = resolution.retryAll;
+                if (resolution.matchedId !== undefined) {
+                    matchedId = resolution.matchedId;
+                }
+                if (resolution.solverAdded) {
+                    return { retry: true, retryAll, matchedId, solverAdded: true, exit: false, hidden: false };
+                }
+            } else if (this.options.fullAuto?.unhandledErrorBehavior === 'saveAndExit') {
+                await this.saveAndExit();
+                return { retry, retryAll, matchedId, solverAdded: false, exit: true, hidden: false };
+            }
+            // fullAuto with 'skip' behavior: fall through and record the error
+        }
+        if (solver?.hideError) {
+            return { retry, retryAll, matchedId, solverAdded: false, exit: false, hidden: true };
+        }
+        if (!(recordId in this.errors)) {
+            this.errors[recordId] = [];
+        }
+        this.errors[recordId].push({ message: e.message, fixed: errorFixed, solver });
+        return { retry, retryAll, matchedId, solverAdded: false, exit: false, hidden: false };
+    }
+
+    private applySolver(recordId: string, record: SObjectRecord<Schema, string>, e: SaveError): { solver?: SolverType, errorFixed: boolean, retry: boolean, matchedId?: string } {
+        const result: { solver?: SolverType, errorFixed: boolean, retry: boolean, matchedId?: string } = { errorFixed: false, retry: false };
+        if (!this.options.solvers) {
+            return result;
+        }
+        const usedSolvers = this.errors[recordId]?.filter(error => error.message === e.message).map(error => error.solver);
+        if (usedSolvers?.length > 0) {
+            this.io.skippingPreviouslyUsedSolvers(usedSolvers);
+        }
+        const solver = this.options.solvers.find(solver => new RegExp(solver.message).test(e.message) && !usedSolvers?.includes(solver));
+        if (!solver) {
+            return result;
+        }
+        result.solver = solver;
+        if (solver.action === 'fix') {
+            for (const changeField of solver.changeFields) {
+                this.setFieldWithLaterUpdate(recordId, record, changeField.field, changeField.value);
+            }
+            this.io.fixingUsingSolver(e.message, solver.message, solver.action);
+            this.io.savedOldFieldsInToUpdateLater(this.toUpdateLater[recordId]);
+            result.errorFixed = true;
+            result.retry = true;
+        } else if (solver.action === 'skip') {
+            this.io.skippingRecordUsingSolver(recordId, solver.message);
+            result.errorFixed = true;
+        } else if (solver.action === 'match') {
+            this.io.matchingRecordUsingSolver(recordId, solver.message);
+            const matchId = new RegExp(solver.message).exec(e.message)?.[1];
+            if (matchId) {
+                result.matchedId = matchId;
+                result.errorFixed = true;
+            }
+        } else if (solver.action === 'extract_column') {
+            this.io.extractingColumnFromError(e.message, solver.message);
+            let columnName;
+            if (solver.fromFields) {
+                columnName = e.fields[0];
+            } else {
+                columnName = new RegExp(solver.message).exec(e.message)?.[1];
+            }
+            if (columnName) {
+                this.setFieldWithLaterUpdate(recordId, record, columnName, solver.replaceWith);
+                result.errorFixed = true;
+                result.retry = true;
+            }
+        } else if (solver.action === 'append_random') {
+            this.io.appendingRandomToRecord(recordId, solver.message);
+            for (const changeField of solver.changeFields) {
+                record[changeField.field] = record[changeField.field] + '.' + Math.random().toString(36).substring(2, 2 + changeField.length);
+            }
+            result.errorFixed = true;
+            result.retry = true;
+        }
+        return result;
+    }
+
+    private async handleErrorInteractively(recordId: string, record: SObjectRecord<Schema, string>, e: SaveError): Promise<{ solver?: SolverType, errorFixed: boolean, retry: boolean, retryAll: boolean, matchedId?: string, solverAdded: boolean, exit: boolean }> {
+        const result: { solver?: SolverType, errorFixed: boolean, retry: boolean, retryAll: boolean, matchedId?: string, solverAdded: boolean, exit: boolean } = { errorFixed: false, retry: false, retryAll: false, solverAdded: false, exit: false };
+        let inputOk;
+        do {
+            inputOk = true;
+            const userInput = await this.io.askForInput(recordId, e.message);
+            if (userInput === USER_INPUTS.fix) {
+                let fieldsToUpdate;
+                while (!fieldsToUpdate) {
+                    const fieldsJson = await this.io.askForFieldsToUpdate();
+                    try {
+                        fieldsToUpdate = JSON.parse(fieldsJson);
+                    } catch {
+                        this.io.invalidJson();
+                    }
+                }
+                const solver: FixSolver = {
+                    action: 'fix',
+                    message: e.message,
+                    changeFields: []
+                };
+                for (const field of Object.keys(fieldsToUpdate)) {
+                    this.setFieldWithLaterUpdate(recordId, record, field, fieldsToUpdate[field]);
+                    solver.changeFields.push({ field, value: fieldsToUpdate[field] });
+                }
+                result.solver = solver;
+                result.retry = true;
+                result.errorFixed = true;
+            } else if (userInput === USER_INPUTS.retry) {
+                result.retry = true;
+            } else if (userInput === USER_INPUTS.retryAll) {
+                result.retryAll = true;
+                result.retry = true;
+            } else if (userInput === USER_INPUTS.match) {
+                result.matchedId = await this.io.askForMatch();
+            } else if (userInput === USER_INPUTS.saveAndExit) {
+                await this.saveAndExit();
+                result.exit = true;
+            } else if (userInput === USER_INPUTS.addSolver) {
+                let newSolver;
+                while (!newSolver) {
+                    const solverJson = await this.io.askForSolver();
+                    try {
+                        newSolver = JSON.parse(solverJson);
+                        new RegExp(newSolver.message);
+                    } catch {
+                        newSolver = null;
+                        this.io.invalidJson();
+                    }
+                }
+                if (!this.options.solvers) {
+                    this.options.solvers = [];
+                }
+                this.options.solvers.push(newSolver);
+                result.solverAdded = true;
+                result.retry = true;
+            } else if (userInput === USER_INPUTS.skip) {
+                // skip record, don't do anything
+            } else {
+                this.io.invalidInput(userInput);
+                inputOk = false;
+            }
+        } while (!inputOk);
+        return result;
     }
 
     private async resolveCircularDependencies(): Promise<void> {
