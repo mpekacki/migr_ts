@@ -624,6 +624,7 @@ class MigrationRunner {
                             }
                         } else if (!retryRecord) {
                             const errs = savedRecord.errors
+                            let hiddenErrorCount = 0;
                             for (const e of errs) {
                                 let errorFixed = false;
                                 let solver: SolverType | undefined;
@@ -757,7 +758,12 @@ class MigrationRunner {
                                         this.errors[recordId] = [];
                                     }
                                     this.errors[recordId].push({ message: e.message, fixed: errorFixed, solver });
+                                } else {
+                                    hiddenErrorCount++;
                                 }
+                            }
+                            if (errs.length > 0 && hiddenErrorCount === errs.length) {
+                                this.io.hidingError(recordId);
                             }
                         }
                         if (retryRecord) {

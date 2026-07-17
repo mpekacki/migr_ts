@@ -80,6 +80,8 @@ function formatEvent(event: IOEvent): string {
             return `saved old fields in toUpdateLater: ${JSON.stringify(d?.oldFields)}`;
         case 'error':
             return `error: ${d?.message}`;
+        case 'hidden_error':
+            return `error on record ${d?.recordId} hidden by solver`;
         case 'insert_error': {
             if (d?.recordId && d?.error) {
                 const options = [
