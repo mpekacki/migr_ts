@@ -50,6 +50,17 @@ describe('migration state reducer', () => {
         expect(s.remaining).toBe(8); // decremented by successes
     });
 
+    it('uncounts errors hidden by hideError solvers', () => {
+        const s = initialState();
+        feed(s, 'saved_records', [{ success: false, errors: [] }, { success: false, errors: [] }]);
+        expect(s.errors).toBe(2);
+        feed(s, 'hidden_error', { recordId: '003' });
+        expect(s.errors).toBe(1);
+        feed(s, 'hidden_error', { recordId: '004' });
+        feed(s, 'hidden_error', { recordId: '005' });
+        expect(s.errors).toBe(0); // never goes negative
+    });
+
     it('counts skipped records from skip events and skip solvers', () => {
         const s = initialState();
         feed(s, 'skipping_record', { sObjectName: 'User', recordId: '005' });

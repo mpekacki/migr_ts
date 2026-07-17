@@ -153,6 +153,10 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'error', { message }));
     }
 
+    public hidingError(recordId: string) {
+        this.onOutput(this.buildIOEvent('output', 'hidden_error', { recordId }));
+    }
+
     public async askForInput(recordId: string, message: string): Promise<string> {
         return await this.onInput(this.buildIOEvent('input', 'insert_error', { recordId, error: message }));
     }

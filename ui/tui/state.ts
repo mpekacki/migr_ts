@@ -189,6 +189,11 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             state.errors++;
             push(state, 'err', d.message ?? 'error');
             break;
+        case 'hidden_error':
+            // A failed save already counted via 'saved_records', but every error on
+            // the record was handled by a solver with hideError — uncount it.
+            state.errors = Math.max(0, state.errors - 1);
+            break;
         case 'error_updating_record':
             state.errors++;
             push(state, 'err', `Update failed ${d.sObjectName} ${d.recordId}`);

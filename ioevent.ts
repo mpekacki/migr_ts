@@ -35,7 +35,8 @@ export type IOEventType =
     | 'looking_for_circular_dependencies'
     | 'found_circular_dependency'
     | 'record_no_id'
-    | 'error_updating_record';
+    | 'error_updating_record'
+    | 'hidden_error';
 
 class IOEvent {
     constructor(
