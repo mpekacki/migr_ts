@@ -1,0 +1,40 @@
+name: Version bump
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version-bump
+
+jobs:
+  bump:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout main
+      uses: actions/checkout@v4
+      with:
+        ref: main
+
+    - name: Determine bump level
+      id: level
+      env:
+        LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+      run: |
+        level=patch
+        [[ " $LABELS " == *" minor "* ]] && level=minor
+        [[ " $LABELS " == *" major "* ]] && level=major
+        echo "level=$level" >> "$GITHUB_OUTPUT"
+
+    - name: Bump version and push
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        npm version ${{ steps.level.outputs.level }} -m "chore: release v%s"
+        git push --follow-tags
