@@ -37,6 +37,24 @@ const cleanup = () => {
 };
 process.on('SIGINT', () => { cleanup(); process.exit(130); });
 
+// Errors thrown before the UI is torn down would otherwise vanish into the
+// alternate screen buffer (or get lost with no handler at all). Always log
+// them to the output file (if any) and the restored terminal before exiting.
+let reportedFatal = false;
+const reportFatal = (err: unknown) => {
+    if (reportedFatal) return;
+    reportedFatal = true;
+    const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    if (outputStream) {
+        outputStream.write(`FATAL: ${message}\n`);
+    }
+    cleanup();
+    console.error(message);
+    process.exitCode = 1;
+};
+process.on('uncaughtException', reportFatal);
+process.on('unhandledRejection', reportFatal);
+
 main(options, (output: IOEvent) => {
     // Print to terminal
     const message = ui.display(output);
@@ -47,8 +65,8 @@ main(options, (output: IOEvent) => {
     }
 }, async (question: IOEvent) => {
     return ui.prompt(question);
-}).finally(async () => {
+}).then(async () => {
     // Keep the final screen up until the user acknowledges it, then tear down.
     await ui.awaitExit?.();
     cleanup();
-});
+}).catch(reportFatal);
