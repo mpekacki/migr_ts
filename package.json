@@ -4,8 +4,10 @@
   "bin": "main.js",
   "main": "main.js",
   "scripts": {
-    "build": "npx esbuild main.ts --bundle --outfile=bundle.js --platform=node --packages=external && npx javascript-obfuscator bundle.js --output bundle.js",
-    "release": "npx esbuild main.ts --bundle --outfile=build/bundle.js --platform=node --packages=external --minify && npx javascript-obfuscator build/bundle.js --output build/bundle.js && node -e \"const fs=require('fs');const p=require('./package.json');const d='build/v'+p.version;fs.mkdirSync(d,{recursive:true});fs.copyFileSync('build/bundle.js',d+'/bundle.js')\"",
+    "build": "npx esbuild main.ts --bundle --outfile=bundle.js --platform=node --packages=external",
+    "build-obfuscate": "npx javascript-obfuscator bundle.js --output bundle.js",
+    "release": "npx esbuild main.ts --bundle --outfile=build/bundle.js --platform=node --packages=external --minify && node -e \"const fs=require('fs');const p=require('./package.json');const d='build/v'+p.version;fs.mkdirSync(d,{recursive:true});fs.copyFileSync('build/bundle.js',d+'/bundle.js')\"",
+    "release-obfuscate": "npx javascript-obfuscator build/bundle.js --output build/bundle.js",
     "lint": "eslint .",
     "test": "jest",
     "test:ci": "jest --config=jest.config.ci.js --no-coverage --passWithNoTests",
