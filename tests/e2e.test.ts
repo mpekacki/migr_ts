@@ -2,6 +2,7 @@ import { test, expect } from '@jest/globals';
 import { Connection, AuthInfo } from '@salesforce/core';
 import { exec } from 'child_process';
 import fs from 'fs';
+import { DatabaseSync } from 'node:sqlite';
 import { IOEvent } from '../app';
 
 
@@ -26,6 +27,9 @@ afterEach(async () => {
     }
     if (fs.existsSync('./custom_history_test_dir')) {
         fs.rmdirSync('./custom_history_test_dir', { recursive: true });
+    }
+    if (fs.existsSync('./test-output.db')) {
+        fs.unlinkSync('./test-output.db');
     }
 });
 
@@ -1603,6 +1607,133 @@ test('migrate to file and from file', async () => {
 
     const newCustObjA = await retrieveRecord(conn2, 'Custom_Object_A__c', newCustObjAId);
     expect(newCustObjA.Lookup_to_B__c).toBe(newCustObjBId);
+});
+
+// Reads a table out of a migr_ts SQLite export so the export can be inspected
+// with plain SQL, which is the point of exporting to SQLite instead of JSON.
+function queryExportedRecords(dbPath: string, sObjectType: string): any[] {
+    const db = new DatabaseSync(dbPath);
+    try {
+        return db.prepare(`SELECT * FROM "${sObjectType}" ORDER BY rowid`).all() as any[];
+    } finally {
+        db.close();
+    }
+}
+
+test('migrate to SQLite database and from SQLite database', async () => {
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const custObjC = await createRecord(conn1, 'Custom_Object_C__c', { });
+    const custObjB = await createRecord(conn1, 'Custom_Object_B__c', { Lookup_to_C__c: custObjC.id! });
+    const custObjA = await createRecord(conn1, 'Custom_Object_A__c', { Lookup_to_B__c: custObjB.id! });
+
+    const configToSqlite = {
+        sourceOrg: sourceOrgAlias,
+        targetSqlite: 'test-output.db',
+        recordIds: [custObjA.id!],
+        matchers: defaultMatchers
+    };
+
+    await runMigration(configToSqlite);
+
+    // the export is a real, queryable database with one table per SObject type
+    expect(fs.existsSync('./test-output.db')).toBe(true);
+
+    const exportedA = queryExportedRecords('./test-output.db', 'Custom_Object_A__c');
+    expect(exportedA).toHaveLength(1);
+    expect(exportedA[0].Id).toBe(custObjA.id!);
+    expect(exportedA[0].Lookup_to_B__c).toBe(custObjB.id!);
+
+    const exportedB = queryExportedRecords('./test-output.db', 'Custom_Object_B__c');
+    expect(exportedB).toHaveLength(1);
+    expect(exportedB[0].Id).toBe(custObjB.id!);
+    expect(exportedB[0].Lookup_to_C__c).toBe(custObjC.id!);
+
+    expect(queryExportedRecords('./test-output.db', 'Custom_Object_C__c')).toHaveLength(1);
+
+    const configFromSqlite = {
+        sourceSqlite: 'test-output.db',
+        targetOrg: targetOrgAlias,
+        recordIds: [custObjA.id!],
+        matchers: defaultMatchers
+    };
+
+    const { parsedOutput } = await runMigration(configFromSqlite);
+
+    const newCustObjAId = assertRecordMigrated(parsedOutput, custObjA.id!);
+    const newCustObjBId = assertRecordMigrated(parsedOutput, custObjB.id!);
+    const newCustObjCId = assertRecordMigrated(parsedOutput, custObjC.id!);
+
+    const newCustObjB = await retrieveRecord(conn2, 'Custom_Object_B__c', newCustObjBId);
+    expect(newCustObjB.Lookup_to_C__c).toBe(newCustObjCId);
+
+    const newCustObjA = await retrieveRecord(conn2, 'Custom_Object_A__c', newCustObjAId);
+    expect(newCustObjA.Lookup_to_B__c).toBe(newCustObjBId);
+});
+
+test('SQLite round trip preserves text, number, boolean and date fields', async () => {
+    const { conn1, conn2 } = await setupTestConnections();
+
+    const accountName = `Sqlite Account ${Date.now()}`;
+    const account = await createRecord(conn1, 'Account', {
+        Name: accountName,
+        NumberOfEmployees: 42,
+        Description: 'Exported through SQLite'
+    });
+    const task = await createRecord(conn1, 'Task', {
+        Subject: 'Sqlite Roundtrip',
+        WhatId: account.id!,
+        ActivityDate: '2030-04-01',
+        CallDurationInSeconds: 90,
+        IsReminderSet: true,
+        ReminderDateTime: '2030-04-01T09:00:00.000+0000',
+        IsRecurrence: false
+    });
+
+    await runMigration({
+        sourceOrg: sourceOrgAlias,
+        targetSqlite: 'test-output.db',
+        recordIds: [task.id!],
+        matchers: defaultMatchers
+    });
+
+    // SQLite has no boolean type, so check how the values landed in the file
+    const exportedTask = queryExportedRecords('./test-output.db', 'Task')
+        .find(row => row.Id === task.id!);
+    expect(exportedTask).toBeDefined();
+    expect(exportedTask.Subject).toBe('Sqlite Roundtrip');
+    expect(exportedTask.ActivityDate).toBe('2030-04-01');
+    expect(exportedTask.CallDurationInSeconds).toBe(90);
+    expect(exportedTask.IsReminderSet).toBe(1);
+    expect(exportedTask.IsRecurrence).toBe(0);
+
+    const exportedAccount = queryExportedRecords('./test-output.db', 'Account')
+        .find(row => row.Id === account.id!);
+    expect(exportedAccount).toBeDefined();
+    expect(exportedAccount.NumberOfEmployees).toBe(42);
+    expect(exportedAccount.Description).toBe('Exported through SQLite');
+
+    const { parsedOutput } = await runMigration({
+        sourceSqlite: 'test-output.db',
+        targetOrg: targetOrgAlias,
+        recordIds: [task.id!],
+        matchers: defaultMatchers
+    });
+
+    // and that the target org got the original types back, not stringified ones
+    const newAccountId = assertRecordMigrated(parsedOutput, account.id!);
+    const newAccount = await retrieveRecord(conn2, 'Account', newAccountId);
+    expect(newAccount.Name).toBe(accountName);
+    expect(newAccount.NumberOfEmployees).toBe(42);
+    expect(newAccount.Description).toBe('Exported through SQLite');
+
+    const newTask = await retrieveRecord(conn2, 'Task', assertRecordMigrated(parsedOutput, task.id!));
+    expect(newTask.Subject).toBe('Sqlite Roundtrip');
+    expect(newTask.WhatId).toBe(newAccountId);
+    expect(newTask.ActivityDate).toBe('2030-04-01');
+    expect(newTask.CallDurationInSeconds).toBe(90);
+    expect(newTask.IsReminderSet).toBe(true);
+    expect(newTask.IsRecurrence).toBe(false);
 });
 
 // Creates an account hierarchy where the parent account's contract triggers an

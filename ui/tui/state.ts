@@ -78,8 +78,8 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
     switch (event.type) {
         case 'starting_migration': {
             const o = d.options ?? {};
-            state.source = o.sourceFile ?? o.sourceOrgUrl ?? o.sourceOrg ?? '—';
-            state.target = o.targetFile ?? o.targetOrgUrl ?? o.targetOrg ?? '—';
+            state.source = o.sourceSqlite ?? o.sourceFile ?? o.sourceOrgUrl ?? o.sourceOrg ?? '—';
+            state.target = o.targetSqlite ?? o.targetFile ?? o.targetOrgUrl ?? o.targetOrg ?? '—';
             state.phase = 'Starting';
             push(state, 'run', 'Starting migration');
             break;
