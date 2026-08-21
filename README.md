@@ -9,7 +9,7 @@ A CLI tool for migrating Salesforce records between orgs (or to/from files). It 
 - **Matchers** — identify records that already exist in the target org (by name, developer name, or any field mapping) so they are reused instead of duplicated
 - **Solvers** — pattern-based error handlers that automatically fix field values, skip records, retry with backoff, extract IDs from error messages, and more
 - **Resumable migrations** — a per-target history file maps source IDs to target IDs, so re-runs skip already-migrated records
-- **File mode** — serialize records to JSON instead of inserting, or load from JSON instead of a source org
+- **File mode** — serialize records to JSON or a SQLite database instead of inserting, or load from either instead of a source org
 - **Anonymization** — obfuscate or sanitize email fields during migration
 - **Interactive terminal UI** — full-screen TUI with progress, error resolution prompts, and the ability to add solvers on the fly (or run fully automated with `fullAuto`)
 
@@ -49,6 +49,24 @@ See [config.json](config.json) for a full example. The most important fields:
 | `fullAuto.enabled` | Run without interactive prompts |
 | `anonymization.emailFields` | Obfuscate or sanitize email addresses |
 | `sourceFile` / `targetFile` | Migrate from/to a JSON file instead of an org |
+| `sourceSqlite` / `targetSqlite` | Migrate from/to a SQLite database instead of an org |
+
+### SQLite export format
+
+`targetSqlite` writes the fetched records to a SQLite database instead of inserting them, and `sourceSqlite` reads that database back as the source of a later migration. The database is a plain SQLite file with no extensions, so it can be opened with any SQLite client:
+
+```bash
+sqlite3 export.db "SELECT Id, Name FROM Account"
+```
+
+Each SObject type gets its own table, named after the type (`Account`, `Custom_Object_A__c`), with the record id as the primary key and one column per field. Two bookkeeping tables sit alongside them:
+
+| Table | Contents |
+|-------|----------|
+| `_migr_meta` | Export format version and timestamp |
+| `_migr_fields` | The JS type of every field, so booleans (stored as `0`/`1`) and numbers are restored on import rather than coming back as text |
+
+An export replaces any database already at that path. Records edited in place with SQL are picked up on the next `sourceSqlite` run, which makes the database a convenient place to tweak data between orgs.
 
 ### Example
 

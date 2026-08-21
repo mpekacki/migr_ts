@@ -7,17 +7,20 @@ import Chunks from './chunks';
 import IOEvent from './ioevent';
 import IO from './io';
 import { preprocessData } from './preprocess-data';
+import { readRecordsFromSqlite, writeRecordsToSqlite } from './sqlite-store';
 import { DescribeGlobalResult } from 'jsforce/lib/api/soap/schema';
 
 interface Options {
     sourceOrg?: string;
     sourceFile?: string;
+    sourceSqlite?: string;
     targetOrg: string;
     sourceOrgUrl?: string;
     sourceOrgToken?: string;
     targetOrgUrl?: string;
     targetOrgToken?: string;
     targetFile?: string;
+    targetSqlite?: string;
     historyFilePath?: string;
     recordIds: string[];
     relatedRecordDepthLimit: number;
@@ -196,8 +199,14 @@ class MigrationRunner {
         this.io = new IO(onOutput, onInput);
         this.chunking = new Chunks(CHUNKING_OBJECTS, 200, 10);
         this.clientFactory = clientFactory;
-        this.isMigrateToFile = options.targetFile !== undefined;
-        this.isMigrateFromFile = options.sourceFile !== undefined;
+        if (options.sourceFile !== undefined && options.sourceSqlite !== undefined) {
+            throw new Error('Specify either sourceFile or sourceSqlite, not both');
+        }
+        if (options.targetFile !== undefined && options.targetSqlite !== undefined) {
+            throw new Error('Specify either targetFile or targetSqlite, not both');
+        }
+        this.isMigrateToFile = options.targetFile !== undefined || options.targetSqlite !== undefined;
+        this.isMigrateFromFile = options.sourceFile !== undefined || options.sourceSqlite !== undefined;
     }
 
     async run(): Promise<void> {
@@ -292,14 +301,15 @@ class MigrationRunner {
     }
 
     private async loadRecordsFromFile(): Promise<void> {
-        const fileContent = fs.readFileSync(this.options.sourceFile!, 'utf8');
-        const parsedFile = JSON.parse(fileContent);
+        const loadedRecords = this.options.sourceSqlite !== undefined
+            ? readRecordsFromSqlite(this.options.sourceSqlite)
+            : JSON.parse(fs.readFileSync(this.options.sourceFile!, 'utf8')).records;
         this.describeFromFile = {
             sobjects: []
         };
 
-        for (const recordId of Object.keys(parsedFile.records)) {
-            const record = parsedFile.records[recordId];
+        for (const recordId of Object.keys(loadedRecords)) {
+            const record = loadedRecords[recordId];
             if (!this.describeFromFile.sobjects.find((sobject: any) => sobject.name === record.attributes.type)) {
                 this.describeFromFile.sobjects.push({
                     keyPrefix: recordId.substring(0, 3),
@@ -504,8 +514,8 @@ class MigrationRunner {
             recordCountsBySObjectType[record.attributes!.type]++;
         }
 
-        const source = this.options.sourceFile ?? this.options.sourceOrgUrl ?? this.options.sourceOrg;
-        const target = this.options.targetFile ?? this.options.targetOrgUrl ?? this.options.targetOrg;
+        const source = this.options.sourceSqlite ?? this.options.sourceFile ?? this.options.sourceOrgUrl ?? this.options.sourceOrg;
+        const target = this.options.targetSqlite ?? this.options.targetFile ?? this.options.targetOrgUrl ?? this.options.targetOrg;
         const confirmationData = { source, target, recordReasons: await this.countRecordReasons(), matchers: matchersBySObjectType, ...recordCountsBySObjectType };
         const confirmation = await this.io.askForConfirmation(confirmationData);
         return confirmation === 'y';
@@ -1005,10 +1015,14 @@ class MigrationRunner {
                 Id: id
             };
         }
-        const fileData = {
-            records: recordsObj
-        };
-        fs.writeFileSync(this.options.targetFile!, JSON.stringify(fileData, null, 2));
+        if (this.options.targetSqlite !== undefined) {
+            writeRecordsToSqlite(this.options.targetSqlite, recordsObj);
+        } else {
+            const fileData = {
+                records: recordsObj
+            };
+            fs.writeFileSync(this.options.targetFile!, JSON.stringify(fileData, null, 2));
+        }
 
         const requestedRecordsMappings: Record<string, string> = {};
         for (const originalRecordId of this.options.recordIds) {
