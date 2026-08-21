@@ -1,4 +1,4 @@
-import { DatabaseSync, SupportedValueType } from 'node:sqlite';
+import type { DatabaseSync, SupportedValueType } from 'node:sqlite';
 import * as fs from 'fs';
 
 /**
@@ -11,6 +11,41 @@ import * as fs from 'fs';
  */
 
 export const SQLITE_FORMAT_VERSION = '1';
+
+type SqliteModule = { DatabaseSync: new (path: string) => DatabaseSync };
+
+let sqliteModule: SqliteModule | undefined;
+
+/**
+ * Loads `node:sqlite` on first use.
+ *
+ * The module is required lazily so runs that never touch `sourceSqlite` /
+ * `targetSqlite` do not pay for it, and the ExperimentalWarning Node emits on
+ * first load (Node 22 and 23) is swallowed: everything this CLI writes to
+ * stdout/stderr is parsed as JSON by its callers and by the e2e tests, so a
+ * stray warning line breaks them. `process.emitWarning` is called
+ * synchronously while the module loads, so restoring it right after the
+ * require is enough.
+ */
+function loadSqlite(): SqliteModule {
+    if (sqliteModule === undefined) {
+        const originalEmitWarning = process.emitWarning;
+        process.emitWarning = ((warning: string | Error, ...args: any[]) => {
+            const message = typeof warning === 'string' ? warning : warning?.message ?? '';
+            if (message.includes('SQLite is an experimental feature')) {
+                return;
+            }
+            return (originalEmitWarning as any)(warning, ...args);
+        }) as typeof process.emitWarning;
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            sqliteModule = require('node:sqlite') as SqliteModule;
+        } finally {
+            process.emitWarning = originalEmitWarning;
+        }
+    }
+    return sqliteModule;
+}
 
 const META_TABLE = '_migr_meta';
 const FIELDS_TABLE = '_migr_fields';
@@ -133,7 +168,7 @@ export function writeRecordsToSqlite(filePath: string, records: Record<string, a
         }
     }
 
-    const db = new DatabaseSync(filePath);
+    const db = new (loadSqlite().DatabaseSync)(filePath);
     try {
         db.exec(`CREATE TABLE ${META_TABLE} (key TEXT PRIMARY KEY, value TEXT)`);
         db.exec(`CREATE TABLE ${FIELDS_TABLE} (sobject_type TEXT NOT NULL, field_name TEXT NOT NULL, value_type TEXT NOT NULL, PRIMARY KEY (sobject_type, field_name))`);
@@ -193,7 +228,7 @@ export function readRecordsFromSqlite(filePath: string): Record<string, any> {
         throw new Error(`SQLite database not found: ${filePath}`);
     }
 
-    const db = new DatabaseSync(filePath);
+    const db = new (loadSqlite().DatabaseSync)(filePath);
     try {
         const hasFieldsTable = db
             .prepare('SELECT name FROM sqlite_master WHERE type = \'table\' AND name = ?')
