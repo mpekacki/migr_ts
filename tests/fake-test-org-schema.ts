@@ -10,6 +10,7 @@
  * setting only fire in the target org.
  */
 
+import { CONTRACT_STATUS_ERROR } from './e2e-harness';
 import {
     FakeFieldDef,
     FakeOrgConfig,
@@ -20,9 +21,6 @@ import {
 
 export const SOURCE_ORG_ALIAS = 'mockSourceOrg';
 export const TARGET_ORG_ALIAS = 'mockTargetOrg';
-
-// Error emitted when inserting a Contract with Status = 'Activated'
-export const CONTRACT_STATUS_ERROR = 'Choose a valid contract status and save your changes. Ask your admin for details.';
 
 // ---------------------------------------------------------------------------
 // Schema
