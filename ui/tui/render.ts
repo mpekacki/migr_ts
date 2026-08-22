@@ -174,7 +174,8 @@ export function buildFrame(
         lines.push(row(`${ansi.green('>')} ${inputView(inputBuffer, inner)}`));
     } else {
         const hint = awaitingExit
-            ? ansi.boldOn(ansi.green('Press any key to exit…'))
+            // Arrows and Tab move around the summary, so they cannot also exit.
+            ? ansi.boldOn(ansi.green(`Press any key to exit…${overflow ? ' (↑↓ to scroll)' : ''}`))
             : state.done
                 ? ansi.gray('Done.')
                 : ansi.gray(`${SPINNER[spinnerFrame % SPINNER.length]} working…`);

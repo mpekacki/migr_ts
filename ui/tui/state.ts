@@ -1,4 +1,5 @@
 import IOEvent from '../../ioevent';
+import { ansi } from './ansi';
 
 export type Phase =
     | 'Starting'
@@ -32,6 +33,11 @@ export interface MigrationState {
     feed: FeedEntry[];
     /** When set, the feed area is replaced by this overlay (a prompt or summary). */
     overlay: string[] | null;
+    /**
+     * The end-of-run summary, kept separately from `overlay` so it can be
+     * reprinted on the normal screen once the alternate screen is torn down.
+     */
+    finalSummary: string[] | null;
     done: boolean;
 }
 
@@ -49,6 +55,7 @@ export function initialState(): MigrationState {
         remaining: 0,
         feed: [],
         overlay: null,
+        finalSummary: null,
         done: false,
     };
 }
@@ -215,15 +222,54 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
         case 'invalid_input':
             push(state, 'warn', `Invalid input: ${d.input}`);
             break;
-        case 'finished':
+        case 'finished': {
             state.phase = 'Complete';
             state.done = true;
             push(state, 'ok', 'Migration complete');
+            const summary = buildFinalSummary(event.data);
+            if (summary.length > 0) {
+                state.finalSummary = summary;
+                state.overlay = summary; // hold it on screen instead of the feed
+            }
             break;
+        }
         default:
             // Unmapped but harmless events are simply ignored in the feed.
             break;
     }
+}
+
+/**
+ * The screen shown once the migration finishes: the IDs the user asked to
+ * migrate next to the IDs they became in the target org. The plain UI prints
+ * this as part of its `finished` output; the TUI would otherwise scroll it away
+ * with the rest of the feed, so it is pinned as an overlay instead.
+ */
+export function buildFinalSummary(data: unknown): string[] {
+    let parsed: { requestedRecords?: Record<string, string> } | null;
+    try {
+        parsed = typeof data === 'string' ? JSON.parse(data) : (data as typeof parsed);
+    } catch {
+        return [];
+    }
+    const requested = parsed?.requestedRecords ?? {};
+    const ids = Object.keys(requested);
+    if (ids.length === 0) return [];
+
+    const idWidth = Math.max(...ids.map(id => id.length));
+    const migrated = ids.filter(id => requested[id]).length;
+    const lines = [
+        ansi.boldOn(ansi.green('✓ Migration complete')),
+        '',
+        `${ansi.boldOn('Requested records')} ${ansi.gray(`(${migrated}/${ids.length} migrated)`)}`,
+        '',
+    ];
+    for (const id of ids) {
+        const newId = requested[id];
+        lines.push(`  ${id.padEnd(idWidth)} ${ansi.gray('→')} ` +
+            (newId ? ansi.green(newId) : ansi.yellow('(not migrated)')));
+    }
+    return lines;
 }
 
 export function formatTypeCounts(recordCountsByType?: Record<string, number>): string {

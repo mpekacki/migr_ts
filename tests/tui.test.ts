@@ -1,5 +1,5 @@
 import IOEvent, { IOEventType } from '../ioevent';
-import { applyEvent, initialState, MigrationState, pushConsole } from '../ui/tui/state';
+import { applyEvent, buildFinalSummary, initialState, MigrationState, pushConsole } from '../ui/tui/state';
 import { buildFrame, maxScrollOffset, maxFeedScrollOffset, bodyHeightFor, inputCursorCol } from '../ui/tui/render';
 import { padTo, stripAnsi, truncate, visibleLength, wrapAnsi, takeLastColumns, ansi } from '../ui/tui/ansi';
 
@@ -167,6 +167,77 @@ describe('migration state reducer', () => {
         const running = s.feed.filter(e => e.glyph === 'run');
         expect(running.length).toBe(1); // only the most recent stays "running"
         expect(s.feed[s.feed.length - 1].text).toContain('Contact');
+    });
+});
+
+describe('final summary', () => {
+    const payload = JSON.stringify({
+        allMigratedRecords: { '0015g00000QqWxYAAV': '0015g00000RrXyZAAV' },
+        errors: {},
+        requestedRecords: {
+            '0015g00000QqWxYAAV': '0015g00000RrXyZAAV',
+            '0035g00000LmNoPAAZ': '',
+        },
+    });
+
+    it('lists each requested record next to the ID it became', () => {
+        const lines = buildFinalSummary(payload).map(stripAnsi);
+        expect(lines).toContain('  0015g00000QqWxYAAV → 0015g00000RrXyZAAV');
+        expect(lines).toContain('  0035g00000LmNoPAAZ → (not migrated)');
+        expect(lines.join('\n')).toContain('(1/2 migrated)');
+    });
+
+    it('accepts the payload already parsed as well as the JSON string', () => {
+        expect(buildFinalSummary(JSON.parse(payload))).toEqual(buildFinalSummary(payload));
+    });
+
+    it('pins the summary on screen and keeps it for reprinting on exit', () => {
+        const s = initialState();
+        feed(s, 'finished', payload);
+        expect(s.done).toBe(true);
+        expect(s.finalSummary).not.toBeNull();
+        expect(s.overlay).toBe(s.finalSummary);
+    });
+
+    it('leaves the feed alone when there is nothing requested to report', () => {
+        const s = initialState();
+        feed(s, 'finished', JSON.stringify({ errors: {}, requestedRecords: {} }));
+        expect(s.overlay).toBeNull();
+        expect(s.finalSummary).toBeNull();
+
+        const bad = initialState();
+        feed(bad, 'finished', 'not json');
+        expect(bad.overlay).toBeNull();
+        expect(bad.done).toBe(true);
+    });
+
+    it('shows the mapping on the final screen while awaiting exit', () => {
+        const s = initialState();
+        feed(s, 'finished', payload);
+        const frame = buildFrame(s, 0, 60, 22, false, true);
+        const text = stripAnsi(frame.join('\n'));
+        expect(text).toContain('0015g00000QqWxYAAV → 0015g00000RrXyZAAV');
+        expect(text).toContain('(not migrated)');
+        expect(text).toContain('Press any key to exit');
+        for (const line of frame) expect(visibleLength(line)).toBe(60);
+    });
+
+    it('makes a long list scrollable and says so on the exit line', () => {
+        const requestedRecords: Record<string, string> = {};
+        for (let i = 0; i < 60; i++) {
+            requestedRecords[`0015g0000000${String(i).padStart(3, '0')}AAA`] = `0015g0000099${String(i).padStart(3, '0')}AAA`;
+        }
+        const s = initialState();
+        feed(s, 'finished', JSON.stringify({ requestedRecords }));
+        expect(maxScrollOffset(s.overlay, 60, 22)).toBeGreaterThan(0);
+
+        const text = stripAnsi(buildFrame(s, 0, 60, 22, false, true).join('\n'));
+        expect(text).toContain('↑↓ to scroll');
+        expect(text).not.toContain('0015g0000000059AAA'); // below the fold until scrolled
+
+        const scrolled = stripAnsi(
+            buildFrame(s, 0, 60, 22, false, true, '', maxScrollOffset(s.overlay, 60, 22)).join('\n'));
+        expect(scrolled).toContain('0015g0000000059AAA');
     });
 });
 
