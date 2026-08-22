@@ -8,6 +8,9 @@ import * as fs from 'fs';
  * export can be inspected and edited with any SQLite client. SQLite columns are
  * untyped and have no boolean, so the JS type of every field is kept in a side
  * table and used to restore the original values on import.
+ *
+ * Exporting to a database that already exists merges into it, so several
+ * migrations can accumulate in one file; see {@link writeRecordsToSqlite}.
  */
 
 export const SQLITE_FORMAT_VERSION = '1';
@@ -131,15 +134,46 @@ function isReservedField(field: string): boolean {
 }
 
 /**
- * Writes every record to `filePath`, replacing any database already there.
- * `records` is keyed by record id; each record carries its SObject type in
- * `attributes.type`, exactly like the JSON file format.
+ * Writes every record to `filePath`, merging with any database already there:
+ * records only the database has are kept, records this run produced again are
+ * replaced by their new version, so a second migration adds to the export
+ * instead of wiping it. `records` is keyed by record id; each record carries
+ * its SObject type in `attributes.type`, exactly like the JSON file format.
+ *
+ * The merged set is written to a temporary database that replaces `filePath`
+ * only once it is complete, so a failed run cannot take the previous export
+ * down with it.
  */
 export function writeRecordsToSqlite(filePath: string, records: Record<string, any>): void {
-    if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+    const merged = { ...readExistingRecords(filePath), ...records };
+    const tempPath = `${filePath}.migr_ts_tmp`;
+    if (fs.existsSync(tempPath)) {
+        fs.unlinkSync(tempPath);
     }
+    try {
+        writeDatabase(tempPath, merged);
+        fs.renameSync(tempPath, filePath);
+    } catch (error) {
+        if (fs.existsSync(tempPath)) {
+            fs.unlinkSync(tempPath);
+        }
+        throw error;
+    }
+}
 
+/**
+ * The records an earlier run left in `filePath`, or none when there is nothing
+ * to merge with. A file that is not a migr_ts export makes this throw rather
+ * than be overwritten.
+ */
+function readExistingRecords(filePath: string): Record<string, any> {
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
+        return {};
+    }
+    return readRecordsFromSqlite(filePath);
+}
+
+function writeDatabase(filePath: string, records: Record<string, any>): void {
     const recordIdsByType: Record<string, string[]> = {};
     const fieldTypesByType: Record<string, Record<string, ValueType>> = {};
 

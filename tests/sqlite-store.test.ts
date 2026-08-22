@@ -16,8 +16,10 @@ function tempDbPath(): string {
 afterEach(() => {
     while (tempFiles.length > 0) {
         const filePath = tempFiles.pop()!;
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
+        for (const file of [filePath, `${filePath}.migr_ts_tmp`]) {
+            if (fs.existsSync(file)) {
+                fs.unlinkSync(file);
+            }
         }
     }
 });
@@ -156,7 +158,7 @@ describe('sqlite-store', () => {
         expect(readBack.BillingAddress).toEqual({ city: 'San Francisco', country: 'US' });
     });
 
-    test('replaces an existing database instead of appending to it', () => {
+    test('merges into an existing database instead of replacing it', () => {
         const filePath = tempDbPath();
         writeRecordsToSqlite(filePath, {
             '001000000000001AAA': record('Account', { Name: 'Cloud Kicks' })
@@ -167,7 +169,120 @@ describe('sqlite-store', () => {
 
         const readBack = readRecordsFromSqlite(filePath);
 
-        expect(Object.keys(readBack)).toEqual(['003000000000001AAA']);
+        expect(Object.keys(readBack).sort()).toEqual(['001000000000001AAA', '003000000000001AAA']);
+        expect(readBack['001000000000001AAA'].Name).toBe('Cloud Kicks');
+        expect(readBack['003000000000001AAA'].LastName).toBe('Doe');
+    });
+
+    test('replaces a record that is exported again', () => {
+        const filePath = tempDbPath();
+        writeRecordsToSqlite(filePath, {
+            '001000000000001AAA': record('Account', { Name: 'Cloud Kicks', NumberOfEmployees: 42, Phone: '555-0100' }),
+            '001000000000002AAA': record('Account', { Name: 'Universal Containers', NumberOfEmployees: 7, Phone: '555-0200' })
+        });
+        writeRecordsToSqlite(filePath, {
+            '001000000000001AAA': record('Account', { Name: 'Cloud Kicks Renamed', NumberOfEmployees: 43 })
+        });
+
+        const readBack = readRecordsFromSqlite(filePath);
+
+        expect(readBack['001000000000001AAA'].Name).toBe('Cloud Kicks Renamed');
+        expect(readBack['001000000000001AAA'].NumberOfEmployees).toBe(43);
+        // the new version of the record has no Phone, so neither does the export
+        expect(readBack['001000000000001AAA'].Phone).toBeNull();
+        // the record the run did not touch keeps everything it had
+        expect(readBack['001000000000002AAA'].Name).toBe('Universal Containers');
+        expect(readBack['001000000000002AAA'].NumberOfEmployees).toBe(7);
+        expect(readBack['001000000000002AAA'].Phone).toBe('555-0200');
+    });
+
+    test('keeps value types across merged runs', () => {
+        const filePath = tempDbPath();
+        writeRecordsToSqlite(filePath, {
+            '003000000000001AAA': record('Contact', { LastName: 'Doe', DoNotCall: true, NumberOfChildren: 3 })
+        });
+        writeRecordsToSqlite(filePath, {
+            '003000000000002AAA': record('Contact', { LastName: 'Roe', DoNotCall: false, NumberOfChildren: 0 })
+        });
+
+        const readBack = readRecordsFromSqlite(filePath);
+
+        expect(readBack['003000000000001AAA'].DoNotCall).toBe(true);
+        expect(readBack['003000000000001AAA'].NumberOfChildren).toBe(3);
+        expect(readBack['003000000000002AAA'].DoNotCall).toBe(false);
+        expect(readBack['003000000000002AAA'].NumberOfChildren).toBe(0);
+    });
+
+    test('adds a column for a field only a later run has', () => {
+        const filePath = tempDbPath();
+        writeRecordsToSqlite(filePath, {
+            '001000000000001AAA': record('Account', { Name: 'Cloud Kicks' })
+        });
+        writeRecordsToSqlite(filePath, {
+            '001000000000002AAA': record('Account', { Name: 'Universal Containers', Website: 'https://example.com' })
+        });
+
+        const readBack = readRecordsFromSqlite(filePath);
+
+        expect(readBack['001000000000001AAA'].Website).toBeNull();
+        expect(readBack['001000000000002AAA'].Website).toBe('https://example.com');
+    });
+
+    test('widens a column a later run stores a different type in', () => {
+        const filePath = tempDbPath();
+        writeRecordsToSqlite(filePath, {
+            '001000000000001AAA': record('Account', { Odd_Field__c: 'text' })
+        });
+        writeRecordsToSqlite(filePath, {
+            '001000000000002AAA': record('Account', { Odd_Field__c: 17 })
+        });
+
+        const readBack = readRecordsFromSqlite(filePath);
+
+        expect(readBack['001000000000001AAA'].Odd_Field__c).toBe('text');
+        expect(readBack['001000000000002AAA'].Odd_Field__c).toBe(17);
+    });
+
+    test('starts fresh when the database file is empty', () => {
+        const filePath = tempDbPath();
+        fs.writeFileSync(filePath, '');
+
+        writeRecordsToSqlite(filePath, {
+            '001000000000001AAA': record('Account', { Name: 'Cloud Kicks' })
+        });
+
+        expect(readRecordsFromSqlite(filePath)['001000000000001AAA'].Name).toBe('Cloud Kicks');
+    });
+
+    test('leaves the existing database intact when the export fails', () => {
+        const filePath = tempDbPath();
+        writeRecordsToSqlite(filePath, {
+            '001000000000001AAA': record('Account', { Name: 'Cloud Kicks' })
+        });
+
+        expect(() => writeRecordsToSqlite(filePath, { '003000000000001AAA': { LastName: 'Doe' } }))
+            .toThrow(/missing attributes.type/);
+
+        expect(readRecordsFromSqlite(filePath)['001000000000001AAA'].Name).toBe('Cloud Kicks');
+        expect(fs.existsSync(`${filePath}.migr_ts_tmp`)).toBe(false);
+    });
+
+    test('refuses to export into a database that is not a migr_ts export', () => {
+        const filePath = tempDbPath();
+        const db = new DatabaseSync(filePath);
+        db.exec('CREATE TABLE something_else (a TEXT)');
+        db.close();
+
+        expect(() => writeRecordsToSqlite(filePath, {
+            '001000000000001AAA': record('Account', { Name: 'Cloud Kicks' })
+        })).toThrow(/not a migr_ts SQLite export/);
+
+        const check = new DatabaseSync(filePath);
+        try {
+            expect(check.prepare('SELECT name FROM sqlite_master WHERE name = ?').all('something_else')).toHaveLength(1);
+        } finally {
+            check.close();
+        }
     });
 
     test('writes and reads an empty record set', () => {
