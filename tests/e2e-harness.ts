@@ -209,10 +209,12 @@ export async function createDuplicateCustObjCs(sourceOrg: TestOrg, targetOrg: Te
 export function confirmMigration(checkData?: (data: any) => void): InputHandler {
     return (ioEvent: IOEvent, sendInput: (input: string) => void) => {
         if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
-            sendInput('y');
+            // check before answering: sendInput resolves the pending input promise,
+            // after which a failed assertion here would be swallowed
             if (checkData) {
                 checkData(ioEvent.data!);
             }
+            sendInput('y');
         }
     };
 }

@@ -27,6 +27,14 @@ function formatEvent(event: IOEvent): string {
             return `related records of ${d?.relationshipName}: ${d?.count}`;
         case 'fetched_records':
             return `fetched ${d?.count} records`;
+        case 'nothing_to_migrate': {
+            const alreadyMigrated: Record<string, number> = d?.alreadyMigrated || {};
+            const total = Object.values(alreadyMigrated).reduce((sum, n) => sum + n, 0);
+            const because = total > 0
+                ? ` - ${total} already migrated (${formatTypeCounts(alreadyMigrated)})`
+                : '';
+            return `nothing to migrate${because}`;
+        }
         case 'confirm_migration':
             return formatConfirmMigration(d);
         case 'aborted':
@@ -145,8 +153,9 @@ function formatConfirmMigration(d: any): string {
 
     // Collect SObject type counts (top-level numeric properties)
     const typeCounts: Record<string, number> = {};
+    const reservedKeys = ['recordReasons', 'matchers', 'source', 'target', 'alreadyMigrated'];
     for (const key of Object.keys(d || {})) {
-        if (key !== 'recordReasons' && key !== 'matchers' && key !== 'source' && key !== 'target' && typeof d[key] === 'number') {
+        if (!reservedKeys.includes(key) && typeof d[key] === 'number') {
             typeCounts[key] = d[key];
         }
     }
@@ -168,6 +177,20 @@ function formatConfirmMigration(d: any): string {
             lines.push(`  ${type.padEnd(maxTypeLen)}  ${String(count).padStart(maxCountLen)}  (${action})`);
         }
         lines.push(`  ${'Total'.padEnd(maxTypeLen)}  ${String(total).padStart(maxCountLen)}`);
+        lines.push('');
+    }
+
+    // Records already migrated in a previous run - excluded from this migration
+    const alreadyMigrated: Record<string, number> = d?.alreadyMigrated || {};
+    const alreadyMigratedEntries = Object.entries(alreadyMigrated).sort((a, b) => b[1] - a[1]);
+    if (alreadyMigratedEntries.length > 0) {
+        const alreadyMigratedTotal = alreadyMigratedEntries.reduce((sum, [, n]) => sum + n, 0);
+        lines.push(`Already migrated (excluded): ${alreadyMigratedTotal}`);
+        const maxTypeLen = Math.max(...alreadyMigratedEntries.map(([k]) => k.length));
+        const maxCountLen = Math.max(...alreadyMigratedEntries.map(([, v]) => String(v).length));
+        for (const [type, count] of alreadyMigratedEntries) {
+            lines.push(`  ${type.padEnd(maxTypeLen)}  ${String(count).padStart(maxCountLen)}`);
+        }
         lines.push('');
     }
 

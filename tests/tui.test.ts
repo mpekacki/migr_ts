@@ -121,6 +121,18 @@ describe('migration state reducer', () => {
         expect(s.remaining).toBe(8); // decremented by successes
     });
 
+    it('reports nothing to migrate with the already migrated counts', () => {
+        const s = initialState();
+        feed(s, 'nothing_to_migrate', { alreadyMigrated: { Account: 1, Contact: 2 } });
+        expect(s.feed[s.feed.length - 1].text).toBe('Nothing to migrate (already migrated: 1 Account, 2 Contact)');
+    });
+
+    it('reports nothing to migrate without a breakdown when nothing was migrated before', () => {
+        const s = initialState();
+        feed(s, 'nothing_to_migrate', { alreadyMigrated: {} });
+        expect(s.feed[s.feed.length - 1].text).toBe('Nothing to migrate');
+    });
+
     it('uncounts errors hidden by hideError solvers', () => {
         const s = initialState();
         feed(s, 'saved_records', [{ success: false, errors: [] }, { success: false, errors: [] }]);
@@ -220,6 +232,40 @@ describe('final summary', () => {
         expect(text).toContain('(not migrated)');
         expect(text).toContain('Press any key to exit');
         for (const line of frame) expect(visibleLength(line)).toBe(60);
+    });
+
+    it('does not claim a migration when there was nothing to migrate', () => {
+        const s = initialState();
+        feed(s, 'nothing_to_migrate', { alreadyMigrated: { Account: 1, Contact: 2 } });
+        feed(s, 'finished', payload);
+
+        // the final screen is all most users read - it has to say it itself
+        const text = stripAnsi(buildFrame(s, 0, 70, 22, false, true).join('\n'));
+        expect(text).toContain('Nothing to migrate');
+        expect(text).not.toContain('Migration complete');
+        expect(text).toContain('(1/2 migrated earlier)');
+        expect(s.finalSummary!.map(stripAnsi).join('\n'))
+            .toContain('3 records were migrated earlier (1 Account, 2 Contact).');
+        // the mapping is still there, it is just no longer presented as new work
+        expect(text).toContain('0015g00000QqWxYAAV → 0015g00000RrXyZAAV');
+    });
+
+    it('uses the singular, and drops the note entirely for an empty already-migrated set', () => {
+        const one = buildFinalSummary(payload, { Account: 1 }).map(stripAnsi).join('\n');
+        expect(one).toContain('1 record was migrated earlier (1 Account)');
+
+        const none = buildFinalSummary(payload, {}).map(stripAnsi);
+        expect(none.join('\n')).toContain('Nothing to migrate');
+        expect(none.join('\n')).not.toContain('migrated earlier (');
+        expect(none.filter(line => line === '')).toHaveLength(2); // no orphaned blank line
+    });
+
+    it('still reports a normal completion when records were migrated', () => {
+        const s = initialState();
+        feed(s, 'finished', payload);
+        const text = stripAnsi(buildFrame(s, 0, 70, 22, false, true).join('\n'));
+        expect(text).toContain('Migration complete');
+        expect(text).not.toContain('Nothing to migrate');
     });
 
     it('makes a long list scrollable and says so on the exit line', () => {

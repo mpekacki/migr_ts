@@ -816,6 +816,55 @@ export const e2eScenarios: E2EScenario[] = [
         assertRecordMappedTo(parsedOutput2, account.id, newAccountId);
     }),
 
+    scenario('confirmation reports records already migrated in a previous run', async (ctx: E2EContext) => {
+        const accountName = `Cloud Kicks ${Math.random()}`;
+        const account = await createAccount(ctx.sourceOrg, accountName);
+        const contact = await createRecord(ctx.sourceOrg, 'Contact', { AccountId: account.id, LastName: `John Doe ${Math.random()}` });
+
+        const config = createBasicConfig(ctx, [contact.id]);
+
+        const { parsedOutput } = await ctx.runMigration(config, confirmMigration((confirmationData) => {
+            // nothing has been migrated yet
+            expect(confirmationData.alreadyMigrated).toEqual({});
+        }));
+
+        assertRecordMigrated(parsedOutput, contact.id);
+        assertRecordMigrated(parsedOutput, account.id);
+
+        // run again with a second contact - the account and the first contact are
+        // in history now, so only the new contact is left to migrate
+        const contact2 = await createRecord(ctx.sourceOrg, 'Contact', { AccountId: account.id, LastName: `Jane Doe ${Math.random()}` });
+
+        config.recordIds = [contact.id, contact2.id];
+
+        const { parsedOutput: parsedOutput2 } = await ctx.runMigration(config, confirmMigration((confirmationData) => {
+            expect(confirmationData.alreadyMigrated.Account).toBe(1);
+            expect(confirmationData.alreadyMigrated.Contact).toBe(1);
+            // the already migrated records are not part of the records to migrate
+            expect(confirmationData.Contact).toBe(1);
+            expect(confirmationData.Account).toBeUndefined();
+        }));
+
+        assertRecordMigrated(parsedOutput2, contact2.id);
+    }),
+
+    scenario('no confirmation is asked when there is nothing left to migrate', async (ctx: E2EContext) => {
+        const account = await createAccount(ctx.sourceOrg, `Cloud Kicks ${Math.random()}`);
+
+        const config = createBasicConfig(ctx, [account.id]);
+
+        const { parsedOutput } = await ctx.runMigration(config, confirmMigration());
+        const newAccountId = assertRecordMigrated(parsedOutput, account.id);
+
+        // Everything the second run fetches is in history already, so there is
+        // nothing to confirm. The empty input queue fails the run on any prompt.
+        const { parsedOutput: parsedOutput2, capturedOutput } = await ctx.runMigration(config, []);
+
+        expect(capturedOutput.some(event => event.type === 'confirm_migration')).toBe(false);
+        expect(capturedOutput.some(event => event.type === 'nothing_to_migrate')).toBe(true);
+        assertRecordMappedTo(parsedOutput2, account.id, newAccountId);
+    }),
+
     scenario('fix column automatically with modifying current value', async (ctx: E2EContext) => {
         const { externalId, sourceRecord, targetRecord } = await createDuplicateCustObjCs(ctx.sourceOrg, ctx.targetOrg);
 

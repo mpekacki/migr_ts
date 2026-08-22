@@ -17,6 +17,7 @@ export type IOEventType =
     | 'querying_related_records'
     | 'related_records'
     | 'fetched_records'
+    | 'nothing_to_migrate'
     | 'aborted'
     | 'confirmation'
     | 'finished'
