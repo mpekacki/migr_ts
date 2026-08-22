@@ -78,6 +78,14 @@ describe('event-formatter', () => {
             expect(result).toContain('Skip (s)');
         });
 
+        it('should format insert_error with the full error payload when available', () => {
+            const errorDetails = { statusCode: 'FAILED_ACTIVATION', message: 'Choose a valid contract status.', fields: ['Status'] };
+            const event = new IOEvent('input', 'insert_error', { recordId: '800', error: errorDetails.message, errorDetails });
+            const result = format(event);
+            expect(result).toContain('recordId: 800');
+            expect(result).toContain(JSON.stringify(errorDetails));
+        });
+
         it('should format insert_error without recordId as generic input prompt', () => {
             const event = new IOEvent('input', 'insert_error', {});
             expect(format(event)).toBe('Enter input:');

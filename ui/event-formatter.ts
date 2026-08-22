@@ -94,7 +94,9 @@ function formatEvent(event: IOEvent): string {
                     { key: 's', label: 'Skip' }
                 ];
                 const optionsList = options.map(opt => `- ${opt.label} (${opt.key})`).join('\n');
-                return `recordId: ${d.recordId}, no solver found for error: ${d.error}\nPlease provide input to resolve the error:\nAvailable options:\n${optionsList}:`;
+                // show the whole error payload (status code, fields, ...) - the same data the activity log shows
+                const errorText = d.errorDetails ? JSON.stringify(d.errorDetails) : d.error;
+                return `recordId: ${d.recordId}, no solver found for error: ${errorText}\nPlease provide input to resolve the error:\nAvailable options:\n${optionsList}:`;
             }
             return `Enter input:`;
         }
