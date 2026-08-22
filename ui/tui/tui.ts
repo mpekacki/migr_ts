@@ -135,7 +135,7 @@ export class TuiUI implements UI {
 
     private maxScroll(): number {
         const { width, height } = this.dims();
-        if (this.feedView) return maxFeedScrollOffset(this.state.feed.length, height);
+        if (this.feedView) return maxFeedScrollOffset(this.state.feed, width, height);
         return maxScrollOffset(this.state.overlay, width, height);
     }
 

@@ -1,4 +1,4 @@
-import { ansi, padTo, visibleLength } from './ansi';
+import { ansi, padTo, takeLastColumns, truncate, visibleLength, wrapAnsi } from './ansi';
 import { FeedEntry, Glyph, MigrationState, Phase } from './state';
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -57,9 +57,13 @@ export function maxScrollOffset(overlay: string[] | null, width: number, height:
     return Math.max(0, total - bodyHeightFor(height));
 }
 
-/** Largest valid scroll offset for the activity feed viewed under a prompt. */
-export function maxFeedScrollOffset(feedLength: number, height: number): number {
-    return Math.max(0, feedLength - bodyHeightFor(height));
+/**
+ * Largest valid scroll offset for the activity feed viewed under a prompt.
+ * Counts *rendered* lines, since a long entry wraps onto several of them.
+ */
+export function maxFeedScrollOffset(feed: FeedEntry[], width: number, height: number): number {
+    const total = renderFeed(feed, 0, true, innerWidth(width)).length;
+    return Math.max(0, total - bodyHeightFor(height));
 }
 
 export function buildFrame(
@@ -90,7 +94,14 @@ export function buildFrame(
     lines.push(B.tl + titleBar + B.h.repeat(Math.max(0, titleFill)) + B.tr);
 
     // ── Header: source/target ──────────────────────────────────────────────
-    lines.push(row(`${ansi.gray('Source')} ${state.source}   ${ansi.gray('Target')} ${state.target}`));
+    // The header is a fixed single row, so long org URLs are shortened — but
+    // each side gets its own budget so the target never vanishes off the edge.
+    const labelsWidth = 'Source '.length + '   Target '.length;
+    const half = Math.max(3, Math.floor((inner - labelsWidth) / 2));
+    lines.push(row(
+        `${ansi.gray('Source')} ${truncate(state.source, half)}` +
+        `   ${ansi.gray('Target')} ${truncate(state.target, half)}`,
+    ));
 
     // ── Header: phase + progress bar ────────────────────────────────────────
     const phaseLabel = PHASE_COLOR[state.phase](state.phase.padEnd(10));
@@ -176,32 +187,31 @@ export function buildFrame(
     return lines.slice(0, h);
 }
 
+/**
+ * Render the feed to display lines. Entries wider than the box wrap onto
+ * continuation lines that hang under the first line's text, so long error
+ * messages stay fully readable instead of running off the right edge.
+ */
 function renderFeed(feed: FeedEntry[], spinnerFrame: number, done: boolean, inner: number): string[] {
-    return feed.map(e => {
+    const out: string[] = [];
+    for (const e of feed) {
         const indent = '  '.repeat(e.indent);
         const g = glyphStr(e.glyph, spinnerFrame, done);
         const text = e.glyph === 'sub' || e.glyph === 'info' ? ansi.gray(e.text) : e.text;
-        // truncate happens later in padTo via row(); just assemble here
-        void inner;
-        return `${indent}${g} ${text}`;
-    });
+        const head = `${indent}${g} `;            // glyph is always one column
+        const hang = ' '.repeat(indent.length + 2);
+        const textWidth = Math.max(1, inner - visibleLength(head));
+        const wrapped = wrapAnsi(text, textWidth);
+        out.push(head + wrapped[0]);
+        for (let i = 1; i < wrapped.length; i++) out.push(hang + wrapped[i]);
+    }
+    return out;
 }
 
 /** Wrap lines wider than `inner` so nothing is silently cut horizontally. */
 export function wrapToWidth(lines: string[], inner: number): string[] {
     const out: string[] = [];
-    for (const raw of lines) {
-        if (visibleLength(raw) <= inner) {
-            out.push(raw);
-        } else {
-            let rest = raw;
-            while (visibleLength(rest) > inner) {
-                out.push(rest.slice(0, inner));
-                rest = rest.slice(inner);
-            }
-            out.push(rest);
-        }
-    }
+    for (const raw of lines) out.push(...wrapAnsi(raw, inner));
     return out;
 }
 
@@ -212,15 +222,14 @@ function inputCapacity(inner: number): number {
 
 /** The portion of the input buffer that fits, scrolled horizontally to the end. */
 function inputView(buffer: string, inner: number): string {
-    const cap = inputCapacity(inner);
-    return buffer.length <= cap ? buffer : buffer.slice(buffer.length - cap);
+    return takeLastColumns(buffer, inputCapacity(inner));
 }
 
 /** 1-based screen column where the input cursor should sit (just past the text). */
 export function inputCursorCol(buffer: string, width: number): number {
     const inner = innerWidth(width);
-    const shown = Math.min(buffer.length, inputCapacity(inner));
-    // "│ " (2) + "> " (2) + shown chars, then cursor sits on the next column.
+    const shown = visibleLength(inputView(buffer, inner));
+    // "│ " (2) + "> " (2) + shown columns, then cursor sits on the next column.
     return 2 + 2 + shown + 1;
 }
 
