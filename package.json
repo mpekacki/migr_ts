@@ -1,6 +1,6 @@
 {
   "name": "migr_ts",
-  "version": "1.16.7",
+  "version": "1.16.8",
   "bin": "main.js",
   "main": "main.js",
   "scripts": {
