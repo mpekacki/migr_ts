@@ -1314,6 +1314,68 @@ export const e2eScenarios: E2EScenario[] = [
         expect(newTask.IsRecurrence).toBe(false);
     }),
 
+    scenario('exporting to an existing SQLite database merges the runs', async (ctx: E2EContext) => {
+        const custObjC = await createRecord(ctx.sourceOrg, 'Custom_Object_C__c', {});
+        const custObjB = await createRecord(ctx.sourceOrg, 'Custom_Object_B__c', { Lookup_to_C__c: custObjC.id });
+        const accountName = `Sqlite Merge ${Date.now()}`;
+        const account = await createRecord(ctx.sourceOrg, 'Account', { Name: accountName, NumberOfEmployees: 10 });
+
+        const exportConfig = (recordIds: string[]) => ({
+            sourceOrg: ctx.sourceOrg.alias,
+            targetSqlite: 'test-output.db',
+            recordIds,
+            matchers: defaultMatchers
+        });
+
+        await ctx.runMigration(exportConfig([custObjB.id]));
+        expect(queryExportedRecords('./test-output.db', 'Custom_Object_B__c')).toHaveLength(1);
+
+        // a second run exporting a different record, of a type the database does not have yet
+        await ctx.runMigration(exportConfig([account.id]));
+
+        // the first run's records are still there...
+        const exportedB = queryExportedRecords('./test-output.db', 'Custom_Object_B__c');
+        expect(exportedB).toHaveLength(1);
+        expect(exportedB[0].Id).toBe(custObjB.id);
+        expect(exportedB[0].Lookup_to_C__c).toBe(custObjC.id);
+        expect(queryExportedRecords('./test-output.db', 'Custom_Object_C__c')).toHaveLength(1);
+
+        // ...alongside the second run's
+        const exportedAccount = queryExportedRecords('./test-output.db', 'Account')
+            .find(row => row.Id === account.id);
+        expect(exportedAccount).toBeDefined();
+        expect(exportedAccount.Name).toBe(accountName);
+        expect(exportedAccount.NumberOfEmployees).toBe(10);
+
+        // exporting a record the database already holds replaces it with its current version
+        const renamedAccountName = `${accountName} Renamed`;
+        await ctx.sourceOrg.update('Account', { Id: account.id, Name: renamedAccountName, NumberOfEmployees: 20 });
+
+        await ctx.runMigration(exportConfig([account.id]));
+
+        const reExportedAccounts = queryExportedRecords('./test-output.db', 'Account')
+            .filter(row => row.Id === account.id);
+        expect(reExportedAccounts).toHaveLength(1);
+        expect(reExportedAccounts[0].Name).toBe(renamedAccountName);
+        expect(reExportedAccounts[0].NumberOfEmployees).toBe(20);
+        expect(queryExportedRecords('./test-output.db', 'Custom_Object_B__c')).toHaveLength(1);
+
+        // and the merged database is still a valid migration source
+        const { parsedOutput } = await ctx.runMigration({
+            sourceSqlite: 'test-output.db',
+            targetOrg: ctx.targetOrg.alias,
+            recordIds: [account.id, custObjB.id],
+            matchers: defaultMatchers
+        });
+
+        const newAccount = await retrieveRecord(ctx.targetOrg, 'Account', assertRecordMigrated(parsedOutput, account.id));
+        expect(newAccount.Name).toBe(renamedAccountName);
+        expect(newAccount.NumberOfEmployees).toBe(20);
+
+        const newCustObjB = await retrieveRecord(ctx.targetOrg, 'Custom_Object_B__c', assertRecordMigrated(parsedOutput, custObjB.id));
+        expect(newCustObjB.Lookup_to_C__c).toBe(assertRecordMigrated(parsedOutput, custObjC.id));
+    }),
+
     scenario('full auto mode - save and exit', async (ctx: E2EContext) => {
         const { account, contract, contract2 } = await createFullAutoTestRecords(ctx.sourceOrg);
 

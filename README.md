@@ -66,7 +66,9 @@ Each SObject type gets its own table, named after the type (`Account`, `Custom_O
 | `_migr_meta` | Export format version and timestamp |
 | `_migr_fields` | The JS type of every field, so booleans (stored as `0`/`1`) and numbers are restored on import rather than coming back as text |
 
-An export replaces any database already at that path. Records edited in place with SQL are picked up on the next `sourceSqlite` run, which makes the database a convenient place to tweak data between orgs.
+An export merges into a database already at that path: records only the database holds are left alone, and records the new run exports again replace their stored version, so several migrations can accumulate in one file. Delete the file to start a fresh export. A file that is not a migr_ts export is never overwritten - the run fails instead.
+
+Records edited in place with SQL are picked up on the next `sourceSqlite` run, which makes the database a convenient place to tweak data between orgs.
 
 ### Example
 
