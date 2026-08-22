@@ -161,8 +161,8 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'hidden_error', { recordId }));
     }
 
-    public async askForInput(recordId: string, message: string): Promise<string> {
-        return await this.onInput(this.buildIOEvent('input', 'insert_error', { recordId, error: message }));
+    public async askForInput(recordId: string, message: string, errorDetails?: any): Promise<string> {
+        return await this.onInput(this.buildIOEvent('input', 'insert_error', { recordId, error: message, errorDetails }));
     }
 
     public async askForFieldsToUpdate(): Promise<string> {

@@ -860,7 +860,7 @@ class MigrationRunner {
         let inputOk;
         do {
             inputOk = true;
-            const userInput = await this.io.askForInput(recordId, e.message);
+            const userInput = await this.io.askForInput(recordId, e.message, e);
             if (userInput === USER_INPUTS.fix) {
                 let fieldsToUpdate;
                 while (!fieldsToUpdate) {
