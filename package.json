@@ -4,9 +4,9 @@
   "bin": "main.js",
   "main": "main.js",
   "scripts": {
-    "build": "npx esbuild main.ts --bundle --outfile=bundle.js --platform=node --packages=external",
+    "build": "node build.mjs --outfile=bundle.js",
     "build-obfuscate": "npx javascript-obfuscator bundle.js --output bundle.js",
-    "release": "npx esbuild main.ts --bundle --outfile=build/bundle.js --platform=node --packages=external --minify && node -e \"const fs=require('fs');const p=require('./package.json');const d='build/v'+p.version;fs.mkdirSync(d,{recursive:true});fs.copyFileSync('build/bundle.js',d+'/bundle.js')\"",
+    "release": "node build.mjs --outfile=build/bundle.js --minify && node -e \"const fs=require('fs');const p=require('./package.json');const d='build/v'+p.version;fs.mkdirSync(d,{recursive:true});fs.copyFileSync('build/bundle.js',d+'/bundle.js')\"",
     "release-obfuscate": "npx javascript-obfuscator build/bundle.js --output build/bundle.js",
     "lint": "eslint .",
     "test": "jest",

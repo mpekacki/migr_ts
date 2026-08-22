@@ -1,3 +1,4 @@
+import './bootstrap'; // must stay first - see bootstrap.ts
 import { program } from 'commander';
 import { IOEvent, main, Options } from './app';
 import fs from 'fs';
