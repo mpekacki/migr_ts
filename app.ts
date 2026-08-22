@@ -193,6 +193,8 @@ class MigrationRunner {
     private migratedRecords: Record<string, string> = {};
     private recordAddedReasons: Record<string, string> = {};
     private toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
+    /** Fetched records dropped by removeAlreadyMigratedRecords, counted per SObject type. */
+    private alreadyMigratedCountsBySObjectType: Record<string, number> = {};
 
     constructor(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>, clientFactory?: ClientFactory) {
         this.options = options;
@@ -228,7 +230,12 @@ class MigrationRunner {
 
         this.io.fetchedRecords(Object.keys(this.recordsByIds).length);
 
-        if (!this.options.fullAuto?.enabled) {
+        // With nothing left to migrate there is nothing to confirm - say why and
+        // carry on to the reporting the run would have produced anyway.
+        const nothingToMigrate = Object.keys(this.recordsByIds).length === 0;
+        if (nothingToMigrate) {
+            this.io.nothingToMigrate({ ...this.alreadyMigratedCountsBySObjectType });
+        } else if (!this.options.fullAuto?.enabled) {
             const confirmed = await this.confirmMigration();
             if (!confirmed) {
                 this.io.aborted();
@@ -484,6 +491,10 @@ class MigrationRunner {
     private removeAlreadyMigratedRecords(): void {
         for (const recordId of Object.keys(this.old2new)) {
             if (recordId in this.recordsByIds) {
+                const sObjectType = this.recordsByIds[recordId].attributes?.type;
+                if (sObjectType) {
+                    this.alreadyMigratedCountsBySObjectType[sObjectType] = (this.alreadyMigratedCountsBySObjectType[sObjectType] || 0) + 1;
+                }
                 delete this.recordsByIds[recordId];
             }
         }
@@ -516,7 +527,8 @@ class MigrationRunner {
 
         const source = this.options.sourceSqlite ?? this.options.sourceFile ?? this.options.sourceOrgUrl ?? this.options.sourceOrg;
         const target = this.options.targetSqlite ?? this.options.targetFile ?? this.options.targetOrgUrl ?? this.options.targetOrg;
-        const confirmationData = { source, target, recordReasons: await this.countRecordReasons(), matchers: matchersBySObjectType, ...recordCountsBySObjectType };
+        const alreadyMigrated = { ...this.alreadyMigratedCountsBySObjectType };
+        const confirmationData = { source, target, recordReasons: await this.countRecordReasons(), matchers: matchersBySObjectType, alreadyMigrated, ...recordCountsBySObjectType };
         const confirmation = await this.io.askForConfirmation(confirmationData);
         return confirmation === 'y';
     }

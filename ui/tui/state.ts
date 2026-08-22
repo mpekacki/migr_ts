@@ -38,6 +38,11 @@ export interface MigrationState {
      * reprinted on the normal screen once the alternate screen is torn down.
      */
     finalSummary: string[] | null;
+    /**
+     * Set when the run had nothing left to migrate. Any record id on the final
+     * screen then comes from an earlier run, so it must not read as "created".
+     */
+    alreadyMigrated: Record<string, number> | null;
     done: boolean;
 }
 
@@ -56,6 +61,7 @@ export function initialState(): MigrationState {
         feed: [],
         overlay: null,
         finalSummary: null,
+        alreadyMigrated: null,
         done: false,
     };
 }
@@ -129,6 +135,12 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             state.total = d.count ?? state.total;
             push(state, 'ok', `Fetched ${d.count} records`);
             break;
+        case 'nothing_to_migrate': {
+            state.alreadyMigrated = d.alreadyMigrated ?? {};
+            const counts = formatTypeCounts(d.alreadyMigrated);
+            push(state, 'info', `Nothing to migrate${counts ? ` (already migrated: ${counts})` : ''}`);
+            break;
+        }
         case 'remaining_records':
             state.remaining = d.count ?? 0;
             state.phase = 'Resolving';
@@ -225,8 +237,12 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
         case 'finished': {
             state.phase = 'Complete';
             state.done = true;
-            push(state, 'ok', 'Migration complete');
-            const summary = buildFinalSummary(event.data);
+            if (state.alreadyMigrated) {
+                push(state, 'info', 'Finished - nothing to migrate');
+            } else {
+                push(state, 'ok', 'Migration complete');
+            }
+            const summary = buildFinalSummary(event.data, state.alreadyMigrated);
             if (summary.length > 0) {
                 state.finalSummary = summary;
                 state.overlay = summary; // hold it on screen instead of the feed
@@ -244,8 +260,12 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
  * migrate next to the IDs they became in the target org. The plain UI prints
  * this as part of its `finished` output; the TUI would otherwise scroll it away
  * with the rest of the feed, so it is pinned as an overlay instead.
+ *
+ * `alreadyMigrated` is set when the run had nothing left to do. This screen is
+ * all most users read, so it has to say that up front - otherwise a list of
+ * target ids under "Migration complete" reads as though this run created them.
  */
-export function buildFinalSummary(data: unknown): string[] {
+export function buildFinalSummary(data: unknown, alreadyMigrated?: Record<string, number> | null): string[] {
     let parsed: { requestedRecords?: Record<string, string> } | null;
     try {
         parsed = typeof data === 'string' ? JSON.parse(data) : (data as typeof parsed);
@@ -258,18 +278,36 @@ export function buildFinalSummary(data: unknown): string[] {
 
     const idWidth = Math.max(...ids.map(id => id.length));
     const migrated = ids.filter(id => requested[id]).length;
-    const lines = [
-        ansi.boldOn(ansi.green('✓ Migration complete')),
-        '',
-        `${ansi.boldOn('Requested records')} ${ansi.gray(`(${migrated}/${ids.length} migrated)`)}`,
-        '',
-    ];
+    const lines = alreadyMigrated
+        ? [
+            ansi.boldOn(ansi.yellow('Nothing to migrate')),
+            '',
+            ...nothingToMigrateNote(alreadyMigrated),
+            `${ansi.boldOn('Requested records')} ${ansi.gray(`(${migrated}/${ids.length} migrated earlier)`)}`,
+            '',
+        ]
+        : [
+            ansi.boldOn(ansi.green('✓ Migration complete')),
+            '',
+            `${ansi.boldOn('Requested records')} ${ansi.gray(`(${migrated}/${ids.length} migrated)`)}`,
+            '',
+        ];
     for (const id of ids) {
         const newId = requested[id];
         lines.push(`  ${id.padEnd(idWidth)} ${ansi.gray('→')} ` +
             (newId ? ansi.green(newId) : ansi.yellow('(not migrated)')));
     }
     return lines;
+}
+
+/** The note under the headline, or nothing at all when there is none to give. */
+function nothingToMigrateNote(alreadyMigrated: Record<string, number>): string[] {
+    const total = Object.values(alreadyMigrated).reduce((sum, n) => sum + n, 0);
+    if (total === 0) {
+        return [];
+    }
+    const record = total === 1 ? 'record was' : 'records were';
+    return [ansi.gray(`${total} ${record} migrated earlier (${formatTypeCounts(alreadyMigrated)}).`), ''];
 }
 
 export function formatTypeCounts(recordCountsByType?: Record<string, number>): string {

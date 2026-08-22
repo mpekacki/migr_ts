@@ -140,6 +140,46 @@ describe('event-formatter', () => {
             const event = new IOEvent('output', 'invalid_regex');
             expect(format(event)).toBe('invalid regex, please try again');
         });
+
+        it('should format nothing_to_migrate with the already migrated counts', () => {
+            const event = new IOEvent('output', 'nothing_to_migrate', { alreadyMigrated: { Account: 1, Contact: 2 } });
+            expect(format(event)).toBe('nothing to migrate - 3 already migrated (1 Account, 2 Contact)');
+        });
+
+        it('should format nothing_to_migrate when nothing was migrated before either', () => {
+            const event = new IOEvent('output', 'nothing_to_migrate', { alreadyMigrated: {} });
+            expect(format(event)).toBe('nothing to migrate');
+        });
+
+        it('should format confirm_migration with already migrated counts', () => {
+            const event = new IOEvent('input', 'confirm_migration', {
+                source: 'sourceOrg',
+                target: 'targetOrg',
+                recordReasons: {},
+                matchers: {},
+                alreadyMigrated: { Account: 2, Contact: 3 },
+                Account: 1
+            });
+            const result = format(event);
+            expect(result).toContain('Already migrated (excluded): 5');
+            expect(result).toContain('Contact  3');
+            expect(result).toContain('Account  2');
+            // the already migrated counts must not be mixed into the records to migrate
+            expect(result).toContain('Records to migrate:');
+            expect(result).toMatch(/Total\s+1/);
+        });
+
+        it('should omit the already migrated section when nothing was migrated before', () => {
+            const event = new IOEvent('input', 'confirm_migration', {
+                source: 'sourceOrg',
+                target: 'targetOrg',
+                recordReasons: {},
+                matchers: {},
+                alreadyMigrated: {},
+                Account: 1
+            });
+            expect(format(event)).not.toContain('Already migrated');
+        });
     });
 
     describe('getFormatter(true) - debug mode', () => {

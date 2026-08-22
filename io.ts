@@ -59,6 +59,10 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'fetched_records', { count }));
     }
 
+    public nothingToMigrate(alreadyMigrated: Record<string, number>) {
+        this.onOutput(this.buildIOEvent('output', 'nothing_to_migrate', { alreadyMigrated }));
+    }
+
     public async askForConfirmation(recordCountsBySObjectType: Record<string, any>) {
         const confirmation = await this.onInput(this.buildIOEvent('input', 'confirm_migration', recordCountsBySObjectType));
         this.confirmation(confirmation);
