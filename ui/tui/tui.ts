@@ -111,21 +111,8 @@ export class TuiUI implements UI {
             this.inputBuffer = this.inputBuffer.slice(0, -1);
             return false;
         }
-        if (s === '\t') {                                            // Tab: question <-> feed
-            this.feedView = !this.feedView;
-            // Question opens at the top; the feed opens at its latest lines.
-            this.scrollOffset = this.feedView ? this.maxScroll() : 0;
-            return false;
-        }
-        if (s.startsWith('\x1b')) {                                  // scroll keys
-            const max = this.maxScroll();
-            const page = this.pageSize();
-            if (s === '\x1b[A') this.scrollOffset = Math.max(0, this.scrollOffset - 1);
-            else if (s === '\x1b[B') this.scrollOffset = Math.min(max, this.scrollOffset + 1);
-            else if (s === '\x1b[5~') this.scrollOffset = Math.max(0, this.scrollOffset - page);
-            else if (s === '\x1b[6~') this.scrollOffset = Math.min(max, this.scrollOffset + page);
-            return false;
-        }
+        if (this.handleViewKey(s)) return false;                     // Tab / scrolling
+        if (s.startsWith('\x1b')) return false;                      // other escape sequences
         // Printable input (strip control chars so pastes stay on one line).
         // eslint-disable-next-line no-control-regex
         const printable = s.replace(/[\x00-\x1f]/g, '');
@@ -133,9 +120,31 @@ export class TuiUI implements UI {
         return false;
     }
 
+    /**
+     * Keys that move around the body rather than answering anything: Tab flips
+     * between the overlay and the activity feed, the arrows and PgUp/PgDn scroll
+     * it. Shared by the prompt and the final summary. Returns true if consumed.
+     */
+    private handleViewKey(s: string): boolean {
+        if (s === '\t') {
+            this.feedView = !this.feedView;
+            // The overlay opens at the top; the feed opens at its latest lines.
+            this.scrollOffset = this.feedView ? this.maxScroll() : 0;
+            return true;
+        }
+        const max = this.maxScroll();
+        const page = this.pageSize();
+        if (s === '\x1b[A') this.scrollOffset = Math.max(0, this.scrollOffset - 1);
+        else if (s === '\x1b[B') this.scrollOffset = Math.min(max, this.scrollOffset + 1);
+        else if (s === '\x1b[5~') this.scrollOffset = Math.max(0, this.scrollOffset - page);
+        else if (s === '\x1b[6~') this.scrollOffset = Math.min(max, this.scrollOffset + page);
+        else return false;
+        return true;
+    }
+
     private maxScroll(): number {
         const { width, height } = this.dims();
-        if (this.feedView) return maxFeedScrollOffset(this.state.feed.length, height);
+        if (this.feedView) return maxFeedScrollOffset(this.state.feed, width, height);
         return maxScrollOffset(this.state.overlay, width, height);
     }
 
@@ -152,6 +161,8 @@ export class TuiUI implements UI {
         if (this.closed || !process.stdin.isTTY) return Promise.resolve();
         this.stopSpinner();
         this.awaitingExit = true;
+        this.scrollOffset = 0;
+        this.feedView = false;
         this.redraw();
         return this.waitForKeypress();
     }
@@ -167,6 +178,11 @@ export class TuiUI implements UI {
                 if (chunk.length === 1 && chunk[0] === 0x03) {
                     this.close();
                     process.exit(130);
+                }
+                // Scrolling the summary must not count as the acknowledging key.
+                if (this.handleViewKey(chunk.toString('utf8'))) {
+                    this.redraw();
+                    return;
                 }
                 stdin.removeListener('data', onData);
                 stdin.setRawMode?.(wasRaw ?? false);
@@ -184,6 +200,11 @@ export class TuiUI implements UI {
         process.stdout.removeListener('resize', this.onResize);
         this.restoreConsole();
         this.write(screen.showCursor + screen.exitAlt);
+        // The alternate screen takes the summary with it. Reprint it on the
+        // normal screen so the new record IDs stay in the scrollback.
+        if (this.state.finalSummary) {
+            this.write(this.state.finalSummary.join('\n') + `${ansi.reset}\n`);
+        }
     }
 
     // ── internals ───────────────────────────────────────────────────────────
