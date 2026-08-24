@@ -96,7 +96,7 @@ Records edited in place with SQL are picked up on the next `sourceSqlite` run, w
 
 ```bash
 npm run build        # bundle main.ts to bundle.js
-npm run release      # minified build in build/v{version}/
+npm run release      # build in build/v{version}/
 npm run lint         # eslint
 npm test             # run all tests
 ```
