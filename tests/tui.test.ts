@@ -112,13 +112,56 @@ describe('migration state reducer', () => {
         expect(s.target).toBe('out.json');
     });
 
-    it('tracks created and error counts from saved_records', () => {
+    // saved_records covers the very same records the per-record events report, so
+    // counting both was double-counting every insert and every failure.
+    it('counts a batch of inserts once, from the per-record events', () => {
         const s = initialState();
         feed(s, 'remaining_records', { count: 10 });
         feed(s, 'saved_records', [{ success: true }, { success: true }, { success: false, errors: [] }]);
+        expect(s.created).toBe(0);
+        expect(s.errors).toBe(0);
+
+        feed(s, 'created_record', { recordId: '001' });
+        feed(s, 'record_settled', { count: 9 });
+        feed(s, 'created_record', { recordId: '002' });
+        feed(s, 'record_settled', { count: 8 });
+        feed(s, 'error', { message: 'boom' });
         expect(s.created).toBe(2);
         expect(s.errors).toBe(1);
-        expect(s.remaining).toBe(8); // decremented by successes
+        expect(s.remaining).toBe(8);
+    });
+
+    it('takes remaining from the queue, not from insert successes', () => {
+        const s = initialState();
+        feed(s, 'remaining_records', { count: 5 });
+        // Matched and skipped records leave the queue without being inserted.
+        feed(s, 'found_existing_record', { sObjectName: 'Account', recordId: '001' });
+        feed(s, 'record_settled', { count: 4 });
+        feed(s, 'skipping_record', { sObjectName: 'User', recordId: '005' });
+        feed(s, 'record_settled', { count: 3 });
+        expect(s.remaining).toBe(3);
+        expect(s.matched).toBe(1);
+        expect(s.skipped).toBe(1);
+        expect(s.created).toBe(0);
+    });
+
+    it('leaves the phase alone while the queue drains mid-pass', () => {
+        const s = initialState();
+        feed(s, 'saving_records', { records: [{}] });
+        expect(s.phase).toBe('Saving');
+        feed(s, 'record_settled', { count: 4 });
+        expect(s.phase).toBe('Saving');
+        feed(s, 'remaining_records', { count: 4 });
+        expect(s.phase).toBe('Resolving');
+    });
+
+    it('counts records matched to an existing target record', () => {
+        const s = initialState();
+        feed(s, 'found_existing_record', { sObjectName: 'Account', recordId: '001' });
+        feed(s, 'using_solver', { recordId: '003', solver: 'x', solverAction: 'match' });
+        expect(s.matched).toBe(2);
+        expect(s.created).toBe(0);
+        expect(s.errors).toBe(0);
     });
 
     it('reports nothing to migrate with the already migrated counts', () => {
@@ -133,15 +176,25 @@ describe('migration state reducer', () => {
         expect(s.feed[s.feed.length - 1].text).toBe('Nothing to migrate');
     });
 
-    it('uncounts errors hidden by hideError solvers', () => {
+    // A hideError solver suppresses the 'error' event upstream, so a hidden error
+    // never reaches the counter and hidden_error has nothing left to undo.
+    it('never counts errors hidden by hideError solvers', () => {
         const s = initialState();
         feed(s, 'saved_records', [{ success: false, errors: [] }, { success: false, errors: [] }]);
-        expect(s.errors).toBe(2);
         feed(s, 'hidden_error', { recordId: '003' });
-        expect(s.errors).toBe(1);
         feed(s, 'hidden_error', { recordId: '004' });
-        feed(s, 'hidden_error', { recordId: '005' });
-        expect(s.errors).toBe(0); // never goes negative
+        expect(s.errors).toBe(0);
+    });
+
+    it('counts an error that a solver resolved only while it is unresolved', () => {
+        const s = initialState();
+        // A fix solver handles the failure silently, then the retry succeeds.
+        feed(s, 'saved_records', [{ success: false, errors: [] }]);
+        feed(s, 'using_solver', { error: 'e', solverMessage: 'fix it', solverAction: 'fix' });
+        feed(s, 'saved_records', [{ success: true }]);
+        feed(s, 'created_record', { recordId: '001' });
+        expect(s.errors).toBe(0);
+        expect(s.created).toBe(1);
     });
 
     it('counts skipped records from skip events and skip solvers', () => {
@@ -318,6 +371,36 @@ describe('frame renderer', () => {
         expect(frame).toContain('Records 0/17');
     });
 
+    it('shows every outcome counter when they have something to report', () => {
+        const s = initialState();
+        feed(s, 'fetched_records', { count: 20 });
+        feed(s, 'created_record', { recordId: '001' });
+        feed(s, 'found_existing_record', { sObjectName: 'Account', recordId: '002' });
+        feed(s, 'skipping_record', { sObjectName: 'User', recordId: '005' });
+        feed(s, 'error', { message: 'boom' });
+        feed(s, 'record_settled', { count: 16 });
+
+        const frame = stripAnsi(build(s, 100).join('\n'));
+        expect(frame).toContain('Records 1/20');
+        expect(frame).toContain('Matched 1');
+        expect(frame).toContain('Skipped 1');
+        expect(frame).toContain('Errors 1');
+        expect(frame).toContain('Remaining 16');
+    });
+
+    it('drops still-empty counters rather than truncating Remaining', () => {
+        const s = initialState();
+        feed(s, 'fetched_records', { count: 184 });
+        feed(s, 'record_settled', { count: 86 });
+        for (let i = 0; i < 13; i++) feed(s, 'created_record', { recordId: `00${i}` });
+
+        const narrow = stripAnsi(build(s, 52).join('\n'));
+        expect(narrow).toContain('Records 13/184');
+        expect(narrow).toContain('Remaining 86');
+        expect(narrow).not.toContain('Matched');   // nothing matched yet, so it yields room
+        for (const line of build(s, 52)) expect(visibleLength(line)).toBe(52);
+    });
+
     it('renders the overlay text in the body when prompting', () => {
         const s = initialState();
         s.overlay = ['Do you want to continue? (y/n)'];
@@ -366,7 +449,8 @@ describe('frame renderer', () => {
         });
         const rows = stripAnsi(build(s, 44, 24).join('\n'))
             .split('\n')
-            .filter(l => l.includes('identifier') || l.includes('Matched'));
+            // 'Matched existing', not 'Matched' - the counters row has one of those now
+            .filter(l => l.includes('identifier') || l.includes('Matched existing'));
         expect(rows.length).toBeGreaterThan(1);
         // Continuation rows are indented past the glyph column, not at it.
         expect(rows[1]).toMatch(/^│ {5}\S/);

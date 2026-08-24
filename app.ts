@@ -765,7 +765,11 @@ class MigrationRunner {
         let matchedId = applied.matchedId;
 
         if (!errorFixed) {
-            this.io.error(JSON.stringify(e));
+            // A hideError solver keeps the error out of the output entirely, so it
+            // must not be reported here either - only the record's own resolution is.
+            if (!applied.solver?.hideError) {
+                this.io.error(JSON.stringify(e));
+            }
             if (!this.options.fullAuto?.enabled) {
                 const resolution = await this.handleErrorInteractively(recordId, record, e);
                 if (resolution.exit) {
@@ -825,9 +829,11 @@ class MigrationRunner {
             this.io.skippingRecordUsingSolver(recordId, solver.message);
             result.errorFixed = true;
         } else if (solver.action === 'match') {
-            this.io.matchingRecordUsingSolver(recordId, solver.message);
             const matchId = new RegExp(solver.message).exec(e.message)?.[1];
             if (matchId) {
+                // Only report the match once it actually produced an id - a solver
+                // whose pattern captures nothing leaves the error unresolved.
+                this.io.matchingRecordUsingSolver(recordId, solver.message);
                 result.matchedId = matchId;
                 result.errorFixed = true;
             }
@@ -1206,6 +1212,9 @@ class MigrationRunner {
         delete this.fetchedRecordsByIds[recordId];
         this.migratedRecords[recordId] = newRecordId;
         this.saveHistoryFile();
+        // Every record leaves the queue through here - created, matched, skipped
+        // or given up on - so this is the one place the remaining count is exact.
+        this.io.recordSettled(Object.keys(this.recordsByIds).length);
     }
 
     private setFieldWithLaterUpdate(recordId: string, record: SObjectRecord<Schema, string>, field: string, value: string | null): void {

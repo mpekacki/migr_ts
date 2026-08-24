@@ -45,6 +45,8 @@ function formatEvent(event: IOEvent): string {
             return formatFinished(d);
         case 'remaining_records':
             return `remaining records: ${d?.count}`;
+        case 'record_settled':
+            return `record settled, ${d?.count} remaining`;
         case 'querying_existing_record':
             return `querying for existing record: ${d?.soql}`;
         case 'found_existing_record':

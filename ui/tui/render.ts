@@ -113,13 +113,7 @@ export function buildFrame(
     lines.push(row(`${phaseGlyph} ${phaseLabel} ${bar} ${String(pct).padStart(3)}%`));
 
     // ── Header: counters ────────────────────────────────────────────────────
-    const counters = [
-        `${ansi.gray('Records')} ${ansi.boldOn(String(state.created))}${ansi.gray(`/${state.total}`)}`,
-        `${ansi.gray('Errors')} ${state.errors > 0 ? ansi.red(String(state.errors)) : '0'}`,
-        `${ansi.gray('Skipped')} ${state.skipped}`,
-        `${ansi.gray('Remaining')} ${state.remaining}`,
-    ].join('   ');
-    lines.push(row(counters));
+    lines.push(row(counterLine(state, inner)));
 
     // ── Separator ───────────────────────────────────────────────────────────
     lines.push(border(B.lt, B.rt));
@@ -189,6 +183,32 @@ export function buildFrame(
 }
 
 /**
+ * The counters row. Every record ends up in exactly one of Records (inserted),
+ * Matched (already in the target), Skipped or - while it is still queued -
+ * Remaining; a record that failed outright is in none of them, which is what
+ * Errors reports. On a narrow terminal the outcome counters that are still zero
+ * are dropped, left to right, rather than letting Remaining fall off the edge.
+ */
+function counterLine(state: MigrationState, inner: number): string {
+    const records = `${ansi.gray('Records')} ${ansi.boldOn(String(state.created))}${ansi.gray(`/${state.total}`)}`;
+    const remaining = `${ansi.gray('Remaining')} ${state.remaining}`;
+    let optional = [
+        { count: state.matched, text: `${ansi.gray('Matched')} ${state.matched}` },
+        { count: state.errors, text: `${ansi.gray('Errors')} ${state.errors > 0 ? ansi.red(String(state.errors)) : '0'}` },
+        { count: state.skipped, text: `${ansi.gray('Skipped')} ${state.skipped}` },
+    ];
+    const join = () => [records, ...optional.map(c => c.text), remaining].join('   ');
+
+    let line = join();
+    while (visibleLength(line) > inner && optional.some(c => c.count === 0)) {
+        const drop = optional.findIndex(c => c.count === 0);
+        optional = optional.filter((_, i) => i !== drop);
+        line = join();
+    }
+    return line;
+}
+
+/**
  * Render the feed to display lines. Entries wider than the box wrap onto
  * continuation lines that hang under the first line's text, so long error
  * messages stay fully readable instead of running off the right edge.
@@ -241,7 +261,9 @@ function progressPct(state: MigrationState): number {
 
 function progressFromCounts(state: MigrationState): number {
     if (state.total <= 0) return 0;
-    const settled = Math.min(state.total, state.created + state.skipped);
+    // Records matched to an existing target record are done too, so they have to
+    // count here - otherwise a run against a well-populated target never fills.
+    const settled = Math.min(state.total, state.created + state.matched + state.skipped);
     return Math.max(0, Math.min(100, Math.round((settled / state.total) * 100)));
 }
 

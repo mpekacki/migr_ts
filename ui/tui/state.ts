@@ -21,12 +21,22 @@ export interface FeedEntry {
     text: string;
 }
 
+/**
+ * The counters are deliberately fed by *per-record* events only, so each record
+ * lands in exactly one of them: `created_record`, `found_existing_record` or a
+ * matching solver, `skipping_record` or a skip solver. The batch `saved_records`
+ * event covers the same records and must not touch them, or every insert is
+ * counted twice. `remaining` is likewise taken from the app's own queue length
+ * (`record_settled`) rather than derived, because a record can also leave the
+ * queue by failing outright, which no counter here represents.
+ */
 export interface MigrationState {
     source: string;
     target: string;
     phase: Phase;
     total: number;       // records fetched / to migrate
     created: number;
+    matched: number;     // resolved to a record that already existed in the target
     errors: number;
     skipped: number;
     remaining: number;
@@ -55,6 +65,7 @@ export function initialState(): MigrationState {
         phase: 'Starting',
         total: 0,
         created: 0,
+        matched: 0,
         errors: 0,
         skipped: 0,
         remaining: 0,
@@ -145,10 +156,15 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             state.remaining = d.count ?? 0;
             state.phase = 'Resolving';
             break;
+        case 'record_settled':
+            // Mid-pass progress: the queue shrank, but the phase is unchanged.
+            state.remaining = d.count ?? state.remaining;
+            break;
         case 'querying_existing_record':
             push(state, 'run', 'Querying for existing record', 1);
             break;
         case 'found_existing_record':
+            state.matched++;
             push(state, 'sub', `Matched existing ${d.sObjectName} ${d.recordId}`, 1);
             break;
         case 'skipping_record':
@@ -166,12 +182,11 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             break;
         }
         case 'saved_records': {
+            // Feed line only. The counters come from the per-record events this
+            // batch is about to produce (`created_record`, `error`, solver events).
             const arr: Array<{ success: boolean }> = Array.isArray(event.data) ? event.data : [];
             const ok = arr.filter(r => r.success).length;
             const bad = arr.length - ok;
-            state.created += ok;
-            state.errors += bad;
-            if (state.remaining > 0) state.remaining = Math.max(0, state.remaining - ok);
             push(state, bad > 0 ? 'warn' : 'ok', `Saved ${ok}/${arr.length} records`);
             break;
         }
@@ -193,6 +208,7 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
                 d.solverAction === 'append_random' ? `Appended random to ${d.recordId}` :
                 `Applied solver: ${d.solverMessage ?? ''}`;
             if (d.solverAction === 'skip') state.skipped++;
+            if (d.solverAction === 'match') state.matched++;
             push(state, 'info', label, 1);
             break;
         }
@@ -208,11 +224,8 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             state.errors++;
             push(state, 'err', d.message ?? 'error');
             break;
-        case 'hidden_error':
-            // A failed save already counted via 'saved_records', but every error on
-            // the record was handled by a solver with hideError — uncount it.
-            state.errors = Math.max(0, state.errors - 1);
-            break;
+        // 'hidden_error' needs no handling: a hideError solver suppresses the
+        // 'error' event itself, so there is nothing here to uncount.
         case 'error_updating_record':
             state.errors++;
             push(state, 'err', `Update failed ${d.sObjectName} ${d.recordId}`);
