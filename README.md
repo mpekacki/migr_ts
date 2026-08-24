@@ -59,7 +59,7 @@ See [config.json](config.json) for a full example. The most important fields:
 sqlite3 export.db "SELECT Id, Name FROM Account"
 ```
 
-Each SObject type gets its own table, named after the type (`Account`, `Custom_Object_A__c`), with the record id as the primary key and one column per field. Two bookkeeping tables sit alongside them:
+Each SObject type gets its own table, named after the type (`Account`, `Custom_Object_A__c`), with the record id as the primary key and one column per field. Every field fetched from the source is exported, read-only ones included - formula fields, `Name` on `User`, `DeveloperName` on `RecordType` - so the export can be queried on them and matchers can match on them. Which fields can actually be inserted is decided on import, not on export. Two bookkeeping tables sit alongside them:
 
 | Table | Contents |
 |-------|----------|

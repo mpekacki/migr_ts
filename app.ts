@@ -502,12 +502,22 @@ class MigrationRunner {
 
     private applyPreprocessing(): void {
         if (this.options.anonymization?.emailFields?.mode) {
-            preprocessData(this.recordsByIds, {
+            const strategy = {
                 emailAnonymization: {
                     mode: this.options.anonymization.emailFields.mode,
                     template: this.options.anonymization.emailFields.template
                 }
-            });
+            };
+            preprocessData(this.recordsByIds, strategy);
+            if (this.isMigrateToFile) {
+                // The export carries the fetched record, not just its creatable
+                // fields, so the fields only that map holds have to be anonymized
+                // too. Both maps hold the raw value once and the transformers are
+                // deterministic, so the fields they share end up identical - which
+                // is why this runs per map rather than over the merged export,
+                // where an already obfuscated address would be obfuscated again.
+                preprocessData(this.fetchedRecordsByIds, strategy);
+            }
         }
     }
 
@@ -609,12 +619,31 @@ class MigrationRunner {
         if (!matcher) {
             return { migratedRecordId: '', skipRecord: false };
         }
+        const fetchedRecord = this.fetchedRecordsByIds[recordId];
         const conditions: Record<string, string> = {};
+        const missingFields: string[] = [];
         for (const fieldMapping of matcher.fieldMappings) {
-            conditions[fieldMapping.targetField] = this.fetchedRecordsByIds[recordId][fieldMapping.sourceField];
+            // A field the source does not carry at all would be dropped from the
+            // WHERE clause by jsforce rather than rejected, and a matcher whose
+            // every field is dropped queries the whole SObject and adopts the first
+            // record it finds. Refuse instead. A null value is fine - that is a
+            // real condition, and what an exported empty field comes back as.
+            if (!fetchedRecord || !(fieldMapping.sourceField in fetchedRecord) || fetchedRecord[fieldMapping.sourceField] === undefined) {
+                missingFields.push(fieldMapping.sourceField);
+                continue;
+            }
+            conditions[fieldMapping.targetField] = fetchedRecord[fieldMapping.sourceField];
             if (conditions[fieldMapping.targetField] in this.old2new) {
                 conditions[fieldMapping.targetField] = this.old2new[conditions[fieldMapping.targetField]];
             }
+        }
+        if (missingFields.length > 0) {
+            throw new Error(
+                `Record ${recordId} (${sObjectName}) has no value for matcher field${missingFields.length > 1 ? 's' : ''} ${missingFields.join(', ')}, `
+                + 'so it cannot be matched against the target org. Fields that cannot be inserted (formula fields, Name on User, '
+                + 'DeveloperName on RecordType) were left out of exports made before this was fixed - re-export the source, '
+                + 'or add the missing column to it.'
+            );
         }
         const selector = this.targetClient!.find(sObjectName, conditions).select('Id');
         this.io.queryingForExistingRecord('SELECT Id FROM ' + sObjectName + ' WHERE ' + Object.entries(conditions).map(([k, v]) => `${k} = '${v}'`).join(' AND '));
@@ -1027,8 +1056,16 @@ class MigrationRunner {
     private async migrateToFile(): Promise<void> {
         const recordsObj: Record<string, any> = {};
         for (const [id, record] of Object.entries(this.recordsByIds)) {
+            // Export the whole fetched record, not just the fields that can be
+            // inserted: matchers read their source fields off the fetched record
+            // (findExistingRecordId), and plenty of them - Name on User, formula
+            // fields, DeveloperName on RecordType - are not creatable, so leaving
+            // them out makes the export unusable as a source. The creatable filter
+            // is applied on the way back in, by loadRecordsFromFile.
+            const fetchedRecord = this.fetchedRecordsByIds[id] ?? {};
             recordsObj[id] = {
                 attributes: record.attributes,
+                ...Object.fromEntries(Object.entries(fetchedRecord)),
                 ...Object.fromEntries(Object.entries(record)),
                 Id: id
             };
