@@ -1,4 +1,4 @@
-import { IOEvent } from '../../app';
+import IOEvent from '../../ioevent';
 import { UI } from '../ui';
 import { getFormatter } from '../event-formatter';
 import { ansi, screen } from './ansi';

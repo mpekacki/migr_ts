@@ -1,6 +1,6 @@
 import { SObjectRecord, Schema } from "jsforce";
-import { IOEvent, Options } from "./app";
-import { IOEventType } from "./ioevent";
+import { Options } from "./config";
+import IOEvent, { IOEventType } from "./ioevent";
 
 class IO {
     private readonly onOutput: (output: IOEvent) => void;

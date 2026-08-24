@@ -1,7 +1,7 @@
 import { expect } from '@jest/globals';
 import { exec } from 'child_process';
 import fs from 'fs';
-import { IOEvent } from '../app';
+import IOEvent from '../ioevent';
 
 class ApplicationRunner {
     private capturedOutput: IOEvent[] = [];

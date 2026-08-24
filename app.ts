@@ -1,121 +1,16 @@
-import { DescribeSObjectResult, Field, Schema, SObjectRecord } from 'jsforce';
-import { SalesforceClient, DefaultSalesforceClient, AuthConfig } from './salesforce-client';
+import { Field, Schema, SObjectRecord } from 'jsforce';
+import { SalesforceClient, DefaultSalesforceClient, AuthConfig, SaveError, SaveResult } from './salesforce-client';
 import * as fs from 'fs';
-import * as path from 'path';
 import { scanForCircularDependency } from './circular';
 import Chunks from './chunks';
 import IOEvent from './ioevent';
 import IO from './io';
 import { preprocessData } from './preprocess-data';
 import { readRecordsFromSqlite, writeRecordsToSqlite } from './sqlite-store';
-import { DescribeGlobalResult } from 'jsforce/lib/api/soap/schema';
-
-interface Options {
-    sourceOrg?: string;
-    sourceFile?: string;
-    sourceSqlite?: string;
-    targetOrg: string;
-    sourceOrgUrl?: string;
-    sourceOrgToken?: string;
-    targetOrgUrl?: string;
-    targetOrgToken?: string;
-    targetFile?: string;
-    targetSqlite?: string;
-    historyFilePath?: string;
-    recordIds: string[];
-    relatedRecordDepthLimit: number;
-    maxConcurrentRequests?: number;
-    matchers: {
-        sObjectType: string;
-        fieldMappings: {
-            sourceField: string;
-            targetField: string;
-        }[];
-        whenMissing: 'skip' | 'create';
-    }[];
-    relationships: {
-        [sObjectType: string]: {
-            name: string;
-        }[];
-    };
-    solvers: SolverType[];
-    fullAuto?: {
-        enabled: boolean;
-        unhandledErrorBehavior: 'skip' | 'saveAndExit';
-    };
-    anonymization?: {
-        emailFields?: {
-            mode: 'obfuscate' | 'sanitize';
-            template?: string;
-        };
-    };
-}
-
-interface Solver {
-    message: string;
-    hideError?: boolean;
-}
-
-interface FixSolver extends Solver {
-    action: 'fix';
-    changeFields: {
-        field: string;
-        value: string;
-    }[];
-}
-
-interface SkipSolver extends Solver {
-    action: 'skip';
-}
-
-interface MatchSolver extends Solver {
-    action: 'match';
-}
-
-interface ExtractSolver extends Solver {
-    action: 'extract_column';
-    replaceWith: string | null;
-    fromFields?: boolean;
-}
-
-interface AppendRandomSolver extends Solver {
-    action: 'append_random';
-    changeFields: {
-        field: string;
-        length: number;
-    }[];
-}
-
-interface RetrySolver extends Solver {
-    action: 'retry';
-    maxAttempts?: number;
-    delay?: number; // milliseconds
-}
-
-interface BackoffSolver extends Solver {
-    action: 'backoff';
-    maxAttempts?: number;
-    initialDelay?: number; // milliseconds
-    backoffMultiplier?: number;
-}
-
-interface FallbackSolver extends Solver {
-    action: 'fallback';
-    fallbackAction: 'skip' | 'log_and_continue';
-}
-
-type SolverType = FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver | RetrySolver | BackoffSolver | FallbackSolver;
-
-interface SaveError {
-    message: string;
-    fields: string[];
-}
-
-interface SaveResult {
-    id: string;
-    success: boolean;
-    errors: SaveError[];
-}
+import { FixSolver, Options, SolverType } from './config';
+import DescribeCache from './describe-cache';
+import MigrationHistory from './history';
+import { applySolver, handleJsforceError as solveJsforceError } from './solvers';
 
 export interface ClientFactory {
     createSourceClient(orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined): Promise<SalesforceClient>;
@@ -180,17 +75,14 @@ class MigrationRunner {
     private isMigrateToFile: boolean;
     private isMigrateFromFile: boolean;
 
-    private historyFilePath: string = '';
-    private describeFromFile: any | null = null;
-    private describeGlobal: DescribeGlobalResult | null = null;
-    private sObjectDescribes = { cache: {} as Record<string, Promise<DescribeSObjectResult>> };
+    /** Both are set up by the first two steps of run() and used by everything after. */
+    private describes!: DescribeCache;
+    private history!: MigrationHistory;
 
     private recordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     private fetchedRecordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     private lookupFieldsBySObjectType: Record<string, Field[]> = {};
-    private old2new: Record<string, string> = {};
     private errors: Record<string, { message: string, fixed: boolean, solver?: SolverType }[]> = {};
-    private migratedRecords: Record<string, string> = {};
     private recordAddedReasons: Record<string, string> = {};
     private toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
     /** Fetched records dropped by removeAlreadyMigratedRecords, counted per SObject type. */
@@ -215,7 +107,7 @@ class MigrationRunner {
         this.io.startingMigration(this.options);
 
         await this.initializeClients();
-        this.initializeHistory();
+        this.history = new MigrationHistory(this.options, this.isMigrateToFile);
         await this.validateMatchers();
 
         let recordIdsToFetch = this.options.recordIds;
@@ -270,35 +162,17 @@ class MigrationRunner {
         if (!this.targetClient) {
             throw new Error('No target client available');
         }
-    }
 
-    private initializeHistory(): void {
-        if (this.options.historyFilePath) {
-            const stats = fs.existsSync(this.options.historyFilePath) ? fs.statSync(this.options.historyFilePath) : null;
-            if ((stats && stats.isDirectory()) || (!stats && this.options.historyFilePath.endsWith(path.sep))) {
-                this.historyFilePath = path.join(this.options.historyFilePath, `${this.options.targetOrg}__history.json`);
-            } else {
-                this.historyFilePath = this.options.historyFilePath;
-            }
-        } else {
-            this.historyFilePath = path.join(process.cwd(), `${this.options.targetOrg}__history.json`);
-        }
-        let history: Record<string, string> = {};
-        if (!this.isMigrateToFile && fs.existsSync(this.historyFilePath)) {
-            history = JSON.parse(fs.readFileSync(this.historyFilePath, 'utf8'));
-        }
-        for (const recordId of Object.keys(history)) {
-            this.old2new[recordId] = history[recordId];
-        }
+        this.describes = new DescribeCache(this.io, this.sourceClient, this.targetClient, this.isMigrateFromFile);
     }
 
     private async validateMatchers(): Promise<void> {
         this.io.checkingMatchers();
         const matcherSObjectTypes = [...new Set(this.options.matchers.map(m => m.sObjectType))];
-        await Promise.all(matcherSObjectTypes.map(sObjectType => this.getSObjectDescribe(sObjectType)));
+        await Promise.all(matcherSObjectTypes.map(sObjectType => this.describes.getSObject(sObjectType)));
 
         for (const matcher of this.options.matchers) {
-            const sobjectDescribe = await this.getSObjectDescribe(matcher.sObjectType);
+            const sobjectDescribe = await this.describes.getSObject(matcher.sObjectType);
             for (const fieldMapping of matcher.fieldMappings) {
                 if (!sobjectDescribe.fields.some(field => field.name === fieldMapping.sourceField)) {
                     throw new Error(`Field ${fieldMapping.sourceField} not found in SObject ${matcher.sObjectType}`);
@@ -311,22 +185,24 @@ class MigrationRunner {
         const loadedRecords = this.options.sourceSqlite !== undefined
             ? readRecordsFromSqlite(this.options.sourceSqlite)
             : JSON.parse(fs.readFileSync(this.options.sourceFile!, 'utf8')).records;
-        this.describeFromFile = {
-            sobjects: []
-        };
+        // Stands in for the source org's global describe. It is handed over before
+        // the loop rather than after it because getSObjectType reads it as the loop
+        // fills it in - each record's own type is enough to place the ones after it.
+        const describeFromFile: { sobjects: any[] } = { sobjects: [] };
+        this.describes.setFileDescribe(describeFromFile);
 
         for (const recordId of Object.keys(loadedRecords)) {
             const record = loadedRecords[recordId];
-            if (!this.describeFromFile.sobjects.find((sobject: any) => sobject.name === record.attributes.type)) {
-                this.describeFromFile.sobjects.push({
+            if (!describeFromFile.sobjects.find((sobject: any) => sobject.name === record.attributes.type)) {
+                describeFromFile.sobjects.push({
                     keyPrefix: recordId.substring(0, 3),
                     name: record.attributes.type
                 });
             }
             this.fetchedRecordsByIds[recordId] = record;
 
-            const sObjectName = await this.getSObjectType(recordId, record);
-            const creatableFields = (await this.getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
+            const sObjectName = await this.describes.getSObjectType(recordId, record);
+            const creatableFields = (await this.describes.getSObject(sObjectName)).fields.filter(field => field.createable);
             const recordForMigration: SObjectRecord<Schema, string> = {};
             for (const field of creatableFields) {
                 recordForMigration[field.name] = record[field.name];
@@ -365,8 +241,8 @@ class MigrationRunner {
     }
 
     private async fetchRecordAndDiscoverIds(recordId: string, depth: number): Promise<string[]> {
-        const sObjectName = await this.getSObjectType(recordId);
-        const sobjectDescribe = await this.getSObjectDescribe(sObjectName);
+        const sObjectName = await this.describes.getSObjectType(recordId);
+        const sobjectDescribe = await this.describes.getSObject(sObjectName);
         const reason = this.recordAddedReasons[recordId];
         this.io.fetchingRecord(recordId, sObjectName, reason);
         const recordFields = await this.retrieveRecord(recordId, sObjectName);
@@ -374,7 +250,7 @@ class MigrationRunner {
             return [];
         }
         this.fetchedRecordsByIds[recordId] = recordFields;
-        const creatableFields = (await this.getSObjectDescribe(sObjectName)).fields.filter(field => field.createable);
+        const creatableFields = (await this.describes.getSObject(sObjectName)).fields.filter(field => field.createable);
         const record: SObjectRecord<Schema, string> = {};
         for (const field of creatableFields) {
             record[field.name] = recordFields[field.name];
@@ -400,11 +276,11 @@ class MigrationRunner {
                 return null;
             } else if (error.errorCode === 'INVALID_TYPE_FOR_OPERATION') {
                 this.io.recordNotQueryable(recordId, sObjectName);
-                this.old2new[recordId] = '';
+                this.history.remember(recordId, '');
                 return null;
             } else if (error.errorCode === 'MALFORMED_ID') {
                 this.io.malformedId(recordId, sObjectName);
-                this.old2new[recordId] = recordId;
+                this.history.remember(recordId, recordId);
                 return null;
             } else {
                 throw error;
@@ -421,7 +297,7 @@ class MigrationRunner {
                     for (const match of matches) {
                         if (!(match in this.recordsByIds) && !newIds.includes(match)) {
                             try {
-                                await this.getSObjectType(match);
+                                await this.describes.getSObjectType(match);
                                 newIds.push(match);
                                 if (recordId in this.recordAddedReasons) {
                                     this.recordAddedReasons[match] = this.recordAddedReasons[recordId];
@@ -489,7 +365,7 @@ class MigrationRunner {
     }
 
     private removeAlreadyMigratedRecords(): void {
-        for (const recordId of Object.keys(this.old2new)) {
+        for (const recordId of this.history.ids()) {
             if (recordId in this.recordsByIds) {
                 const sObjectType = this.recordsByIds[recordId].attributes?.type;
                 if (sObjectType) {
@@ -567,12 +443,12 @@ class MigrationRunner {
         const toInsert: Record<string, SObjectRecord<Schema, string>> = {};
         for (const recordId of Object.keys(this.recordsByIds)) {
             const record = this.recordsByIds[recordId];
-            const sObjectName = await this.getSObjectType(recordId, record);
+            const sObjectName = await this.describes.getSObjectType(recordId, record);
             const recordReady = await this.resolveRecordReferences(recordId, record);
             if (recordReady) {
                 anyRecordProcessed = true;
                 const { migratedRecordId, skipRecord } = await this.findExistingRecordId(recordId, sObjectName);
-                const isObjectCreatable = (await this.getSObjectDescribe(sObjectName)).createable;
+                const isObjectCreatable = (await this.describes.getSObject(sObjectName)).createable;
                 if (!migratedRecordId && !skipRecord && isObjectCreatable) {
                     toInsert[recordId] = {
                         attributes: record.attributes,
@@ -594,15 +470,15 @@ class MigrationRunner {
                 if (matches) {
                     for (const match of matches) {
                         try {
-                            await this.getSObjectType(match);
+                            await this.describes.getSObjectType(match);
                         } catch {
                             // do nothing, it was some random string
                             continue;
                         }
-                        if (!(match in this.old2new) && match in this.recordsByIds && match !== recordId) {
+                        if (!this.history.has(match) && match in this.recordsByIds && match !== recordId) {
                             recordReady = false;
-                        } else if (match in this.old2new) {
-                            record[field] = record[field].replace(match, this.old2new[match]);
+                        } else if (this.history.has(match)) {
+                            record[field] = record[field].replace(match, this.history.get(match));
                             if (record[field] === '') {
                                 delete record[field];
                             }
@@ -633,8 +509,8 @@ class MigrationRunner {
                 continue;
             }
             conditions[fieldMapping.targetField] = fetchedRecord[fieldMapping.sourceField];
-            if (conditions[fieldMapping.targetField] in this.old2new) {
-                conditions[fieldMapping.targetField] = this.old2new[conditions[fieldMapping.targetField]];
+            if (this.history.has(conditions[fieldMapping.targetField])) {
+                conditions[fieldMapping.targetField] = this.history.get(conditions[fieldMapping.targetField]);
             }
         }
         if (missingFields.length > 0) {
@@ -786,7 +662,13 @@ class MigrationRunner {
     }
 
     private async handleSaveError(recordId: string, record: SObjectRecord<Schema, string>, e: SaveError): Promise<{ retry: boolean, retryAll: boolean, matchedId?: string, solverAdded: boolean, exit: boolean, hidden: boolean }> {
-        const applied = this.applySolver(recordId, record, e);
+        const applied = applySolver(recordId, record, e, {
+            io: this.io,
+            solvers: this.options.solvers,
+            usedSolvers: this.errors[recordId]?.filter(error => error.message === e.message).map(error => error.solver) ?? [],
+            setField: (field, value) => this.setFieldWithLaterUpdate(recordId, record, field, value),
+            stashedFields: () => this.toUpdateLater[recordId],
+        });
         let solver = applied.solver;
         let errorFixed = applied.errorFixed;
         let retry = applied.retry;
@@ -830,64 +712,6 @@ class MigrationRunner {
         }
         this.errors[recordId].push({ message: e.message, fixed: errorFixed, solver });
         return { retry, retryAll, matchedId, solverAdded: false, exit: false, hidden: false };
-    }
-
-    private applySolver(recordId: string, record: SObjectRecord<Schema, string>, e: SaveError): { solver?: SolverType, errorFixed: boolean, retry: boolean, matchedId?: string } {
-        const result: { solver?: SolverType, errorFixed: boolean, retry: boolean, matchedId?: string } = { errorFixed: false, retry: false };
-        if (!this.options.solvers) {
-            return result;
-        }
-        const usedSolvers = this.errors[recordId]?.filter(error => error.message === e.message).map(error => error.solver);
-        if (usedSolvers?.length > 0) {
-            this.io.skippingPreviouslyUsedSolvers(usedSolvers);
-        }
-        const solver = this.options.solvers.find(solver => new RegExp(solver.message).test(e.message) && !usedSolvers?.includes(solver));
-        if (!solver) {
-            return result;
-        }
-        result.solver = solver;
-        if (solver.action === 'fix') {
-            for (const changeField of solver.changeFields) {
-                this.setFieldWithLaterUpdate(recordId, record, changeField.field, changeField.value);
-            }
-            this.io.fixingUsingSolver(e.message, solver.message, solver.action);
-            this.io.savedOldFieldsInToUpdateLater(this.toUpdateLater[recordId]);
-            result.errorFixed = true;
-            result.retry = true;
-        } else if (solver.action === 'skip') {
-            this.io.skippingRecordUsingSolver(recordId, solver.message);
-            result.errorFixed = true;
-        } else if (solver.action === 'match') {
-            const matchId = new RegExp(solver.message).exec(e.message)?.[1];
-            if (matchId) {
-                // Only report the match once it actually produced an id - a solver
-                // whose pattern captures nothing leaves the error unresolved.
-                this.io.matchingRecordUsingSolver(recordId, solver.message);
-                result.matchedId = matchId;
-                result.errorFixed = true;
-            }
-        } else if (solver.action === 'extract_column') {
-            this.io.extractingColumnFromError(e.message, solver.message);
-            let columnName;
-            if (solver.fromFields) {
-                columnName = e.fields[0];
-            } else {
-                columnName = new RegExp(solver.message).exec(e.message)?.[1];
-            }
-            if (columnName) {
-                this.setFieldWithLaterUpdate(recordId, record, columnName, solver.replaceWith);
-                result.errorFixed = true;
-                result.retry = true;
-            }
-        } else if (solver.action === 'append_random') {
-            this.io.appendingRandomToRecord(recordId, solver.message);
-            for (const changeField of solver.changeFields) {
-                record[changeField.field] = record[changeField.field] + '.' + Math.random().toString(36).substring(2, 2 + changeField.length);
-            }
-            result.errorFixed = true;
-            result.retry = true;
-        }
-        return result;
     }
 
     private async handleErrorInteractively(recordId: string, record: SObjectRecord<Schema, string>, e: SaveError): Promise<{ solver?: SolverType, errorFixed: boolean, retry: boolean, retryAll: boolean, matchedId?: string, solverAdded: boolean, exit: boolean }> {
@@ -963,10 +787,10 @@ class MigrationRunner {
         const describePromises: Promise<void>[] = [];
         for (const sObjectName of uniqueSObjectTypes) {
             describePromises.push((async () => {
-                requiredLookupFieldsBySObjectType[sObjectName] = (await this.getSObjectDescribe(sObjectName)).fields
+                requiredLookupFieldsBySObjectType[sObjectName] = (await this.describes.getSObject(sObjectName)).fields
                     .filter(field => field.type === 'reference' && !field.nillable && field.createable)
                     .map(field => field.name);
-                allLookupFieldsBySObjectType[sObjectName] = (await this.getSObjectDescribe(sObjectName)).fields
+                allLookupFieldsBySObjectType[sObjectName] = (await this.describes.getSObject(sObjectName)).fields
                     .filter(field => field.type === 'reference' && field.createable)
                     .map(field => field.name);
             })());
@@ -999,14 +823,14 @@ class MigrationRunner {
                     const matches = value.match(ID_REGEX);
                     if (matches) {
                         for (const match of matches) {
-                            if (match in this.old2new) {
-                                record[field] = value.replace(match, this.old2new[match]);
+                            if (this.history.has(match)) {
+                                record[field] = value.replace(match, this.history.get(match));
                             }
                         }
                     }
                 }
             }
-            record.Id = this.old2new[recordId];
+            record.Id = this.history.get(recordId);
             if (!record.Id) {
                 this.io.recordNoId(recordId);
                 continue;
@@ -1120,122 +944,20 @@ class MigrationRunner {
         }
     }
 
-    private async getDescribeGlobal(): Promise<any> {
-        if (this.isMigrateFromFile) {
-            return this.describeFromFile;
-        }
-        if (!this.describeGlobal) {
-            this.describeGlobal = await this.sourceClient!.describeGlobal();
-        }
-        return this.describeGlobal;
-    }
-
-    private async getSObjectDescribe(sObjectName: string): Promise<DescribeSObjectResult> {
-        if (!(sObjectName in this.sObjectDescribes.cache)) {
-            this.io.describeSObject(sObjectName);
-            this.sObjectDescribes.cache[sObjectName] = this.targetClient!.describeSObject(sObjectName);
-        }
-        try {
-            return await this.sObjectDescribes.cache[sObjectName];
-        } catch (ex) {
-            console.log('error fetching ' + sObjectName + ' SObject describe');
-            throw ex;
-        }
-    }
-
-    private async getSObjectType(recordId: string, record?: any): Promise<string> {
-        if (record && record.attributes && record.attributes.type) {
-            return record.attributes.type;
-        }
-        const describeGlobal = await this.getDescribeGlobal();
-        if (describeGlobal) {
-            const prefix = recordId.substring(0, 3);
-            const sobject = describeGlobal.sobjects.find((sobject: any) => sobject.keyPrefix === prefix);
-            if (!sobject) {
-                throw new Error(`SObject with prefix ${prefix} not found`);
-            }
-            return sobject.name;
-        }
-        throw new Error('Unable to determine SObject type');
-    }
-
     private async handleJsforceError(error: any, context: string, retryOperation?: () => Promise<any>): Promise<{ success: boolean, result?: any, shouldSkip?: boolean }> {
-        const errorMessage = error.message || error.toString();
-
-        const solver = this.options.solvers?.find(solver => new RegExp(solver.message).test(errorMessage));
-
-        if (solver) {
-            if (solver.action === 'retry') {
-                const retrySolver = solver as RetrySolver;
-                const maxAttempts = retrySolver.maxAttempts || 3;
-                const delay = retrySolver.delay || 1000;
-
-                for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                    try {
-                        if (delay > 0) {
-                            await new Promise(resolve => setTimeout(resolve, delay));
-                        }
-                        this.io.error(`Retrying ${context} (attempt ${attempt}/${maxAttempts})`);
-                        const result = await retryOperation!();
-                        return { success: true, result };
-                    } catch {
-                        if (attempt === maxAttempts) {
-                            return { success: false };
-                        }
-                    }
-                }
-            } else if (solver.action === 'backoff') {
-                const backoffSolver = solver as BackoffSolver;
-                const maxAttempts = backoffSolver.maxAttempts || 3;
-                const initialDelay = backoffSolver.initialDelay || 1000;
-                const multiplier = backoffSolver.backoffMultiplier || 2;
-
-                for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                    try {
-                        const delay = initialDelay * Math.pow(multiplier, attempt - 1);
-                        if (delay > 0) {
-                            await new Promise(resolve => setTimeout(resolve, delay));
-                        }
-                        this.io.error(`Retrying ${context} with backoff (attempt ${attempt}/${maxAttempts}, delay: ${delay}ms)`);
-                        const result = await retryOperation!();
-                        return { success: true, result };
-                    } catch {
-                        if (attempt === maxAttempts) {
-                            return { success: false };
-                        }
-                    }
-                }
-            } else if (solver.action === 'fallback') {
-                const fallbackSolver = solver as FallbackSolver;
-                this.io.error(`Fallback action for ${context}: ${fallbackSolver.fallbackAction}`);
-                if (fallbackSolver.fallbackAction === 'skip') {
-                    return { success: false, shouldSkip: true };
-                } else if (fallbackSolver.fallbackAction === 'log_and_continue') {
-                    this.io.error(`Continuing despite error in ${context}: ${errorMessage}`);
-                    return { success: false, shouldSkip: false };
-                }
-            }
-        }
-
-        throw error;
-    }
-
-    private saveHistoryFile(): void {
-        if (!this.isMigrateToFile) {
-            fs.writeFileSync(this.historyFilePath, JSON.stringify(this.old2new, null, 2));
-        }
+        return solveJsforceError(error, context, this.io, this.options.solvers, retryOperation);
     }
 
     private async saveAndExit(): Promise<void> {
-        this.saveHistoryFile();
+        this.history.save();
 
         const requestedRecordsMappings: Record<string, string> = {};
         for (const originalRecordId of this.options.recordIds) {
-            requestedRecordsMappings[originalRecordId] = this.old2new[originalRecordId] || '';
+            requestedRecordsMappings[originalRecordId] = this.history.get(originalRecordId) || '';
         }
 
         const outputData = {
-            allMigratedRecords: this.old2new,
+            allMigratedRecords: this.history.all(),
             errors: this.errors,
             recordReasons: await this.countRecordReasons(),
             requestedRecords: requestedRecordsMappings
@@ -1244,11 +966,9 @@ class MigrationRunner {
     }
 
     private setNewRecordId(recordId: string, newRecordId: string): void {
-        this.old2new[recordId] = newRecordId;
+        this.history.settle(recordId, newRecordId);
         delete this.recordsByIds[recordId];
         delete this.fetchedRecordsByIds[recordId];
-        this.migratedRecords[recordId] = newRecordId;
-        this.saveHistoryFile();
         // Every record leaves the queue through here - created, matched, skipped
         // or given up on - so this is the one place the remaining count is exact.
         this.io.recordSettled(Object.keys(this.recordsByIds).length);
@@ -1272,7 +992,7 @@ class MigrationRunner {
         const recordReasons: Record<string, Record<string, number>> = {};
         for (const recordId in this.recordAddedReasons) {
             const reason = this.recordAddedReasons[recordId];
-            const sObjectType = await this.getSObjectType(recordId);
+            const sObjectType = await this.describes.getSObjectType(recordId);
 
             if (!recordReasons[reason]) {
                 recordReasons[reason] = {};
@@ -1288,4 +1008,4 @@ async function main(options: Options, onOutput: (output: IOEvent) => void, onInp
     await runner.run();
 }
 
-export { main, Options, IOEvent };
+export { main };

@@ -7,6 +7,17 @@ export interface AuthConfig {
     orgToken?: string;
 }
 
+export interface SaveError {
+    message: string;
+    fields: string[];
+}
+
+export interface SaveResult {
+    id: string;
+    success: boolean;
+    errors: SaveError[];
+}
+
 export interface SalesforceClient {
     describeGlobal(): Promise<DescribeGlobalResult>;
     describeSObject(sObjectName: string): Promise<DescribeSObjectResult>;
@@ -14,8 +25,8 @@ export interface SalesforceClient {
     find(sObjectName: string, conditions: Record<string, string>): any;
     select(sObjectName: string): any;
     query(soql: string): Promise<any>;
-    bulkCreate(records: any[]): Promise<Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>>;
-    bulkUpdate(records: any[]): Promise<Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>>;
+    bulkCreate(records: any[]): Promise<SaveResult[]>;
+    bulkUpdate(records: any[]): Promise<SaveResult[]>;
     update(sObjectName: string, record: any): Promise<void>;
     getVersion(): string;
 }
@@ -75,7 +86,7 @@ export class DefaultSalesforceClient implements SalesforceClient {
         return await this.connection.query(soql);
     }
 
-    async bulkCreate(records: any[]): Promise<Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>> {
+    async bulkCreate(records: any[]): Promise<SaveResult[]> {
         return (await this.connection.request({
             method: 'POST',
             url: `/services/data/v${this.connection.version}/composite/sobjects`,
@@ -83,10 +94,10 @@ export class DefaultSalesforceClient implements SalesforceClient {
                 allOrNone: false,
                 records: records
             })
-        })) as Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>;
+        })) as SaveResult[];
     }
 
-    async bulkUpdate(records: any[]): Promise<Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>> {
+    async bulkUpdate(records: any[]): Promise<SaveResult[]> {
         return (await this.connection.request({
             method: 'PATCH',
             url: `/services/data/v${this.connection.version}/composite/sobjects`,
@@ -94,7 +105,7 @@ export class DefaultSalesforceClient implements SalesforceClient {
                 allOrNone: false,
                 records: records
             })
-        })) as Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>;
+        })) as SaveResult[];
     }
 
     async update(sObjectName: string, record: any): Promise<void> {

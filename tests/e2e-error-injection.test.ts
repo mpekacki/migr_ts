@@ -1,7 +1,9 @@
 import { test, expect } from '@jest/globals';
 import { Connection, AuthInfo } from '@salesforce/core';
 import * as fs from 'fs';
-import { main, ClientFactory, Options, IOEvent } from '../app';
+import { main, ClientFactory } from '../app';
+import { Options } from '../config';
+import IOEvent from '../ioevent';
 import { MockSalesforceClient } from './mock-salesforce-client';
 import { DefaultSalesforceClient, SalesforceClient } from '../salesforce-client';
 
