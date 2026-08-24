@@ -58,4 +58,3 @@ jobs:
       with:
         name: build-artifacts-v${{ steps.bump.outputs.version }}
         path: build/
-        retention-days: 30
