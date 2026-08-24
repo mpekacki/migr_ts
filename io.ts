@@ -85,6 +85,15 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'remaining_records', { count }));
     }
 
+    /**
+     * One record left the queue - created, matched, skipped or given up on - and
+     * `count` are still waiting. Unlike remainingRecords this says nothing about
+     * where the run is, only how much is left.
+     */
+    public recordSettled(count: number) {
+        this.onOutput(this.buildIOEvent('output', 'record_settled', { count }));
+    }
+
     public queryingForExistingRecord(soql: string) {
         this.onOutput(this.buildIOEvent('output', 'querying_existing_record', { soql }));
     }

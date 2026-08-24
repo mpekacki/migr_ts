@@ -22,6 +22,7 @@ export type IOEventType =
     | 'confirmation'
     | 'finished'
     | 'remaining_records'
+    | 'record_settled'
     | 'querying_existing_record'
     | 'found_existing_record'
     | 'skipping_record'
