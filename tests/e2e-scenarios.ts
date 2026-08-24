@@ -1280,6 +1280,17 @@ export const e2eScenarios: E2EScenario[] = [
 
         expect(queryExportedRecords('./test-output.db', 'Custom_Object_C__c')).toHaveLength(1);
 
+        // The owner of the records drags User and Profile into the export, and both
+        // are matched on a field that cannot be inserted - Name. Fields like that
+        // are exported too, or the database would be useless as a migration source.
+        const exportedUsers = queryExportedRecords('./test-output.db', 'User');
+        expect(exportedUsers.length).toBeGreaterThan(0);
+        expect(exportedUsers[0].Name).toBeTruthy();
+
+        const exportedProfiles = queryExportedRecords('./test-output.db', 'Profile');
+        expect(exportedProfiles.length).toBeGreaterThan(0);
+        expect(exportedProfiles[0].Name).toBeTruthy();
+
         const configFromSqlite = {
             sourceSqlite: 'test-output.db',
             targetOrg: ctx.targetOrg.alias,
@@ -1287,7 +1298,19 @@ export const e2eScenarios: E2EScenario[] = [
             matchers: defaultMatchers
         };
 
-        const { parsedOutput } = await ctx.runMigration(configFromSqlite);
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(configFromSqlite);
+
+        // so the User matcher queries by name rather than issuing a condition-less
+        // query and adopting whichever user the target org returns first
+        const userMatcherQueries = capturedOutput
+            .filter(event => event.type === 'querying_existing_record')
+            .map(event => String(event.data?.soql))
+            .filter(soql => soql.includes('FROM User WHERE'));
+        expect(userMatcherQueries.length).toBeGreaterThan(0);
+        for (const soql of userMatcherQueries) {
+            expect(soql).toContain('Name = ');
+            expect(soql).not.toContain('undefined');
+        }
 
         const newCustObjAId = assertRecordMigrated(parsedOutput, custObjA.id);
         const newCustObjBId = assertRecordMigrated(parsedOutput, custObjB.id);
@@ -1480,6 +1503,31 @@ export const e2eScenarios: E2EScenario[] = [
         const newContact = await retrieveRecord(ctx.targetOrg, 'Contact', newContactId);
         expect(newContact.Email).not.toBe(uniqueEmail);
         expect(newContact.Email).toContain('@');
+    }),
+
+    scenario('anonymize email fields when exporting', async (ctx: E2EContext) => {
+        const uniqueEmail = `test+${Date.now()}@example.com`;
+        const contact = await createRecord(ctx.sourceOrg, 'Contact', { FirstName: 'John', LastName: 'Doe', Email: uniqueEmail });
+
+        await ctx.runMigration({
+            sourceOrg: ctx.sourceOrg.alias,
+            targetSqlite: 'test-output.db',
+            recordIds: [contact.id],
+            matchers: defaultMatchers,
+            anonymization: {
+                emailFields: {
+                    mode: 'obfuscate'
+                }
+            }
+        });
+
+        // the export holds the whole fetched record, so anonymization has to cover
+        // it just as it covers the records an org migration inserts
+        const exportedContact = queryExportedRecords('./test-output.db', 'Contact')
+            .find(row => row.Id === contact.id);
+        expect(exportedContact).toBeDefined();
+        expect(exportedContact.Email).not.toBe(uniqueEmail);
+        expect(exportedContact.Email).toContain('@');
     }),
 
     scenario('report record reason counts', async (ctx: E2EContext) => {

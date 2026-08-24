@@ -15,6 +15,7 @@
 
 import { expect, test } from '@jest/globals';
 import fs from 'fs';
+import { DatabaseSync } from 'node:sqlite';
 import { IOEvent, Options, main } from '../app';
 import { getFormatter } from '../ui/event-formatter';
 import {
@@ -23,6 +24,7 @@ import {
     MigrationRunResult,
     TestOrg,
     cleanupMigrationArtifacts,
+    defaultMatchers,
     toMigrationRunResult
 } from './e2e-harness';
 import { e2eScenarios } from './e2e-scenarios';
@@ -181,3 +183,34 @@ for (const e2eScenario of e2eScenarios) {
         await e2eScenario.run(createContext());
     });
 }
+
+// Lives here rather than in the shared scenarios because the failure it asserts on
+// is a thrown error: in this context that surfaces as a rejected main(), while the
+// live CLI turns it into a FATAL line and a non-zero exit code.
+test('a source missing a matcher field fails instead of matching an arbitrary record', async () => {
+    const ctx = createContext();
+    const custObjA = await ctx.sourceOrg.create('Custom_Object_A__c', {});
+
+    await ctx.runMigration({
+        sourceOrg: ctx.sourceOrg.alias,
+        targetSqlite: 'test-output.db',
+        recordIds: [custObjA.id],
+        matchers: defaultMatchers
+    });
+
+    // an export made before non-creatable fields were exported: the User matcher
+    // matches on Name, and the column is not there
+    const db = new DatabaseSync('./test-output.db');
+    try {
+        db.exec('ALTER TABLE "User" DROP COLUMN "Name"');
+    } finally {
+        db.close();
+    }
+
+    await expect(ctx.runMigration({
+        sourceSqlite: 'test-output.db',
+        targetOrg: ctx.targetOrg.alias,
+        recordIds: [custObjA.id],
+        matchers: defaultMatchers
+    })).rejects.toThrow(/\(User\) has no value for matcher field Name/);
+});
