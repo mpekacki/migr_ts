@@ -53,8 +53,14 @@ jobs:
     - name: Create production build
       run: npm run release
 
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-artifacts-v${{ steps.bump.outputs.version }}
-        path: build/
+    # Release assets never expire, unlike the workflow artifacts this replaced.
+    - name: Publish GitHub release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        VERSION: ${{ steps.bump.outputs.version }}
+      run: |
+        gh release create "v$VERSION" \
+          "build/v$VERSION/bundle.js" \
+          --title "v$VERSION" \
+          --generate-notes \
+          --verify-tag

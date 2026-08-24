@@ -20,10 +20,18 @@ A CLI tool for migrating Salesforce records between orgs (or to/from files). It 
 
 ## Usage
 
+Download `bundle.js` from the [latest release](https://github.com/mpekacki/migr_ts/releases/latest) and run it with Node — the bundle is self-contained, so no `npm install` is needed next to it:
+
+```bash
+node bundle.js -c config.json [-o output.log] [-d] [-p]
+```
+
+Or build it from source:
+
 ```bash
 npm install
 npm run build
-node bundle.js -c config.json [-o output.log] [-d] [-p]
+node bundle.js -c config.json
 ```
 
 | Flag | Description |
