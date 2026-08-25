@@ -190,6 +190,34 @@ describe('event-formatter', () => {
         });
     });
 
+    describe('error_updating_record', () => {
+        const format = getFormatter(false);
+
+        it('should print the whole error payload, not [object Object]', () => {
+            const event = new IOEvent('output', 'error_updating_record', {
+                recordId: '001xx000003DGb0AAG',
+                sObjectName: 'Account',
+                error: {
+                    message: 'insufficient access rights on cross-reference id',
+                    errors: [{ message: 'insufficient access rights on cross-reference id', fields: ['ParentId'], statusCode: 'INSUFFICIENT_ACCESS_ON_CROSS_REFERENCE_ENTITY' }]
+                }
+            });
+            const result = format(event);
+            expect(result).toContain('error updating record 001xx000003DGb0AAG of type Account');
+            expect(result).toContain('insufficient access rights on cross-reference id');
+            expect(result).toContain('ParentId');
+            expect(result).toContain('INSUFFICIENT_ACCESS_ON_CROSS_REFERENCE_ENTITY');
+            expect(result).not.toContain('[object Object]');
+        });
+
+        it('should print a non-object error as it comes', () => {
+            const event = new IOEvent('output', 'error_updating_record', {
+                recordId: '001', sObjectName: 'Account', error: 'connection reset'
+            });
+            expect(format(event)).toBe('error updating record 001 of type Account: connection reset');
+        });
+    });
+
     describe('getFormatter(true) - debug mode', () => {
         const format = getFormatter(true);
 

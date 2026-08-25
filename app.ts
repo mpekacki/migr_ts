@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import { scanForCircularDependency } from './circular';
 import Chunks from './chunks';
 import IOEvent from './ioevent';
-import IO from './io';
+import IO, { serializeError } from './io';
 import { preprocessData } from './preprocess-data';
 import { readRecordsFromSqlite, writeRecordsToSqlite } from './sqlite-store';
 import { FixSolver, Options, SolverType } from './config';
@@ -82,7 +82,12 @@ class MigrationRunner {
     private recordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     private fetchedRecordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     private lookupFieldsBySObjectType: Record<string, Field[]> = {};
-    private errors: Record<string, { message: string, fixed: boolean, solver?: SolverType }[]> = {};
+    /**
+     * Every error the run reports, keyed by source record id. `phase` says which
+     * pass it came from: an insert error can still be fixed by a solver or by the
+     * user, an update error cannot - nothing runs after the update pass.
+     */
+    private errors: Record<string, { message: string, fixed: boolean, solver?: SolverType, phase: 'insert' | 'update' }[]> = {};
     private recordAddedReasons: Record<string, string> = {};
     private toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
     /** Fetched records dropped by removeAlreadyMigratedRecords, counted per SObject type. */
@@ -710,7 +715,7 @@ class MigrationRunner {
         if (!(recordId in this.errors)) {
             this.errors[recordId] = [];
         }
-        this.errors[recordId].push({ message: e.message, fixed: errorFixed, solver });
+        this.errors[recordId].push({ message: e.message, fixed: errorFixed, solver, phase: 'insert' });
         return { retry, retryAll, matchedId, solverAdded: false, exit: false, hidden: false };
     }
 
@@ -849,7 +854,10 @@ class MigrationRunner {
                         const recordId = Object.keys(chunk)[j];
                         const result = updateResults[j];
                         if (!result.success) {
-                            this.io.errorUpdatingRecord(recordId, recordsToUpdate[recordId].attributes!.type, { message: result.errors.map(e => e.message).join(', ') });
+                            // Hand over the SaveErrors themselves, not just their joined
+                            // messages: the status code and the offending field names are
+                            // what make an update failure actionable.
+                            this.reportUpdateError(recordId, recordsToUpdate[recordId], result.errors);
                         }
                     }
                 } catch (jsforceError) {
@@ -862,19 +870,35 @@ class MigrationRunner {
 
                         if (!errorResult.success && !errorResult.shouldSkip) {
                             for (const recordId of Object.keys(chunk)) {
-                                this.io.errorUpdatingRecord(recordId, recordsToUpdate[recordId].attributes!.type, jsforceError);
+                                this.reportUpdateError(recordId, recordsToUpdate[recordId], jsforceError);
                             }
                         } else if (errorResult.shouldSkip) {
                             this.io.error(`Skipping bulk update for ${Object.keys(chunk).length} records due to jsforce error: ${jsforceError.message}`);
                         }
                     } catch {
                         for (const recordId of Object.keys(chunk)) {
-                            this.io.errorUpdatingRecord(recordId, recordsToUpdate[recordId].attributes!.type, jsforceError);
+                            this.reportUpdateError(recordId, recordsToUpdate[recordId], jsforceError);
                         }
                     }
                 }
             }
         }
+    }
+
+    /**
+     * A record failed the update pass. Report it and keep it in this.errors, so the
+     * run's output names it too - without this the record looks fully migrated
+     * there while its deferred lookup is still empty in the target. There is no
+     * `record_no_id` counterpart on purpose: a record with no target id was skipped
+     * or matched away during the insert pass, which is not an error of its own.
+     */
+    private reportUpdateError(recordId: string, record: any, error: any): void {
+        const sObjectName = record.attributes!.type;
+        this.io.errorUpdatingRecord(recordId, sObjectName, error);
+        if (!(recordId in this.errors)) {
+            this.errors[recordId] = [];
+        }
+        this.errors[recordId].push({ message: serializeError(error).message, fixed: false, phase: 'update' });
     }
 
     private async migrateToFile(): Promise<void> {

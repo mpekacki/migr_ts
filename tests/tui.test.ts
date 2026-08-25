@@ -197,6 +197,27 @@ describe('migration state reducer', () => {
         expect(s.created).toBe(1);
     });
 
+    it('shows why an update failed and keeps the feed line on one line', () => {
+        const s = initialState();
+        feed(s, 'error_updating_record', {
+            recordId: '001',
+            sObjectName: 'Account',
+            error: { message: 'insufficient access rights on cross-reference id\n    at Object.<anonymous>' }
+        });
+        expect(s.errors).toBe(1);
+        const line = s.feed[s.feed.length - 1].text;
+        expect(line).toBe('Update failed Account 001: insufficient access rights on cross-reference id');
+    });
+
+    it('reports an update skipped because the record has no target ID', () => {
+        const s = initialState();
+        feed(s, 'record_no_id', { recordId: '001' });
+        const entry = s.feed[s.feed.length - 1];
+        expect(entry.glyph).toBe('warn');
+        expect(entry.text).toContain('001');
+        expect(s.errors).toBe(0);
+    });
+
     it('counts skipped records from skip events and skip solvers', () => {
         const s = initialState();
         feed(s, 'skipping_record', { sObjectName: 'User', recordId: '005' });
@@ -250,6 +271,75 @@ describe('final summary', () => {
         expect(lines).toContain('  0015g00000QqWxYAAV → 0015g00000RrXyZAAV');
         expect(lines).toContain('  0035g00000LmNoPAAZ → (not migrated)');
         expect(lines.join('\n')).toContain('(1/2 migrated)');
+    });
+
+    it('lists the unresolved errors above the mapping and counts the fixed ones', () => {
+        const lines = buildFinalSummary(JSON.stringify({
+            errors: {
+                '0015g00000QqWxYAAV': [
+                    { message: 'duplicate value found', fixed: true, solver: { action: 'fix' }, phase: 'insert' },
+                    { message: 'Always fails on org B', fixed: false, phase: 'update' }
+                ],
+                '0035g00000LmNoPAAZ': [
+                    { message: 'REQUIRED_FIELD_MISSING', fixed: false, phase: 'insert' }
+                ]
+            },
+            requestedRecords: { '0015g00000QqWxYAAV': '0015g00000RrXyZAAV' }
+        })).map(stripAnsi);
+        const text = lines.join('\n');
+
+        expect(lines[0]).toBe('⚠ Migration complete with 2 unresolved errors');
+        expect(text).toContain('Errors (2 unresolved, 1 fixed)');
+        expect(text).toContain('0015g00000QqWxYAAV update Always fails on org B');
+        expect(text).toContain('0035g00000LmNoPAAZ insert REQUIRED_FIELD_MISSING');
+        // fixed errors are counted, not listed
+        expect(text).not.toContain('duplicate value found');
+        // and the failures come before the ids, not after them
+        expect(text.indexOf('Errors (')).toBeLessThan(text.indexOf('Requested records'));
+    });
+
+    it('keeps the clean headline when every error was fixed, and still says so', () => {
+        const lines = buildFinalSummary(JSON.stringify({
+            errors: { '0015g00000QqWxYAAV': [{ message: 'duplicate value found', fixed: true, phase: 'insert' }] },
+            requestedRecords: { '0015g00000QqWxYAAV': '0015g00000RrXyZAAV' }
+        })).map(stripAnsi);
+
+        expect(lines[0]).toBe('✓ Migration complete');
+        expect(lines.join('\n')).toContain('Errors (0 unresolved, 1 fixed)');
+        expect(lines.join('\n')).not.toContain('\n\n\n'); // no orphaned blank line where the list would be
+    });
+
+    it('caps the error list and points at the activity log for the rest', () => {
+        const errors: Record<string, any[]> = {};
+        for (let i = 0; i < 14; i++) {
+            errors[`0015g000000${String(i).padStart(2, '0')}AAA`] = [{ message: `error ${i}`, fixed: false, phase: 'insert' }];
+        }
+        const text = buildFinalSummary(JSON.stringify({ errors, requestedRecords: {} })).map(stripAnsi).join('\n');
+
+        expect(text).toContain('Errors (14 unresolved)');
+        expect(text).toContain('error 9');
+        expect(text).not.toContain('error 10');
+        expect(text).toContain('… and 4 more in the activity log');
+    });
+
+    it('reports errors even when no requested record has anything to show', () => {
+        const s = initialState();
+        feed(s, 'finished', JSON.stringify({
+            errors: { '0015g00000QqWxYAAV': [{ message: 'boom', fixed: false, phase: 'update' }] },
+            requestedRecords: {}
+        }));
+        expect(s.overlay).not.toBeNull();
+        expect(stripAnsi(s.overlay!.join('\n'))).toContain('0015g00000QqWxYAAV update boom');
+    });
+
+    it('keeps a multi-line error message to one line in the summary', () => {
+        const text = buildFinalSummary(JSON.stringify({
+            errors: { '0015g00000QqWxYAAV': [{ message: 'boom\n    at somewhere', fixed: false, phase: 'update' }] },
+            requestedRecords: {}
+        })).map(stripAnsi).join('\n');
+
+        expect(text).toContain('boom');
+        expect(text).not.toContain('at somewhere');
     });
 
     it('accepts the payload already parsed as well as the JSON string', () => {
