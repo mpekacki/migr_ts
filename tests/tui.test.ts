@@ -209,6 +209,20 @@ describe('migration state reducer', () => {
         expect(line).toBe('Update failed Account 001: insufficient access rights on cross-reference id');
     });
 
+    it('lists the values the failed update was writing under the error line', () => {
+        const s = initialState();
+        feed(s, 'error_updating_record', {
+            recordId: '001',
+            sObjectName: 'Account',
+            error: { message: 'insufficient access rights on cross-reference id' },
+            fields: { Id: '001TARGET', ParentId: '001MISSING' }
+        });
+        const values = s.feed[s.feed.length - 1];
+        expect(values.glyph).toBe('sub');
+        // The target Id is not one of the values being written, it is the record.
+        expect(values.text).toBe('ParentId=001MISSING');
+    });
+
     it('reports an update skipped because the record has no target ID', () => {
         const s = initialState();
         feed(s, 'record_no_id', { recordId: '001' });
@@ -296,6 +310,22 @@ describe('final summary', () => {
         expect(text).not.toContain('duplicate value found');
         // and the failures come before the ids, not after them
         expect(text.indexOf('Errors (')).toBeLessThan(text.indexOf('Requested records'));
+    });
+
+    it('shows the values a failed update was writing under its summary line', () => {
+        const lines = buildFinalSummary(JSON.stringify({
+            errors: {
+                '0015g00000QqWxYAAV': [
+                    { message: 'insufficient access rights', fixed: false, phase: 'update', fields: { Id: '0015g00000RrXyZAAV', ParentId: '0015g00000MissinAAV' } }
+                ]
+            },
+            requestedRecords: { '0015g00000QqWxYAAV': '0015g00000RrXyZAAV' }
+        })).map(stripAnsi);
+        const messageLine = lines.findIndex(line => line.includes('insufficient access rights'));
+
+        expect(lines[messageLine + 1]).toContain('ParentId=0015g00000MissinAAV');
+        // lined up under the message, not under the record id
+        expect(lines[messageLine + 1].indexOf('ParentId')).toBe(lines[messageLine].indexOf('insufficient'));
     });
 
     it('keeps the clean headline when every error was fixed, and still says so', () => {

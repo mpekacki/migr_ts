@@ -141,11 +141,15 @@ function formatEvent(event: IOEvent): string {
             return `file ${d?.versionId} created ContentDocument ${d?.newDocumentId} for ${d?.documentId}`;
         case 'file_document_unavailable':
             return `ContentDocument ${d?.documentId} was not migrated: its version ${d?.versionId} never landed`;
-        case 'error_updating_record':
+        case 'error_updating_record': {
             // Show the whole error payload (status code, fields, stack, ...), the way
             // the insert path logs its SaveErrors - interpolating the object here used
-            // to print '[object Object]' and lose the message entirely.
-            return `error updating record ${d?.recordId} of type ${d?.sObjectName}: ${formatErrorPayload(d?.error)}`;
+            // to print '[object Object]' and lose the message entirely. The values the
+            // update was writing come after it: the message alone rarely says which
+            // one the org objected to.
+            const attempted = d?.fields ? ` (attempted values: ${JSON.stringify(d.fields)})` : '';
+            return `error updating record ${d?.recordId} of type ${d?.sObjectName}: ${formatErrorPayload(d?.error)}${attempted}`;
+        }
         default: {
             const data = typeof d === 'object' ? JSON.stringify(d, null, 2) : d;
             return data ? `${data}\n${event.type}` : event.type;
@@ -262,8 +266,9 @@ function formatFinished(d: any): string {
     lines.push('');
 
     // Errors section
-    const errors: Record<string, { message: string, fixed: boolean, solver?: { action: string, message: string } }[]> = data.errors || {};
-    const allErrors: { recordId: string, message: string, fixed: boolean, solver?: { action: string, message: string } }[] = [];
+    type SummaryError = { message: string, fixed: boolean, solver?: { action: string, message: string }, fields?: Record<string, any> };
+    const errors: Record<string, SummaryError[]> = data.errors || {};
+    const allErrors: (SummaryError & { recordId: string })[] = [];
     for (const [recordId, errs] of Object.entries(errors)) {
         for (const err of errs) {
             allErrors.push({ recordId, ...err });
@@ -280,7 +285,10 @@ function formatFinished(d: any): string {
             } else {
                 status = '[unresolved]';
             }
-            lines.push(`  ${err.recordId}: ${err.message} ${status}`);
+            // The values the failing pass was writing, where it recorded them - an
+            // update failure is only actionable next to the payload it rejected.
+            const attempted = err.fields ? ` (attempted values: ${JSON.stringify(err.fields)})` : '';
+            lines.push(`  ${err.recordId}: ${err.message}${attempted} ${status}`);
         }
         lines.push('');
     } else {

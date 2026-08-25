@@ -247,6 +247,10 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             // code, stack) is in the log file and in the debug event.
             const why = firstLine(d.error?.message);
             push(state, 'err', `Update failed ${d.sObjectName} ${d.recordId}${why ? `: ${why}` : ''}`);
+            // The values that were being written, on their own line: the message says
+            // what the org objected to, this says what it objected to it in.
+            const attempted = formatAttemptedValues(d.fields);
+            if (attempted) push(state, 'sub', attempted, 1);
             break;
         }
         case 'record_no_id':
@@ -298,6 +302,8 @@ interface SummaryError {
     fixed: boolean;
     /** 'insert' or 'update'; empty for an output written before phases existed. */
     phase: string;
+    /** The values the failing pass was writing, where the output recorded them. */
+    fields?: Record<string, any>;
 }
 
 /** Beyond this the section stops being a summary; the rest stays in the feed. */
@@ -366,7 +372,8 @@ function collectErrors(errors?: Record<string, any[]>): SummaryError[] {
                 recordId,
                 message: firstLine(error?.message) || 'unknown error',
                 fixed: error?.fixed === true,
-                phase: typeof error?.phase === 'string' ? error.phase : ''
+                phase: typeof error?.phase === 'string' ? error.phase : '',
+                fields: error?.fields && typeof error.fields === 'object' ? error.fields : undefined
             });
         }
     }
@@ -398,6 +405,12 @@ function errorSection(errors: SummaryError[], unresolved: SummaryError[]): strin
         // Pad before coloring - escape codes are invisible but not zero-length.
         const phase = phaseWidth > 0 ? `${ansi.gray(error.phase.padEnd(phaseWidth))} ` : '';
         lines.push(`  ${ansi.yellow(error.recordId.padEnd(idWidth))} ${phase}${error.message}`);
+        // The payload the org rejected, indented under its message: which field held
+        // the bad value is the first thing anyone reading this list wants to know.
+        const attempted = formatAttemptedValues(error.fields);
+        if (attempted) {
+            lines.push(`  ${' '.repeat(idWidth)} ${phaseWidth > 0 ? ' '.repeat(phaseWidth + 1) : ''}${ansi.gray(attempted)}`);
+        }
     }
     if (unresolved.length > listed.length) {
         lines.push(ansi.gray(`  … and ${unresolved.length - listed.length} more in the activity log`));
@@ -414,6 +427,22 @@ function nothingToMigrateNote(alreadyMigrated: Record<string, number>): string[]
     }
     const record = total === 1 ? 'record was' : 'records were';
     return [ansi.gray(`${total} ${record} migrated earlier (${formatTypeCounts(alreadyMigrated)}).`), ''];
+}
+
+const ATTEMPTED_VALUES_CAP = 160;
+
+/**
+ * `Field=value, Field=value` for the feed, kept short enough to stay on one line -
+ * the log file has the untrimmed payload for anything this cuts off.
+ */
+function formatAttemptedValues(fields?: Record<string, any>): string {
+    if (!fields || typeof fields !== 'object') return '';
+    const pairs = Object.entries(fields)
+        .filter(([field]) => field !== 'Id')
+        .map(([field, value]) => `${field}=${value === '' ? "''" : firstLine(String(value))}`);
+    if (pairs.length === 0) return '';
+    const text = pairs.join(', ');
+    return text.length > ATTEMPTED_VALUES_CAP ? `${text.slice(0, ATTEMPTED_VALUES_CAP - 1)}…` : text;
 }
 
 /** A feed entry is one line: keep the first line of a multi-line error message. */
