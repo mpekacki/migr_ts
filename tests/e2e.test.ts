@@ -95,6 +95,13 @@ class LiveTestOrg implements TestOrg {
         return await this.connection.sobject(sObjectType).retrieve(recordId);
     }
 
+    async retrieveBlob(sObjectType: string, recordId: string, fieldName: string) {
+        return (await this.connection.request(
+            { method: 'GET', url: `/services/data/v${this.connection.version}/sobjects/${sObjectType}/${recordId}/${fieldName}` },
+            { encoding: 'base64', responseType: 'text/plain' }
+        )) as unknown as string;
+    }
+
     async findIds(sObjectType: string, conditions: Record<string, any>) {
         return await this.connection.sobject(sObjectType).find(conditions, 'Id').execute() as unknown as { Id: string }[];
     }

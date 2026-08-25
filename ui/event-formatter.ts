@@ -131,6 +131,16 @@ function formatEvent(event: IOEvent): string {
             }
             return `updating ${records.length} records (${typeCounts}): ${jsonStr}`;
         }
+        case 'downloading_file':
+            return `downloading ${d?.field} of ${d?.sObjectName} ${d?.recordId}${d?.size !== undefined ? ` (${formatBytes(d.size)})` : ''}`;
+        case 'file_too_large':
+            return `${d?.field} of ${d?.sObjectName} ${d?.recordId} is ${formatBytes(d?.size)}, over the ${formatBytes(d?.limit)} limit - migrating the record without it`;
+        case 'file_download_failed':
+            return `could not download ${d?.field} of ${d?.sObjectName} ${d?.recordId}, migrating the record without it: ${formatErrorPayload(d?.error)}`;
+        case 'file_document_mapped':
+            return `file ${d?.versionId} created ContentDocument ${d?.newDocumentId} for ${d?.documentId}`;
+        case 'file_document_unavailable':
+            return `ContentDocument ${d?.documentId} was not migrated: its version ${d?.versionId} never landed`;
         case 'error_updating_record':
             // Show the whole error payload (status code, fields, stack, ...), the way
             // the insert path logs its SaveErrors - interpolating the object here used
@@ -141,6 +151,23 @@ function formatEvent(event: IOEvent): string {
             return data ? `${data}\n${event.type}` : event.type;
         }
     }
+}
+
+function formatBytes(bytes: number | undefined): string {
+    if (typeof bytes !== 'number' || !Number.isFinite(bytes)) {
+        return 'unknown size';
+    }
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+    const units = ['KB', 'MB', 'GB'];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit++;
+    }
+    return `${value.toFixed(1)} ${units[unit]}`;
 }
 
 /** IO serializes errors to plain objects; anything else is printed as it comes. */

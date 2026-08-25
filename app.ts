@@ -9,6 +9,7 @@ import { preprocessData } from './preprocess-data';
 import { readRecordsFromSqlite, writeRecordsToSqlite } from './sqlite-store';
 import { FixSolver, Options, SolverType } from './config';
 import DescribeCache from './describe-cache';
+import FileTransfer from './files';
 import MigrationHistory from './history';
 import { applySolver, handleJsforceError as solveJsforceError } from './solvers';
 
@@ -28,6 +29,12 @@ const USER_INPUTS = {
     skip: 's',
 };
 const CHUNKING_OBJECTS = ['User', 'UserRole', 'PermissionSetAssignment', 'BusinessHours'];
+/**
+ * Kept under the 37.5 MB of base64 a non-multipart request body may carry, with
+ * room to spare for the rest of the payload. Only records carrying files come
+ * anywhere near it.
+ */
+const MAX_CHUNK_BYTES = 30 * 1024 * 1024;
 
 // Utility function to limit concurrent promise execution
 async function executeConcurrently<T>(
@@ -75,8 +82,9 @@ class MigrationRunner {
     private isMigrateToFile: boolean;
     private isMigrateFromFile: boolean;
 
-    /** Both are set up by the first two steps of run() and used by everything after. */
+    /** All three are set up by the first two steps of run() and used by everything after. */
     private describes!: DescribeCache;
+    private files!: FileTransfer;
     private history!: MigrationHistory;
 
     private recordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
@@ -96,7 +104,7 @@ class MigrationRunner {
     constructor(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>, clientFactory?: ClientFactory) {
         this.options = options;
         this.io = new IO(onOutput, onInput);
-        this.chunking = new Chunks(CHUNKING_OBJECTS, 200, 10);
+        this.chunking = new Chunks(CHUNKING_OBJECTS, 200, 10, MAX_CHUNK_BYTES);
         this.clientFactory = clientFactory;
         if (options.sourceFile !== undefined && options.sourceSqlite !== undefined) {
             throw new Error('Specify either sourceFile or sourceSqlite, not both');
@@ -169,6 +177,7 @@ class MigrationRunner {
         }
 
         this.describes = new DescribeCache(this.io, this.sourceClient, this.targetClient, this.isMigrateFromFile);
+        this.files = new FileTransfer(this.io, this.describes, this.options, this.sourceClient, this.targetClient);
     }
 
     private async validateMatchers(): Promise<void> {
@@ -213,7 +222,20 @@ class MigrationRunner {
                 recordForMigration[field.name] = record[field.name];
             }
             recordForMigration.attributes = record.attributes || { type: sObjectName, url: '' };
+            // An export carries the fields naming the file's body and document in the
+            // source org; the target has to make its own.
+            this.files.dropSourceOnlyFields(sObjectName, recordForMigration);
             this.recordsByIds[recordId] = recordForMigration;
+        }
+
+        // Only once every record is loaded, so a document is held back only when the
+        // version that releases it actually came along in the export.
+        for (const recordId of Object.keys(this.fetchedRecordsByIds)) {
+            const fetchedRecord = this.fetchedRecordsByIds[recordId];
+            const versionId = this.files.latestVersionOf(fetchedRecord.attributes?.type, fetchedRecord);
+            if (versionId && versionId in this.recordsByIds) {
+                this.files.hold(recordId, versionId);
+            }
         }
     }
 
@@ -261,6 +283,10 @@ class MigrationRunner {
             record[field.name] = recordFields[field.name];
         }
         record.attributes = recordFields.attributes;
+        // A blob field arrives holding the path of the endpoint serving it, not the
+        // file, so the contents are downloaded into both maps before anything else
+        // reads the record.
+        await this.files.download(recordId, sObjectName, record, recordFields);
         this.recordsByIds[recordId] = record;
         this.io.recordsSoFar(Object.keys(this.recordsByIds).length);
         const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
@@ -268,8 +294,27 @@ class MigrationRunner {
             this.lookupFieldsBySObjectType[sObjectName] = lookupFields;
         }
         const newIds = await this.discoverReferencedIds(recordId, record, creatableFields);
+        this.collectFileVersionId(recordId, sObjectName, recordFields, newIds);
         await this.collectRelatedRecordIds(recordId, sObjectName, depth, newIds);
         return newIds;
+    }
+
+    /**
+     * A ContentDocument names its current ContentVersion in a field no one can
+     * insert, so the id scan never sees it - but that version is the only thing
+     * that carries the file, and inserting it is what makes the target create a
+     * document to hold it. Queue it, and hold the document until it lands.
+     */
+    private collectFileVersionId(recordId: string, sObjectName: string, fetchedRecord: any, newIds: string[]): void {
+        const versionId = this.files.latestVersionOf(sObjectName, fetchedRecord);
+        if (!versionId) {
+            return;
+        }
+        this.files.hold(recordId, versionId);
+        if (!(versionId in this.fetchedRecordsByIds) && !newIds.includes(versionId)) {
+            newIds.push(versionId);
+            this.recordAddedReasons[versionId] = this.recordAddedReasons[recordId] || `${sObjectName}.LatestPublishedVersion`;
+        }
     }
 
     private async retrieveRecord(recordId: string, sObjectName: string): Promise<any | null> {
@@ -296,6 +341,11 @@ class MigrationRunner {
     private async discoverReferencedIds(recordId: string, record: SObjectRecord<Schema, string>, creatableFields: Field[]): Promise<string[]> {
         const newIds: string[] = [];
         for (const field of creatableFields) {
+            if (field.type === 'base64') {
+                // A file's contents are megabytes of base64: scanning them for record
+                // ids is pure cost, and any 18 character run in there is a coincidence.
+                continue;
+            }
             if (record[field.name]) {
                 const matches = String(record[field.name])?.match(ID_REGEX);
                 if (matches) {
@@ -436,7 +486,7 @@ class MigrationRunner {
                 }
                 recordProcessed = recordProcessed || solverAdded;
             }
-            if (!recordProcessed) {
+            if (!recordProcessed && !this.releaseStrandedDocuments()) {
                 await this.resolveCircularDependencies();
             }
         }
@@ -449,7 +499,13 @@ class MigrationRunner {
         for (const recordId of Object.keys(this.recordsByIds)) {
             const record = this.recordsByIds[recordId];
             const sObjectName = await this.describes.getSObjectType(recordId, record);
-            const recordReady = await this.resolveRecordReferences(recordId, record);
+            if (this.files.isHeld(recordId)) {
+                // A ContentDocument has no createable field: it comes into being with
+                // the ContentVersion carrying its file. It waits here until that
+                // version lands and hands over the id the target gave the document.
+                continue;
+            }
+            const recordReady = await this.resolveRecordReferences(recordId, record, sObjectName);
             if (recordReady) {
                 anyRecordProcessed = true;
                 const { migratedRecordId, skipRecord } = await this.findExistingRecordId(recordId, sObjectName);
@@ -467,9 +523,13 @@ class MigrationRunner {
         return { toInsert, anyRecordProcessed };
     }
 
-    private async resolveRecordReferences(recordId: string, record: SObjectRecord<Schema, string>): Promise<boolean> {
+    private async resolveRecordReferences(recordId: string, record: SObjectRecord<Schema, string>, sObjectName: string): Promise<boolean> {
         let recordReady = true;
+        const blobFields = await this.files.blobFields(sObjectName);
         for (const field of Object.keys(record)) {
+            if (blobFields.includes(field)) {
+                continue;
+            }
             if (record[field]) {
                 const matches = String(record[field])?.match(ID_REGEX);
                 if (matches) {
@@ -632,6 +692,7 @@ class MigrationRunner {
         if (savedRecord.success) {
             migratedRecordId = savedRecord.id!;
             this.io.createdRecord(migratedRecordId);
+            await this.mapFileDocument(recordId, record, migratedRecordId);
             if (this.errors[recordId]) {
                 this.errors[recordId].forEach(error => error.fixed = true);
             }
@@ -664,6 +725,54 @@ class MigrationRunner {
             this.setNewRecordId(recordId, migratedRecordId!);
         }
         return { exit: false, retryAll, solverAdded };
+    }
+
+    /**
+     * A ContentVersion has landed, so the target has created a ContentDocument to
+     * hold its file. Point the source document id at that new one and let the
+     * document out of the hold: ContentDocumentLinks - and anything else naming
+     * the file - resolve through it.
+     */
+    private async mapFileDocument(recordId: string, record: SObjectRecord<Schema, string>, newRecordId: string): Promise<void> {
+        const documentId = this.files.documentOf(record.attributes?.type, this.fetchedRecordsByIds[recordId]);
+        if (!documentId) {
+            return;
+        }
+        const newDocumentId = await this.files.newDocumentOf(newRecordId);
+        if (!newDocumentId) {
+            return;
+        }
+        this.io.fileDocumentMapped(documentId, newDocumentId, newRecordId);
+        this.files.release(documentId);
+        if (documentId in this.recordsByIds) {
+            this.setNewRecordId(documentId, newDocumentId);
+        } else {
+            // The document was never fetched - only the version was - but the
+            // mapping still has to outlive the run, or a re-run's links point at a
+            // document that only exists in the source.
+            this.history.settle(documentId, newDocumentId);
+        }
+    }
+
+    /**
+     * Held documents whose version is never going to arrive - it failed, was
+     * skipped, or was already migrated - stop being waited for. Reports whether
+     * that freed anything, so the caller only goes looking for a circular
+     * dependency once no file is holding the run up.
+     */
+    private releaseStrandedDocuments(): boolean {
+        let released = false;
+        for (const { documentId, versionId } of this.files.strandedDocuments(versionId => versionId in this.recordsByIds)) {
+            if (!(documentId in this.recordsByIds)) {
+                // Already settled - by an earlier run through the history file, or by
+                // the version that did land. Nothing to report and nothing to undo.
+                continue;
+            }
+            this.io.fileDocumentUnavailable(documentId, versionId);
+            this.setNewRecordId(documentId, '');
+            released = true;
+        }
+        return released;
     }
 
     private async handleSaveError(recordId: string, record: SObjectRecord<Schema, string>, e: SaveError): Promise<{ retry: boolean, retryAll: boolean, matchedId?: string, solverAdded: boolean, exit: boolean, hidden: boolean }> {
@@ -822,8 +931,9 @@ class MigrationRunner {
         const recordsToUpdate: Record<string, any> = {};
         for (const recordId of Object.keys(this.toUpdateLater)) {
             const record = this.toUpdateLater[recordId];
+            const blobFields = await this.files.blobFields(record.attributes!.type);
             for (const field of Object.keys(record)) {
-                if (field !== 'attributes') {
+                if (field !== 'attributes' && !blobFields.includes(field)) {
                     const value = String(record[field]);
                     const matches = value.match(ID_REGEX);
                     if (matches) {

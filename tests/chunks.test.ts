@@ -109,6 +109,36 @@ describe('Chunks', () => {
         expect(Object.keys(result[1]).length).toBe(11);
     });
 
+    it('should start a new chunk when the byte limit is reached', () => {
+        const chunks = new Chunks([], 200, 10, 100);
+        const records = {
+            '1': { "VersionData": "a".repeat(60), "attributes": { "type": "ContentVersion" } as any },
+            '2': { "VersionData": "b".repeat(60), "attributes": { "type": "ContentVersion" } as any },
+            '3': { "VersionData": "c".repeat(60), "attributes": { "type": "ContentVersion" } as any },
+        };
+        const result = chunks.getChunks(records);
+        expect(result.map(chunk => Object.keys(chunk))).toEqual([['1'], ['2'], ['3']]);
+    });
+
+    it('should send a record over the byte limit on its own rather than dropping it', () => {
+        const chunks = new Chunks([], 200, 10, 100);
+        const records = {
+            '1': { "VersionData": "a".repeat(500), "attributes": { "type": "ContentVersion" } as any },
+            '2': { "Name": "small", "attributes": { "type": "ContentVersion" } as any },
+        };
+        const result = chunks.getChunks(records);
+        expect(result.map(chunk => Object.keys(chunk))).toEqual([['1'], ['2']]);
+    });
+
+    it('should ignore record size when no byte limit is set', () => {
+        const chunks = new Chunks([], 200, 10);
+        const records = {
+            '1': { "VersionData": "a".repeat(5000), "attributes": { "type": "ContentVersion" } as any },
+            '2': { "VersionData": "b".repeat(5000), "attributes": { "type": "ContentVersion" } as any },
+        };
+        expect(chunks.getChunks(records)).toHaveLength(1);
+    });
+
     it('should separate system objects from other objects', () => {
         const chunks = new Chunks(['User', 'Profile', 'Role', 'PermissionSet'], 5, 3);
         const records = {

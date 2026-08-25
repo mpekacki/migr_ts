@@ -1,14 +1,36 @@
 import { SObjectRecord, Schema } from 'jsforce';
 
+/**
+ * The size of a record as the request will carry it, near enough to keep a chunk
+ * under the body limit. Summing the string lengths rather than serializing the
+ * record keeps this cheap for the ordinary case and, more to the point, avoids
+ * building a second copy of a record whose file field is megabytes of base64.
+ */
+function recordSize(record: SObjectRecord<Schema, string>): number {
+    let size = 0;
+    for (const value of Object.values(record)) {
+        size += typeof value === 'string' ? value.length : 16;
+    }
+    return size;
+}
+
 export default class Chunks {
     private systemSObjects: string[];
     private maxChunkSize: number;
     private maxSObjectTypeChunks: number;
+    private maxChunkBytes: number;
 
-    constructor(systemSObjects: string[], maxChunkSize: number, maxSObjectTypeChunks: number) {
+    /**
+     * `maxChunkBytes` bounds the request body, which matters for records carrying
+     * files: a composite insert takes base64 blob fields, but the whole
+     * non-multipart body is capped at 37.5 MB of base64. A record over the limit
+     * on its own still travels alone rather than being dropped.
+     */
+    constructor(systemSObjects: string[], maxChunkSize: number, maxSObjectTypeChunks: number, maxChunkBytes: number = Infinity) {
         this.systemSObjects = systemSObjects;
         this.maxChunkSize = maxChunkSize;
         this.maxSObjectTypeChunks = maxSObjectTypeChunks;
+        this.maxChunkBytes = maxChunkBytes;
     }
 
     public getChunks(records: Record<string, SObjectRecord<Schema, string>>): Record<string, SObjectRecord<Schema, string>>[] {
@@ -37,6 +59,7 @@ export default class Chunks {
             let lastSObjectType: string | null = null;
             let numSObjectTypeChunks = 0;
             let currentChunkSize = 0;
+            let currentChunkBytes = 0;
             for (const recordId of idsSortedBySObjectType) {
                 const record = recs[recordId];
                 if (record!.attributes!.type !== lastSObjectType) {
@@ -44,11 +67,17 @@ export default class Chunks {
                     numSObjectTypeChunks++;
                 }
                 currentChunkSize++;
-                if (currentChunkSize > this.maxChunkSize || numSObjectTypeChunks > this.maxSObjectTypeChunks) {
+                const bytes = this.maxChunkBytes === Infinity ? 0 : recordSize(record);
+                currentChunkBytes += bytes;
+                // A record over the limit by itself starts a chunk of its own rather
+                // than looping forever trying to make room for it.
+                const overBytes = currentChunkBytes > this.maxChunkBytes && currentChunkSize > 1;
+                if (currentChunkSize > this.maxChunkSize || numSObjectTypeChunks > this.maxSObjectTypeChunks || overBytes) {
                     chunks.push(currentChunk);
                     currentChunk = {};
                     currentChunkSize = 1;
                     numSObjectTypeChunks = 1;
+                    currentChunkBytes = bytes;
                 }
                 currentChunk[recordId] = record;
             }

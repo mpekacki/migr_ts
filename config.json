@@ -620,7 +620,14 @@
     "Account": [
       {
         "name": "Contacts"
+      },
+      {
+        "name": "ContentDocumentLinks"
       }
     ]
+  },
+  "files": {
+    "enabled": true,
+    "maxFileSizeMb": 25
   }
 }

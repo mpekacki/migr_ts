@@ -34,6 +34,8 @@ export interface TestOrg {
     updateAll(sObjectType: string, records: any[]): Promise<void>;
     delete(sObjectType: string, recordId: string): Promise<void>;
     retrieve(sObjectType: string, recordId: string): Promise<any>;
+    /** The contents of a blob field, base64 encoded - a retrieve only hands back the path serving it. */
+    retrieveBlob(sObjectType: string, recordId: string, fieldName: string): Promise<string>;
     /** Records matching every condition. Only `Id` is guaranteed to be populated. */
     findIds(sObjectType: string, conditions: Record<string, any>): Promise<{ Id: string }[]>;
     query(soql: string): Promise<{ records: any[] }>;
@@ -191,6 +193,37 @@ export async function createFussyCustObjD(org: TestOrg, fussyFields: any = { Fus
     const custObj = await createRecord(org, 'Custom_Object_D__c', { Name: name });
     await org.update('Custom_Object_D__c', { Id: custObj.id, ...fussyFields });
     return { custObj, name };
+}
+
+/**
+ * A file: a ContentVersion carrying the contents, and the ContentDocument the org
+ * creates to hold it. Contents are passed base64 encoded, the way the API takes them.
+ */
+export async function createFile(org: TestOrg, title: string, contents: string) {
+    const version = await createRecord(org, 'ContentVersion', {
+        Title: title,
+        PathOnClient: `${title}.txt`,
+        VersionData: Buffer.from(contents, 'utf8').toString('base64')
+    });
+    const documentId = (await retrieveRecord(org, 'ContentVersion', version.id)).ContentDocumentId;
+    expect(documentId).toBeTruthy();
+    return { versionId: version.id, documentId: documentId as string, contents };
+}
+
+/** Attaches a file to a record, the way the Files related list does. */
+export async function attachFile(org: TestOrg, documentId: string, linkedEntityId: string) {
+    return createRecord(org, 'ContentDocumentLink', {
+        ContentDocumentId: documentId,
+        LinkedEntityId: linkedEntityId,
+        ShareType: 'V',
+        Visibility: 'AllUsers'
+    });
+}
+
+/** The contents of a file, decoded. */
+export async function readFile(org: TestOrg, versionId: string): Promise<string> {
+    const contents = await org.retrieveBlob('ContentVersion', versionId, 'VersionData');
+    return Buffer.from(contents, 'base64').toString('utf8');
 }
 
 // Creates a Custom_Object_C__c with the same unique External_Id__c in both orgs,

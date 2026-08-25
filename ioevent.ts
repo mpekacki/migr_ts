@@ -38,7 +38,12 @@ export type IOEventType =
     | 'found_circular_dependency'
     | 'record_no_id'
     | 'error_updating_record'
-    | 'hidden_error';
+    | 'hidden_error'
+    | 'downloading_file'
+    | 'file_too_large'
+    | 'file_download_failed'
+    | 'file_document_mapped'
+    | 'file_document_unavailable';
 
 class IOEvent {
     constructor(
