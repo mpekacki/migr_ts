@@ -132,12 +132,20 @@ function formatEvent(event: IOEvent): string {
             return `updating ${records.length} records (${typeCounts}): ${jsonStr}`;
         }
         case 'error_updating_record':
-            return `error updating record ${d?.recordId} of type ${d?.sObjectName}: ${d?.error}`;
+            // Show the whole error payload (status code, fields, stack, ...), the way
+            // the insert path logs its SaveErrors - interpolating the object here used
+            // to print '[object Object]' and lose the message entirely.
+            return `error updating record ${d?.recordId} of type ${d?.sObjectName}: ${formatErrorPayload(d?.error)}`;
         default: {
             const data = typeof d === 'object' ? JSON.stringify(d, null, 2) : d;
             return data ? `${data}\n${event.type}` : event.type;
         }
     }
+}
+
+/** IO serializes errors to plain objects; anything else is printed as it comes. */
+function formatErrorPayload(error: any): string {
+    return error !== null && typeof error === 'object' ? JSON.stringify(error) : String(error);
 }
 
 function formatConfirmMigration(d: any): string {

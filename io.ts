@@ -2,6 +2,41 @@ import { SObjectRecord, Schema } from "jsforce";
 import { Options } from "./config";
 import IOEvent, { IOEventType } from "./ioevent";
 
+/**
+ * The fields worth keeping off an error object. Deliberately a fixed list rather
+ * than a spread of everything enumerable: a transport error can carry the whole
+ * request/response graph, and that is both circular (the debug formatter
+ * JSON.stringify's the event) and far more than anyone wants in a log line.
+ */
+const ERROR_FIELDS = ['name', 'errorCode', 'statusCode', 'fields', 'stack'] as const;
+
+/**
+ * Errors reach this layer in three shapes: a thrown Error, the array of SaveErrors
+ * a composite call returns for one record, or a plain object built by hand. None
+ * of them survives the trip to the UI as it is - `${err}` renders the objects as
+ * '[object Object]', and JSON.stringify drops an Error's message and stack because
+ * both are non-enumerable - so flatten every shape into a plain object carrying a
+ * readable `message` next to whatever details came with it.
+ */
+export function serializeError(error: any): Record<string, any> {
+    if (Array.isArray(error)) {
+        const errors = error.map(serializeError);
+        return { message: errors.map(e => e.message).join(', '), errors };
+    }
+    if (error === null || typeof error !== 'object') {
+        return { message: String(error) };
+    }
+    const serialized: Record<string, any> = {
+        message: typeof error.message === 'string' ? error.message : String(error)
+    };
+    for (const field of ERROR_FIELDS) {
+        if (error[field] !== undefined) {
+            serialized[field] = error[field];
+        }
+    }
+    return serialized;
+}
+
 class IO {
     private readonly onOutput: (output: IOEvent) => void;
     private readonly onInput: (input: IOEvent) => Promise<string>;
@@ -223,7 +258,7 @@ class IO {
     }
 
     public errorUpdatingRecord(recordId: string, sObjectName: string, error: any) {
-        this.onOutput(this.buildIOEvent('output', 'error_updating_record', { recordId, sObjectName, error }));
+        this.onOutput(this.buildIOEvent('output', 'error_updating_record', { recordId, sObjectName, error: serializeError(error) }));
     }
 
 }

@@ -226,9 +226,17 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             break;
         // 'hidden_error' needs no handling: a hideError solver suppresses the
         // 'error' event itself, so there is nothing here to uncount.
-        case 'error_updating_record':
+        case 'error_updating_record': {
             state.errors++;
-            push(state, 'err', `Update failed ${d.sObjectName} ${d.recordId}`);
+            // One feed line, so only the message - the full payload (fields, status
+            // code, stack) is in the log file and in the debug event.
+            const why = firstLine(d.error?.message);
+            push(state, 'err', `Update failed ${d.sObjectName} ${d.recordId}${why ? `: ${why}` : ''}`);
+            break;
+        }
+        case 'record_no_id':
+            // Not an error, but the update it was queued for silently never happens.
+            push(state, 'warn', `Update skipped ${d.recordId} (no target ID)`);
             break;
         case 'aborted':
             state.phase = 'Aborted';
@@ -268,18 +276,35 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
     }
 }
 
+/** One error of the run, flattened out of the per-record map in the output. */
+interface SummaryError {
+    recordId: string;
+    message: string;
+    fixed: boolean;
+    /** 'insert' or 'update'; empty for an output written before phases existed. */
+    phase: string;
+}
+
+/** Beyond this the section stops being a summary; the rest stays in the feed. */
+const MAX_LISTED_ERRORS = 10;
+
 /**
- * The screen shown once the migration finishes: the IDs the user asked to
- * migrate next to the IDs they became in the target org. The plain UI prints
- * this as part of its `finished` output; the TUI would otherwise scroll it away
- * with the rest of the feed, so it is pinned as an overlay instead.
+ * The screen shown once the migration finishes: what went wrong, and the IDs the
+ * user asked to migrate next to the IDs they became in the target org. The plain
+ * UI prints its own version of this as part of its `finished` output; the TUI
+ * would otherwise scroll it away with the rest of the feed, so it is pinned as an
+ * overlay instead.
  *
- * `alreadyMigrated` is set when the run had nothing left to do. This screen is
- * all most users read, so it has to say that up front - otherwise a list of
- * target ids under "Migration complete" reads as though this run created them.
+ * The errors come first, ahead of the mapping: this screen is all most users
+ * read, and a failure they have to scroll past a list of ids to find is a
+ * failure they will miss.
+ *
+ * `alreadyMigrated` is set when the run had nothing left to do. This screen has
+ * to say that up front too - otherwise a list of target ids under "Migration
+ * complete" reads as though this run created them.
  */
 export function buildFinalSummary(data: unknown, alreadyMigrated?: Record<string, number> | null): string[] {
-    let parsed: { requestedRecords?: Record<string, string> } | null;
+    let parsed: { requestedRecords?: Record<string, string>, errors?: Record<string, any[]> } | null;
     try {
         parsed = typeof data === 'string' ? JSON.parse(data) : (data as typeof parsed);
     } catch {
@@ -287,29 +312,82 @@ export function buildFinalSummary(data: unknown, alreadyMigrated?: Record<string
     }
     const requested = parsed?.requestedRecords ?? {};
     const ids = Object.keys(requested);
-    if (ids.length === 0) return [];
+    const errors = collectErrors(parsed?.errors);
+    if (ids.length === 0 && errors.length === 0) return [];
 
-    const idWidth = Math.max(...ids.map(id => id.length));
-    const migrated = ids.filter(id => requested[id]).length;
-    const lines = alreadyMigrated
-        ? [
-            ansi.boldOn(ansi.yellow('Nothing to migrate')),
-            '',
-            ...nothingToMigrateNote(alreadyMigrated),
-            `${ansi.boldOn('Requested records')} ${ansi.gray(`(${migrated}/${ids.length} migrated earlier)`)}`,
-            '',
-        ]
-        : [
-            ansi.boldOn(ansi.green('✓ Migration complete')),
-            '',
-            `${ansi.boldOn('Requested records')} ${ansi.gray(`(${migrated}/${ids.length} migrated)`)}`,
-            '',
-        ];
-    for (const id of ids) {
-        const newId = requested[id];
-        lines.push(`  ${id.padEnd(idWidth)} ${ansi.gray('→')} ` +
-            (newId ? ansi.green(newId) : ansi.yellow('(not migrated)')));
+    const unresolved = errors.filter(error => !error.fixed);
+    const lines: string[] = [];
+    if (alreadyMigrated) {
+        lines.push(ansi.boldOn(ansi.yellow('Nothing to migrate')), '', ...nothingToMigrateNote(alreadyMigrated));
+    } else if (unresolved.length > 0) {
+        const what = unresolved.length === 1 ? 'error' : 'errors';
+        lines.push(ansi.boldOn(ansi.yellow(`⚠ Migration complete with ${unresolved.length} unresolved ${what}`)), '');
+    } else {
+        lines.push(ansi.boldOn(ansi.green('✓ Migration complete')), '');
     }
+
+    lines.push(...errorSection(errors, unresolved));
+
+    if (ids.length > 0) {
+        const idWidth = Math.max(...ids.map(id => id.length));
+        const migrated = ids.filter(id => requested[id]).length;
+        const note = alreadyMigrated ? 'migrated earlier' : 'migrated';
+        lines.push(`${ansi.boldOn('Requested records')} ${ansi.gray(`(${migrated}/${ids.length} ${note})`)}`, '');
+        for (const id of ids) {
+            const newId = requested[id];
+            lines.push(`  ${id.padEnd(idWidth)} ${ansi.gray('→')} ` +
+                (newId ? ansi.green(newId) : ansi.yellow('(not migrated)')));
+        }
+    }
+    return lines;
+}
+
+/** Flattens the output's `{ recordId: [error, ...] }` map into one row per error. */
+function collectErrors(errors?: Record<string, any[]>): SummaryError[] {
+    const flattened: SummaryError[] = [];
+    for (const [recordId, recordErrors] of Object.entries(errors ?? {})) {
+        for (const error of recordErrors ?? []) {
+            flattened.push({
+                recordId,
+                message: firstLine(error?.message) || 'unknown error',
+                fixed: error?.fixed === true,
+                phase: typeof error?.phase === 'string' ? error.phase : ''
+            });
+        }
+    }
+    return flattened;
+}
+
+/**
+ * Counts every error the run reported but lists only the unresolved ones: an
+ * error a solver fixed needs no attention, and saying how many were fixed is
+ * enough to explain why the activity log has more of them than this list.
+ */
+function errorSection(errors: SummaryError[], unresolved: SummaryError[]): string[] {
+    if (errors.length === 0) return [];
+
+    const fixed = errors.length - unresolved.length;
+    const counts = [`${unresolved.length} unresolved`];
+    if (fixed > 0) {
+        counts.push(`${fixed} fixed`);
+    }
+    const lines = [`${ansi.boldOn('Errors')} ${ansi.gray(`(${counts.join(', ')})`)}`];
+
+    const listed = unresolved.slice(0, MAX_LISTED_ERRORS);
+    if (listed.length > 0) {
+        lines.push('');
+    }
+    const idWidth = Math.max(0, ...listed.map(error => error.recordId.length));
+    const phaseWidth = Math.max(0, ...listed.map(error => error.phase.length));
+    for (const error of listed) {
+        // Pad before coloring - escape codes are invisible but not zero-length.
+        const phase = phaseWidth > 0 ? `${ansi.gray(error.phase.padEnd(phaseWidth))} ` : '';
+        lines.push(`  ${ansi.yellow(error.recordId.padEnd(idWidth))} ${phase}${error.message}`);
+    }
+    if (unresolved.length > listed.length) {
+        lines.push(ansi.gray(`  … and ${unresolved.length - listed.length} more in the activity log`));
+    }
+    lines.push('');
     return lines;
 }
 
@@ -321,6 +399,12 @@ function nothingToMigrateNote(alreadyMigrated: Record<string, number>): string[]
     }
     const record = total === 1 ? 'record was' : 'records were';
     return [ansi.gray(`${total} ${record} migrated earlier (${formatTypeCounts(alreadyMigrated)}).`), ''];
+}
+
+/** A feed entry is one line: keep the first line of a multi-line error message. */
+function firstLine(text?: string): string {
+    if (typeof text !== 'string') return '';
+    return text.split('\n')[0].trim();
 }
 
 export function formatTypeCounts(recordCountsByType?: Record<string, number>): string {

@@ -954,6 +954,15 @@ export const e2eScenarios: E2EScenario[] = [
         // should be able to query the new record
         const newCustObjD = await retrieveRecord(ctx.targetOrg, 'Custom_Object_D__c', newCustObjDId);
         expect(newCustObjD.Fussy_Field_1__c).toEqual('ok');
+
+        // The record migrated, but restoring the stashed value in the update pass
+        // hits the same validation rule - and the output has to say so, or the run
+        // looks clean while the target field is left holding the solver's value.
+        const errors = parsedOutput.errors[custObjD.id];
+        const updateErrors = errors.filter((error: any) => error.phase === 'update');
+        expect(updateErrors).toHaveLength(1);
+        expect(updateErrors[0].message).toContain('Always fails on org B');
+        expect(updateErrors[0].fixed).toBe(false);
     }),
 
     scenario('match by wrong field', async (ctx: E2EContext) => {
