@@ -1,5 +1,5 @@
 import { terminal } from 'terminal-kit';
-import { IOEvent } from '../../app';
+import IOEvent from '../../ioevent';
 import { UI } from '../ui';
 import { getFormatter } from '../event-formatter';
 import readline from 'readline';

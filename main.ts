@@ -1,6 +1,8 @@
 import './bootstrap'; // must stay first - see bootstrap.ts
 import { program } from 'commander';
-import { IOEvent, main, Options } from './app';
+import { main } from './app';
+import { Options } from './config';
+import IOEvent from './ioevent';
 import fs from 'fs';
 import { UI } from './ui/ui';
 import { TerminalKitUI } from './ui/terminal-kit/terminal';

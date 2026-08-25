@@ -11,7 +11,7 @@
 
 import { expect } from '@jest/globals';
 import fs from 'fs';
-import { IOEvent } from '../app';
+import IOEvent from '../ioevent';
 
 // Error emitted when inserting a Contract with Status = 'Activated'
 export const CONTRACT_STATUS_ERROR = 'Choose a valid contract status and save your changes. Ask your admin for details.';

@@ -1,5 +1,5 @@
 import IO from "../io";
-import { IOEvent } from "../app";
+import IOEvent from "../ioevent";
 
 describe('IO', () => {
     const createIO = () => {

@@ -16,7 +16,9 @@
 import { expect, test } from '@jest/globals';
 import fs from 'fs';
 import { DatabaseSync } from 'node:sqlite';
-import { IOEvent, Options, main } from '../app';
+import { main } from '../app';
+import { Options } from '../config';
+import IOEvent from '../ioevent';
 import { getFormatter } from '../ui/event-formatter';
 import {
     E2EContext,

@@ -11,7 +11,7 @@ import { expect, test } from '@jest/globals';
 import { AuthInfo, Connection } from '@salesforce/core';
 import { exec } from 'child_process';
 import fs from 'fs';
-import { IOEvent } from '../app';
+import IOEvent from '../ioevent';
 import {
     E2EContext,
     InputHandler,

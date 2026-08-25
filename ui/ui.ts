@@ -1,4 +1,4 @@
-import { IOEvent } from '../app';
+import IOEvent from '../ioevent';
 
 export interface UI {
     display(event: IOEvent): string;
