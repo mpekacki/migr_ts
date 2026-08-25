@@ -101,6 +101,10 @@ class MockTestOrg implements TestOrg {
         return this.org.retrieve(sObjectType, recordId);
     }
 
+    async retrieveBlob(sObjectType: string, recordId: string, fieldName: string) {
+        return this.org.retrieveBlob(sObjectType, recordId, fieldName);
+    }
+
     async findIds(sObjectType: string, conditions: Record<string, any>) {
         return this.org.find(sObjectType, conditions).map(record => ({ Id: record.Id }));
     }

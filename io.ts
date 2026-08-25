@@ -37,6 +37,33 @@ export function serializeError(error: any): Record<string, any> {
     return serialized;
 }
 
+/**
+ * Long enough for any field worth reading back in a log, short enough that a
+ * file never reaches one.
+ */
+const MAX_LOGGED_FIELD_LENGTH = 500;
+
+/**
+ * The records as the log should carry them.
+ *
+ * A file field holds megabytes of base64 and the debug formatter serializes the
+ * whole event, so its contents are replaced by their length: the log needs to
+ * say that a file was sent, not repeat it. Records with nothing oversized in
+ * them are passed through untouched rather than copied.
+ */
+function forLogging(records: any[]): any[] {
+    return records.map(record => {
+        let trimmed: any = null;
+        for (const [field, value] of Object.entries(record)) {
+            if (typeof value === 'string' && value.length > MAX_LOGGED_FIELD_LENGTH) {
+                trimmed = trimmed ?? { ...record };
+                trimmed[field] = `<${value.length} characters>`;
+            }
+        }
+        return trimmed ?? record;
+    });
+}
+
 class IO {
     private readonly onOutput: (output: IOEvent) => void;
     private readonly onInput: (input: IOEvent) => Promise<string>;
@@ -158,7 +185,7 @@ class IO {
             recordCountsByType[type] = (recordCountsByType[type] || 0) + 1;
         });
 
-        this.onOutput(this.buildIOEvent('output', 'saving_records', { recordCountsByType, records }));
+        this.onOutput(this.buildIOEvent('output', 'saving_records', { recordCountsByType, records: forLogging(records) }));
     }
 
     public savedRecords(savedRecords: Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>) {
@@ -254,11 +281,31 @@ class IO {
             recordCountsByType[type] = (recordCountsByType[type] || 0) + 1;
         });
 
-        this.onOutput(this.buildIOEvent('output', 'updating_record', { recordCountsByType, records }));
+        this.onOutput(this.buildIOEvent('output', 'updating_record', { recordCountsByType, records: forLogging(records) }));
     }
 
     public errorUpdatingRecord(recordId: string, sObjectName: string, error: any) {
         this.onOutput(this.buildIOEvent('output', 'error_updating_record', { recordId, sObjectName, error: serializeError(error) }));
+    }
+
+    public downloadingFile(recordId: string, sObjectName: string, field: string, size?: number) {
+        this.onOutput(this.buildIOEvent('output', 'downloading_file', { recordId, sObjectName, field, size }));
+    }
+
+    public fileTooLarge(recordId: string, sObjectName: string, field: string, size: number, limit: number) {
+        this.onOutput(this.buildIOEvent('output', 'file_too_large', { recordId, sObjectName, field, size, limit }));
+    }
+
+    public fileDownloadFailed(recordId: string, sObjectName: string, field: string, error: any) {
+        this.onOutput(this.buildIOEvent('output', 'file_download_failed', { recordId, sObjectName, field, error: serializeError(error) }));
+    }
+
+    public fileDocumentMapped(documentId: string, newDocumentId: string, versionId: string) {
+        this.onOutput(this.buildIOEvent('output', 'file_document_mapped', { documentId, newDocumentId, versionId }));
+    }
+
+    public fileDocumentUnavailable(documentId: string, versionId: string) {
+        this.onOutput(this.buildIOEvent('output', 'file_document_unavailable', { documentId, versionId }));
     }
 
 }

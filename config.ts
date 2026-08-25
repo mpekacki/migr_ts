@@ -45,6 +45,12 @@ interface Options {
             template?: string;
         };
     };
+    files?: {
+        /** Defaults to true. Turn off to migrate file records without their contents. */
+        enabled?: boolean;
+        /** Files larger than this are migrated without their contents. Defaults to 25. */
+        maxFileSizeMb?: number;
+    };
 }
 
 interface Solver {

@@ -12,6 +12,7 @@
 
 import { CONTRACT_STATUS_ERROR } from './e2e-harness';
 import {
+    FakeChildRelationship,
     FakeFieldDef,
     FakeOrgConfig,
     FakeSObjectDef,
@@ -30,6 +31,16 @@ const ID_FIELD: FakeFieldDef = { name: 'Id', type: 'id', createable: false };
 const OWNER_FIELD: FakeFieldDef = { name: 'OwnerId', type: 'reference', referenceTo: ['User'] };
 const CREATED_DATE_FIELD: FakeFieldDef = { name: 'CreatedDate', type: 'datetime', createable: false };
 
+/** What a file can be attached to. ContentDocumentLink.LinkedEntityId is polymorphic. */
+const LINKABLE_SOBJECTS = ['Account', 'Case', 'Contact', 'Opportunity', 'User', 'Custom_Object_A__c'];
+
+/** The child relationship every file-bearing object exposes its attached files through. */
+const FILE_LINKS: FakeChildRelationship = {
+    name: 'ContentDocumentLinks',
+    childSObject: 'ContentDocumentLink',
+    field: 'LinkedEntityId'
+};
+
 function buildSchema(isSourceOrg: boolean): FakeSObjectDef[] {
     return [
         {
@@ -47,7 +58,8 @@ function buildSchema(isSourceOrg: boolean): FakeSObjectDef[] {
             ],
             childRelationships: [
                 { name: 'Contacts', childSObject: 'Contact', field: 'AccountId' },
-                { name: 'ChildAccounts', childSObject: 'Account', field: 'ParentId' }
+                { name: 'ChildAccounts', childSObject: 'Account', field: 'ParentId' },
+                FILE_LINKS
             ]
         },
         {
@@ -66,7 +78,8 @@ function buildSchema(isSourceOrg: boolean): FakeSObjectDef[] {
                 CREATED_DATE_FIELD
             ],
             childRelationships: [
-                { name: 'Cases', childSObject: 'Case', field: 'ContactId' }
+                { name: 'Cases', childSObject: 'Case', field: 'ContactId' },
+                FILE_LINKS
             ]
         },
         {
@@ -123,7 +136,8 @@ function buildSchema(isSourceOrg: boolean): FakeSObjectDef[] {
                 { name: 'ContactId', type: 'reference', referenceTo: ['Contact'] },
                 OWNER_FIELD,
                 CREATED_DATE_FIELD
-            ]
+            ],
+            childRelationships: [FILE_LINKS]
         },
         {
             name: 'Lead',
@@ -246,29 +260,66 @@ function buildSchema(isSourceOrg: boolean): FakeSObjectDef[] {
                 ID_FIELD,
                 { name: 'Title', type: 'string', nillable: false },
                 { name: 'PathOnClient', type: 'string', nillable: false },
-                { name: 'VersionData', type: 'base64' },
+                { name: 'VersionData', type: 'base64', sizeField: 'ContentSize' },
+                // Names the body an existing version already has. It is createable and
+                // populated on the way out, so a migrated version carries it unless
+                // something drops it - and sending it next to VersionData is refused.
+                { name: 'ContentBodyId', type: 'string' },
+                { name: 'ContentSize', type: 'int', createable: false },
+                { name: 'IsLatest', type: 'boolean', createable: false },
                 { name: 'ContentDocumentId', type: 'reference', referenceTo: ['ContentDocument'] },
                 OWNER_FIELD,
                 CREATED_DATE_FIELD
             ],
-            // Inserting a version without a document creates the document for it.
+            // Inserting a version without a document creates the document for it, and
+            // the platform shares every new file with its owner.
             afterCreate: (record, org) => {
+                record.IsLatest = true;
+                record.ContentBodyId = `05T${record.Id.slice(3)}`;
                 if (!record.ContentDocumentId) {
-                    record.ContentDocumentId = org.create('ContentDocument', { Title: record.Title }).id;
+                    record.ContentDocumentId = org.create('ContentDocument', {
+                        Title: record.Title,
+                        OwnerId: record.OwnerId,
+                        ContentSize: record.ContentSize
+                    }).id;
+                }
+                org.update('ContentDocument', { Id: record.ContentDocumentId, LatestPublishedVersionId: record.Id });
+                if (record.OwnerId) {
+                    org.create('ContentDocumentLink', {
+                        ContentDocumentId: record.ContentDocumentId,
+                        LinkedEntityId: record.OwnerId,
+                        ShareType: 'I',
+                        Visibility: 'AllUsers'
+                    });
                 }
             }
         },
         {
-            // Documents are managed through ContentVersion: they can neither be
-            // retrieved through the REST retrieve endpoint nor created directly.
+            // Documents are managed through ContentVersion: they can be read but not
+            // created, so a document only ever comes into being alongside the version
+            // that carries its file.
             name: 'ContentDocument',
             keyPrefix: '069',
             createable: false,
-            queryable: false,
             fields: [
                 ID_FIELD,
                 { name: 'Title', type: 'string', createable: false },
+                { name: 'LatestPublishedVersionId', type: 'reference', referenceTo: ['ContentVersion'], createable: false },
+                { name: 'ContentSize', type: 'int', createable: false },
                 { name: 'OwnerId', type: 'reference', referenceTo: ['User'], createable: false }
+            ]
+        },
+        {
+            // What attaches a file to a record. Migrating one is how a file follows
+            // the Account or Case it was attached to.
+            name: 'ContentDocumentLink',
+            keyPrefix: '06A',
+            fields: [
+                ID_FIELD,
+                { name: 'ContentDocumentId', type: 'reference', referenceTo: ['ContentDocument'], nillable: false },
+                { name: 'LinkedEntityId', type: 'reference', referenceTo: LINKABLE_SOBJECTS, nillable: false },
+                { name: 'ShareType', type: 'picklist' },
+                { name: 'Visibility', type: 'picklist' }
             ]
         },
         {
@@ -408,6 +459,43 @@ const restrictedPicklistRule: FakeValidationRule = ({ record, org }) => {
     return null;
 };
 
+/**
+ * A version carries either a file or the id of a body that already exists, never
+ * both: "Specify only one of these fields: VersionData or ContentBodyId."
+ */
+const oneBodyPerVersionRule: FakeValidationRule = ({ record }) => {
+    if (record.VersionData && record.ContentBodyId) {
+        return {
+            message: 'Specify only one of these fields: VersionData or ContentBodyId.: Version Data',
+            fields: ['VersionData'],
+            statusCode: 'FIELD_INTEGRITY_EXCEPTION'
+        };
+    }
+    return null;
+};
+
+/**
+ * A file can only be shared with a record once. The platform links every new file
+ * to its owner by itself, so migrating the source's owner link lands on this.
+ */
+const oneLinkPerEntityRule: FakeValidationRule = ({ record, isNew, org }) => {
+    if (!isNew || !record.ContentDocumentId || !record.LinkedEntityId) {
+        return null;
+    }
+    const existing = org.find('ContentDocumentLink', {
+        ContentDocumentId: record.ContentDocumentId,
+        LinkedEntityId: record.LinkedEntityId
+    });
+    if (existing.length > 0) {
+        return {
+            message: `Document with ID: ${record.ContentDocumentId} is already linked with the entity with ID: ${record.LinkedEntityId}`,
+            fields: ['LinkedEntityId'],
+            statusCode: 'DUPLICATE_VALUE'
+        };
+    }
+    return null;
+};
+
 /** An activated contract cannot be created, only updated into that state. */
 const contractStatusRule: FakeValidationRule = ({ record, isNew }) => {
     if (isNew && record.Status && record.Status !== 'Draft') {
@@ -423,6 +511,8 @@ const contractStatusRule: FakeValidationRule = ({ record, isNew }) => {
 function buildValidationRules(isSourceOrg: boolean): Record<string, FakeValidationRule[]> {
     return {
         Contract: [contractStatusRule],
+        ContentVersion: [oneBodyPerVersionRule],
+        ContentDocumentLink: [oneLinkPerEntityRule],
         Custom_Object_D__c: [
             fussyFieldOnCreateRule('Fussy_Field_1__c'),
             fussyFieldOnCreateRule('Fussy_Field_2__c'),

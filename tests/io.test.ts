@@ -23,6 +23,19 @@ describe('IO', () => {
         expect(output[0].category).toBe('output');
     });
 
+    it('should replace a file field with its length so the log does not carry the file', () => {
+        const {io, output} = createIO();
+
+        const versionData = 'a'.repeat(2000);
+        io.savingRecords({
+            '068000000000000001': { attributes: { type: 'ContentVersion' }, Title: 'Big', VersionData: versionData } as any
+        });
+
+        const [record] = output[0].data.records;
+        expect(record.VersionData).toBe('<2000 characters>');
+        expect(record.Title).toBe('Big');
+    });
+
     it('should emit saving_records with record counts by type', () => {
         const {io, output} = createIO();
 

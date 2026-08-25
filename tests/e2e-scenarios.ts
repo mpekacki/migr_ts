@@ -23,12 +23,14 @@ import {
     assertRecordMigrated,
     assertRecordNotMigrated,
     assertRecordSkipped,
+    attachFile,
     confirmMigration,
     createAccount,
     createActivatedContract,
     createBasicConfig,
     createContract,
     createDuplicateCustObjCs,
+    createFile,
     createFussyCustObjD,
     createRecord,
     createTokenAuthConfig,
@@ -36,6 +38,7 @@ import {
     extractFussyColumnSolver,
     fixContractStatusSolver,
     hasSavedRecord,
+    readFile,
     readLogEvents,
     retrieveRecord,
     scenario
@@ -1067,18 +1070,88 @@ export const e2eScenarios: E2EScenario[] = [
         expect(newCaseC.Description).toBe(`And I like ${newCaseBId}`);
     }),
 
-    scenario('non-queryable and non-creatable object', async (ctx: E2EContext) => {
-        const contentVersion = await createRecord(ctx.sourceOrg, 'ContentVersion', {
-            Title: 'Test Document', // Required field
-            PathOnClient: 'test.txt', // Required field
-            VersionData: 'Hello World'
-        });
+    scenario('migrate a file', async (ctx: E2EContext) => {
+        const file = await createFile(ctx.sourceOrg, 'Test Document', 'Hello World');
 
-        const config = createBasicConfig(ctx, [contentVersion.id]);
+        const config = createBasicConfig(ctx, [file.versionId]);
 
         const { parsedOutput } = await ctx.runMigration(config);
 
-        assertRecordMigrated(parsedOutput, contentVersion.id);
+        const newVersionId = assertRecordMigrated(parsedOutput, file.versionId);
+        expect(await readFile(ctx.targetOrg, newVersionId)).toBe('Hello World');
+
+        const newVersion = await retrieveRecord(ctx.targetOrg, 'ContentVersion', newVersionId);
+        expect(newVersion.Title).toBe('Test Document');
+        // The target creates a ContentDocument of its own to hold the file - nothing
+        // can insert one - and the source document id is mapped onto it, so anything
+        // pointing at the file resolves.
+        expect(newVersion.ContentDocumentId).toBeTruthy();
+        expect(newVersion.ContentDocumentId).not.toBe(file.documentId);
+        assertRecordMappedTo(parsedOutput, file.documentId, newVersion.ContentDocumentId);
+    }),
+
+    scenario('migrate a file attached to a record', async (ctx: E2EContext) => {
+        const account = await createAccount(ctx.sourceOrg, `Files Inc ${Math.random()}`);
+        const file = await createFile(ctx.sourceOrg, 'Contract Scan', 'scanned pages');
+        await attachFile(ctx.sourceOrg, file.documentId, account.id);
+
+        const config = createBasicConfig(ctx, [account.id], {
+            relationships: {
+                Account: [{ name: 'ContentDocumentLinks' }]
+            }
+        });
+
+        const { parsedOutput } = await ctx.runMigration(config);
+
+        const newAccountId = assertRecordMigrated(parsedOutput, account.id);
+        const newDocumentId = assertRecordMigrated(parsedOutput, file.documentId);
+
+        const links = await ctx.targetOrg.query(
+            `SELECT ContentDocumentId FROM ContentDocumentLink WHERE LinkedEntityId = '${newAccountId}'`
+        );
+        expect(links.records.map((link: any) => link.ContentDocumentId)).toEqual([newDocumentId]);
+
+        const versions = await ctx.targetOrg.query(`SELECT Id FROM ContentVersion WHERE ContentDocumentId = '${newDocumentId}'`);
+        expect(versions.records).toHaveLength(1);
+        expect(await readFile(ctx.targetOrg, versions.records[0].Id)).toBe('scanned pages');
+    }),
+
+    scenario('migrate a file through an export', async (ctx: E2EContext) => {
+        const file = await createFile(ctx.sourceOrg, 'Exported Document', 'round trip');
+
+        await ctx.runMigration({
+            sourceOrg: ctx.sourceOrg.alias,
+            targetFile: './test-output.json',
+            recordIds: [file.versionId],
+            matchers: defaultMatchers
+        });
+
+        const { parsedOutput } = await ctx.runMigration({
+            sourceFile: './test-output.json',
+            targetOrg: ctx.targetOrg.alias,
+            recordIds: [file.versionId],
+            matchers: defaultMatchers
+        });
+
+        const newVersionId = assertRecordMigrated(parsedOutput, file.versionId);
+        expect(await readFile(ctx.targetOrg, newVersionId)).toBe('round trip');
+    }),
+
+    scenario('file over the size limit is migrated without its contents', async (ctx: E2EContext) => {
+        const file = await createFile(ctx.sourceOrg, 'Big Document', 'a'.repeat(8192));
+
+        const config = createBasicConfig(ctx, [file.versionId], {
+            // ~1 KB, so the 8 KB file is over it
+            files: { maxFileSizeMb: 0.001 },
+            fullAuto: { enabled: true, unhandledErrorBehavior: 'skip' }
+        });
+
+        const { capturedOutput } = await ctx.runMigration(config, []);
+
+        const tooLarge = capturedOutput.filter(event => event.type === 'file_too_large');
+        expect(tooLarge).toHaveLength(1);
+        expect(tooLarge[0].data.recordId).toBe(file.versionId);
+        expect(capturedOutput.filter(event => event.type === 'downloading_file')).toHaveLength(0);
     }),
 
     scenario('write output to log file', async (ctx: E2EContext) => {

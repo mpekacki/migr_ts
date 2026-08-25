@@ -8,6 +8,7 @@ A CLI tool for migrating Salesforce records between orgs (or to/from files). It 
 - **Circular dependency resolution** — detects dependency cycles, temporarily clears required lookups, and restores them after all records are created
 - **Matchers** — identify records that already exist in the target org (by name, developer name, or any field mapping) so they are reused instead of duplicated
 - **Solvers** — pattern-based error handlers that automatically fix field values, skip records, retry with backoff, extract IDs from error messages, and more
+- **Files** — moves the contents behind ContentVersion/ContentDocument, and reattaches them to the records they were on
 - **Resumable migrations** — a per-target history file maps source IDs to target IDs, so re-runs skip already-migrated records
 - **File mode** — serialize records to JSON or a SQLite database instead of inserting, or load from either instead of a source org
 - **Anonymization** — obfuscate or sanitize email fields during migration
@@ -56,8 +57,34 @@ See [config.json](config.json) for a full example. The most important fields:
 | `maxConcurrentRequests` | API request parallelism (default: 10) |
 | `fullAuto.enabled` | Run without interactive prompts |
 | `anonymization.emailFields` | Obfuscate or sanitize email addresses |
+| `files.enabled` | Migrate file contents (default: `true`) |
+| `files.maxFileSizeMb` | Files larger than this are migrated without their contents (default: 25) |
 | `sourceFile` / `targetFile` | Migrate from/to a JSON file instead of an org |
 | `sourceSqlite` / `targetSqlite` | Migrate from/to a SQLite database instead of an org |
+
+### Files
+
+Files are fetched and inserted differently from ordinary records, and the tool handles both sides of that automatically — no configuration is needed to migrate a `ContentVersion`.
+
+Retrieving a record does not bring its file along: a blob field such as `ContentVersion.VersionData` comes back holding the *path* of the endpoint that serves it, so the contents are downloaded per record and put back into the field base64 encoded. From there the record travels the ordinary path, which means exports carry file contents too and a `sourceFile` / `sourceSqlite` run restores them.
+
+A `ContentDocument` has no createable field, so it can never be inserted. The target creates one of its own the moment the `ContentVersion` carrying the file lands, and the tool maps the source document ID onto that new one. That mapping is what makes attachments work: point `relationships` at `ContentDocumentLinks` and the files on a record follow it into the target org.
+
+```json
+{
+  "recordIds": ["001XXXXXXXXXXXXXXX"],
+  "relationships": {
+    "Account": [{ "name": "ContentDocumentLinks" }]
+  }
+}
+```
+
+Worth knowing:
+
+- Only the **latest version** of each file is migrated. A file with a version history arrives in the target as a single version holding the current contents.
+- `maxFileSizeMb` defaults to 25 because a non-multipart request body may carry at most 37.5 MB of base64, and a 25 MB file encodes to roughly 33 MB. A file over the limit is reported and its record is migrated without contents — which for a `ContentVersion` means the insert then fails, since the field is required.
+- Salesforce shares every new file with its owner by itself. Migrating the source's owner `ContentDocumentLink` therefore runs into `DUPLICATE_VALUE`; a `skip` solver on `is already linked with the entity` disposes of it.
+- `files.enabled: false` migrates file records without their contents, which is useful for rehearsing a large migration.
 
 ### SQLite export format
 

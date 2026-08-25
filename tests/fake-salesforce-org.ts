@@ -68,6 +68,8 @@ export interface FakeFieldDef {
     nillable?: boolean;
     unique?: boolean;
     referenceTo?: string[];
+    /** base64 fields only: the field the org fills in with the stored file's byte count. */
+    sizeField?: string;
     /** Applied on create when the field was not supplied, like a Salesforce default value. */
     defaultValue?: (org: FakeSalesforceOrg) => any;
 }
@@ -146,6 +148,10 @@ function isBlank(value: any): boolean {
     return value === undefined || value === null || value === '';
 }
 
+function blobKey(sObjectName: string, recordId: string, fieldName: string): string {
+    return `${sObjectName}:${recordId}:${fieldName}`;
+}
+
 /** Field values are compared as strings so booleans and numbers match their string form, like SOQL does. */
 function valueMatches(recordValue: any, conditionValue: any): boolean {
     if (isBlank(recordValue)) {
@@ -164,6 +170,8 @@ export class FakeSalesforceOrg {
     private readonly defsByPrefix = new Map<string, FakeSObjectDef>();
     private readonly validationRules: Record<string, FakeValidationRule[]>;
     private readonly recordsByType = new Map<string, Map<string, any>>();
+    /** File contents, base64 encoded, keyed by "SObject:recordId:field" - see applyFields. */
+    private readonly blobs = new Map<string, string>();
     private idSequence = 0;
 
     /** Owner assigned to new records, like the running user of a real connection. */
@@ -272,6 +280,18 @@ export class FakeSalesforceOrg {
             if (value instanceof Date) {
                 // Requests are JSON, so a Date reaches the org as an ISO string.
                 target[fieldName] = value.toISOString();
+                continue;
+            }
+            if (field.type === 'base64' && !isBlank(value)) {
+                // A file is not stored in the field. The org keeps it aside and puts
+                // the path of the endpoint serving it into the record, which is what
+                // a REST retrieve hands back in place of the contents.
+                const contents = String(value);
+                this.blobs.set(blobKey(def.name, target.Id, fieldName), contents);
+                target[fieldName] = `${this.recordUrl(def.name, target.Id)}/${fieldName}`;
+                if (field.sizeField) {
+                    target[field.sizeField] = Buffer.from(contents, 'base64').length;
+                }
                 continue;
             }
             if (isBlank(value)) {
@@ -393,6 +413,16 @@ export class FakeSalesforceOrg {
             throw new SalesforceError(`Provided external ID field does not exist or is not accessible: the requested resource does not exist`, 'NOT_FOUND');
         }
         return structuredClone(record);
+    }
+
+    /** The contents of a stored file, base64 encoded, the way the blob endpoint serves it. */
+    retrieveBlob(sObjectName: string, recordId: string, fieldName: string): string {
+        const def = this.requireDef(sObjectName);
+        const contents = this.blobs.get(blobKey(def.name, recordId, fieldName));
+        if (contents === undefined) {
+            throw new SalesforceError(`The requested resource does not exist: ${recordId}/${fieldName}`, 'NOT_FOUND');
+        }
+        return contents;
     }
 
     /** Every record of a type, in insertion order. */
@@ -572,6 +602,10 @@ export class FakeSalesforceClient implements SalesforceClient {
 
     async retrieve(sObjectName: string, recordId: string): Promise<any> {
         return this.org.retrieve(sObjectName, recordId);
+    }
+
+    async retrieveBlob(sObjectName: string, recordId: string, fieldName: string): Promise<string> {
+        return this.org.retrieveBlob(sObjectName, recordId, fieldName);
     }
 
     find(sObjectName: string, conditions: Record<string, string>): FakeQuery {

@@ -135,6 +135,21 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
         case 'malformed_id':
             push(state, 'warn', `${d.sObjectName} ${d.recordId} is malformed`);
             break;
+        case 'downloading_file':
+            push(state, 'sub', `Downloading ${d.field} of ${d.sObjectName} ${d.recordId}`, 1);
+            break;
+        case 'file_too_large':
+            push(state, 'warn', `${d.field} of ${d.sObjectName} ${d.recordId} is too large - migrating without it`);
+            break;
+        case 'file_download_failed':
+            push(state, 'warn', `Could not download ${d.field} of ${d.sObjectName} ${d.recordId} - migrating without it`);
+            break;
+        case 'file_document_mapped':
+            push(state, 'sub', `ContentDocument ${d.documentId} -> ${d.newDocumentId}`, 1);
+            break;
+        case 'file_document_unavailable':
+            push(state, 'warn', `ContentDocument ${d.documentId} not migrated: version ${d.versionId} never landed`);
+            break;
         case 'querying_related_records':
             state.phase = 'Fetching';
             push(state, 'run', 'Querying related records');

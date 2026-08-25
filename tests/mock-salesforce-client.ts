@@ -2,7 +2,7 @@ import { SalesforceClient, DefaultSalesforceClient, AuthConfig } from '../salesf
 
 interface ErrorConfig {
     recordId: string;
-    operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'query' | 'update' | 'describeSObject' | 'describeGlobal' | 'find' | 'select';
+    operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'retrieveBlob' | 'query' | 'update' | 'describeSObject' | 'describeGlobal' | 'find' | 'select';
     error: Error;
 }
 
@@ -26,7 +26,7 @@ export class MockSalesforceClient implements SalesforceClient {
     /**
      * Configure the client to throw an error for a specific record ID and operation
      */
-    configureError(recordId: string, operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'query' | 'update' | 'describeSObject' | 'describeGlobal' | 'find' | 'select', error: Error): void {
+    configureError(recordId: string, operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'retrieveBlob' | 'query' | 'update' | 'describeSObject' | 'describeGlobal' | 'find' | 'select', error: Error): void {
         this.errorConfigs.push({ recordId, operation, error });
     }
 
@@ -82,6 +82,12 @@ export class MockSalesforceClient implements SalesforceClient {
         const error = this.shouldThrowError('retrieve');
         if (error) throw error;
         return this.defaultClient.retrieve(sObjectName, recordId);
+    }
+
+    async retrieveBlob(sObjectName: string, recordId: string, fieldName: string): Promise<string> {
+        const error = this.shouldThrowError('retrieveBlob');
+        if (error) throw error;
+        return this.defaultClient.retrieveBlob(sObjectName, recordId, fieldName);
     }
 
     find(sObjectName: string, conditions: Record<string, string>): any {
