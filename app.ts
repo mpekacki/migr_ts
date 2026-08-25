@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import { scanForCircularDependency } from './circular';
 import Chunks from './chunks';
 import IOEvent from './ioevent';
-import IO, { serializeError } from './io';
+import IO, { serializeError, updatedFields } from './io';
 import { preprocessData } from './preprocess-data';
 import { readRecordsFromSqlite, writeRecordsToSqlite } from './sqlite-store';
 import { FixSolver, Options, SolverType } from './config';
@@ -93,9 +93,11 @@ class MigrationRunner {
     /**
      * Every error the run reports, keyed by source record id. `phase` says which
      * pass it came from: an insert error can still be fixed by a solver or by the
-     * user, an update error cannot - nothing runs after the update pass.
+     * user, an update error cannot - nothing runs after the update pass. `fields`
+     * is the payload an update was writing, so the output says what it was trying
+     * to set and not just that it failed.
      */
-    private errors: Record<string, { message: string, fixed: boolean, solver?: SolverType, phase: 'insert' | 'update' }[]> = {};
+    private errors: Record<string, { message: string, fixed: boolean, solver?: SolverType, phase: 'insert' | 'update', fields?: Record<string, any> }[]> = {};
     private recordAddedReasons: Record<string, string> = {};
     private toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
     /** Fetched records dropped by removeAlreadyMigratedRecords, counted per SObject type. */
@@ -1004,11 +1006,11 @@ class MigrationRunner {
      */
     private reportUpdateError(recordId: string, record: any, error: any): void {
         const sObjectName = record.attributes!.type;
-        this.io.errorUpdatingRecord(recordId, sObjectName, error);
+        this.io.errorUpdatingRecord(recordId, sObjectName, error, record);
         if (!(recordId in this.errors)) {
             this.errors[recordId] = [];
         }
-        this.errors[recordId].push({ message: serializeError(error).message, fixed: false, phase: 'update' });
+        this.errors[recordId].push({ message: serializeError(error).message, fixed: false, phase: 'update', fields: updatedFields(record) });
     }
 
     private async migrateToFile(): Promise<void> {

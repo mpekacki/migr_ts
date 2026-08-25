@@ -52,16 +52,28 @@ const MAX_LOGGED_FIELD_LENGTH = 500;
  * them are passed through untouched rather than copied.
  */
 function forLogging(records: any[]): any[] {
-    return records.map(record => {
-        let trimmed: any = null;
-        for (const [field, value] of Object.entries(record)) {
-            if (typeof value === 'string' && value.length > MAX_LOGGED_FIELD_LENGTH) {
-                trimmed = trimmed ?? { ...record };
-                trimmed[field] = `<${value.length} characters>`;
-            }
+    return records.map(recordForLogging);
+}
+
+/**
+ * The field values an update was writing, ready to be reported: everything the
+ * payload carried except `attributes`, which says nothing the event's sObjectName
+ * does not already say.
+ */
+export function updatedFields(record: Record<string, any>): Record<string, any> {
+    return recordForLogging(Object.fromEntries(Object.entries(record).filter(([field]) => field !== 'attributes')));
+}
+
+/** One record's field values as the log should carry them. See forLogging. */
+export function recordForLogging(record: any): any {
+    let trimmed: any = null;
+    for (const [field, value] of Object.entries(record)) {
+        if (typeof value === 'string' && value.length > MAX_LOGGED_FIELD_LENGTH) {
+            trimmed = trimmed ?? { ...record };
+            trimmed[field] = `<${value.length} characters>`;
         }
-        return trimmed ?? record;
-    });
+    }
+    return trimmed ?? record;
 }
 
 class IO {
@@ -284,8 +296,14 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'updating_record', { recordCountsByType, records: forLogging(records) }));
     }
 
-    public errorUpdatingRecord(recordId: string, sObjectName: string, error: any) {
-        this.onOutput(this.buildIOEvent('output', 'error_updating_record', { recordId, sObjectName, error: serializeError(error) }));
+    /**
+     * `record` is the payload that was sent to the org. Without it the report names
+     * the record and the message but not what the update was trying to write, which
+     * is exactly what tells apart a bad lookup value from a validation rule.
+     */
+    public errorUpdatingRecord(recordId: string, sObjectName: string, error: any, record?: Record<string, any>) {
+        const fields = record ? updatedFields(record) : undefined;
+        this.onOutput(this.buildIOEvent('output', 'error_updating_record', { recordId, sObjectName, error: serializeError(error), fields }));
     }
 
     public downloadingFile(recordId: string, sObjectName: string, field: string, size?: number) {

@@ -97,6 +97,25 @@ describe('IO', () => {
         expect(error.errors[1].statusCode).toBe('FIELD_INTEGRITY_EXCEPTION');
     });
 
+    it('should report the field values the failed update was writing', () => {
+        const {io, output} = createIO();
+
+        io.errorUpdatingRecord('001xx000003DGb0AAG', 'Account', new Error('nope'), {
+            attributes: { type: 'Account' },
+            Id: '001TARGET0000000AAA',
+            ParentId: '001MISSING000000AAA',
+            Description: 'x'.repeat(600)
+        });
+
+        const fields = output[0].data.fields;
+        expect(fields.ParentId).toBe('001MISSING000000AAA');
+        expect(fields.Id).toBe('001TARGET0000000AAA');
+        // attributes says nothing sObjectName does not, and an oversized value is
+        // reported by its length the way every other logged record is.
+        expect(fields.attributes).toBeUndefined();
+        expect(fields.Description).toBe('<600 characters>');
+    });
+
     it('should still produce a message for an error that is not an object', () => {
         const {io, output} = createIO();
 

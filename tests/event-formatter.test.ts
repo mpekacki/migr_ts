@@ -216,6 +216,18 @@ describe('event-formatter', () => {
             });
             expect(format(event)).toBe('error updating record 001 of type Account: connection reset');
         });
+
+        it('should print the field values the update was writing', () => {
+            const event = new IOEvent('output', 'error_updating_record', {
+                recordId: '001',
+                sObjectName: 'Account',
+                error: { message: 'insufficient access rights on cross-reference id' },
+                fields: { Id: '001TARGET', ParentId: '001MISSING' }
+            });
+            const result = format(event);
+            expect(result).toContain('attempted values');
+            expect(result).toContain('"ParentId":"001MISSING"');
+        });
     });
 
     describe('getFormatter(true) - debug mode', () => {

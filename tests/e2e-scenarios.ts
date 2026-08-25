@@ -966,6 +966,9 @@ export const e2eScenarios: E2EScenario[] = [
         expect(updateErrors).toHaveLength(1);
         expect(updateErrors[0].message).toContain('Always fails on org B');
         expect(updateErrors[0].fixed).toBe(false);
+        // and it has to say what the update was writing: the message names the rule,
+        // only the payload names the value that tripped it.
+        expect(updateErrors[0].fields).toMatchObject({ Fussy_Field_1__c: 'fail' });
     }),
 
     scenario('match by wrong field', async (ctx: E2EContext) => {
