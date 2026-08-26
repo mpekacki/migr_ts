@@ -12,6 +12,7 @@ A CLI tool for migrating Salesforce records between orgs (or to/from files). It 
 - **Resumable migrations** — a per-target history file maps source IDs to target IDs, so re-runs skip already-migrated records
 - **File mode** — serialize records to JSON or a SQLite database instead of inserting, or load from either instead of a source org
 - **Anonymization** — obfuscate or sanitize email fields during migration
+- **Anonymous Apex hooks** — run scripts in the target org before and after a confirmed migration, to disable automation and put it back
 - **Interactive terminal UI** — full-screen TUI with progress, error resolution prompts, and the ability to add solvers on the fly (or run fully automated with `fullAuto`)
 
 ## Requirements
@@ -59,6 +60,7 @@ See [config.json](config.json) for a full example. The most important fields:
 | `anonymization.emailFields` | Obfuscate or sanitize email addresses |
 | `files.enabled` | Migrate file contents (default: `true`) |
 | `files.maxFileSizeMb` | Files larger than this are migrated without their contents (default: 25) |
+| `apex.beforeMigration` / `apex.afterMigration` | Anonymous Apex scripts to run in the target org around the migration |
 | `sourceFile` / `targetFile` | Migrate from/to a JSON file instead of an org |
 | `sourceSqlite` / `targetSqlite` | Migrate from/to a SQLite database instead of an org |
 
@@ -85,6 +87,25 @@ Worth knowing:
 - `maxFileSizeMb` defaults to 25 because a non-multipart request body may carry at most 37.5 MB of base64, and a 25 MB file encodes to roughly 33 MB. A file over the limit is reported and its record is migrated without contents — which for a `ContentVersion` means the insert then fails, since the field is required.
 - Salesforce shares every new file with its owner by itself. Migrating the source's owner `ContentDocumentLink` therefore runs into `DUPLICATE_VALUE`; a `skip` solver on `is already linked with the entity` disposes of it.
 - `files.enabled: false` migrates file records without their contents, which is useful for rehearsing a large migration.
+
+### Anonymous Apex around the migration
+
+`apex.beforeMigration` and `apex.afterMigration` are lists of files holding Anonymous Apex, executed in the target org in the order they are listed — one script per file, the way `sf apex run -f` takes them. This is where the "switch the triggers off, put the rollups back afterwards" work goes.
+
+```json
+{
+  "apex": {
+    "beforeMigration": ["scripts/disable-automation.apex"],
+    "afterMigration": ["scripts/enable-automation.apex", "scripts/recalculate-rollups.apex"]
+  }
+}
+```
+
+- The scripts bracket what the run **writes** to the target org, so they only run when it writes something. Answering `n` at the confirmation prompt leaves the target org untouched and runs neither phase, and so does a re-run that finds every record in its history already (`nothing to migrate`). `fullAuto` runs them without asking.
+- `beforeMigration` runs before the first record is inserted; `afterMigration` runs after the last one has landed and the deferred lookup updates are done.
+- They run as a **pair**: once `beforeMigration` has run, `afterMigration` runs on every way out of the migration — including a run abandoned part way with `h` (save and exit), so automation a `beforeMigration` script switched off is never left off.
+- A script that fails — one that does not compile, or one that throws — stops the run with a non-zero exit code. A `beforeMigration` failure stops it before anything is inserted; an `afterMigration` failure is reported only after the migration summary has been written, so a broken cleanup script never costs you the record of what was migrated.
+- Missing script files and combining `apex` with `targetFile` / `targetSqlite` (an export has no target org to run them in) are rejected before the run starts fetching.
 
 ### SQLite export format
 

@@ -101,6 +101,26 @@ describe('event-formatter', () => {
             expect(format(event)).toBe('aborted');
         });
 
+        it('should format running_apex_script', () => {
+            const event = new IOEvent('output', 'running_apex_script', { phase: 'before', filePath: './setup.apex', index: 1, total: 2 });
+            expect(format(event)).toBe('running apex script 1/2 before migration: ./setup.apex');
+        });
+
+        it('should format apex_script_done', () => {
+            const event = new IOEvent('output', 'apex_script_done', { phase: 'after', filePath: './teardown.apex' });
+            expect(format(event)).toBe('apex script ./teardown.apex finished');
+        });
+
+        it('should format apex_script_failed', () => {
+            const event = new IOEvent('output', 'apex_script_failed', {
+                phase: 'before',
+                filePath: './setup.apex',
+                failure: 'Unexpected token \'x\'. (line 3, column 1)',
+                result: { compiled: false }
+            });
+            expect(format(event)).toBe('apex script ./setup.apex failed: Unexpected token \'x\'. (line 3, column 1)');
+        });
+
         it('should format using_solver with fix action', () => {
             const event = new IOEvent('output', 'using_solver', { error: 'err', solverMessage: 'fix it', solverAction: 'fix' });
             expect(format(event)).toBe('fixing using solver: fix it');

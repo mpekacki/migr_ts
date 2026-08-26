@@ -326,6 +326,23 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'file_document_unavailable', { documentId, versionId }));
     }
 
+    public runningApexScript(phase: string, filePath: string, index: number, total: number) {
+        this.onOutput(this.buildIOEvent('output', 'running_apex_script', { phase, filePath, index, total }));
+    }
+
+    public apexScriptDone(phase: string, filePath: string) {
+        this.onOutput(this.buildIOEvent('output', 'apex_script_done', { phase, filePath }));
+    }
+
+    /**
+     * `failure` is the one-line reason the run reports; `result` is the whole
+     * Tooling API payload, which is where the stack trace of a script that threw
+     * lives.
+     */
+    public apexScriptFailed(phase: string, filePath: string, failure: string, result: any) {
+        this.onOutput(this.buildIOEvent('output', 'apex_script_failed', { phase, filePath, failure, result }));
+    }
+
 }
 
 export default IO;

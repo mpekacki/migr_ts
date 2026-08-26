@@ -25,9 +25,14 @@ import {
     InputHandler,
     MigrationRunResult,
     TestOrg,
+    UNCOMPILABLE_APEX,
     cleanupMigrationArtifacts,
+    createAccount,
+    createBasicConfig,
     defaultMatchers,
-    toMigrationRunResult
+    insertAccount,
+    toMigrationRunResult,
+    writeApexScript
 } from './e2e-harness';
 import { e2eScenarios } from './e2e-scenarios';
 import { FakeSalesforceOrg, createFakeClientFactory } from './fake-salesforce-org';
@@ -189,6 +194,58 @@ for (const e2eScenario of e2eScenarios) {
         await e2eScenario.run(createContext());
     });
 }
+
+// The four tests below live here rather than in the shared scenarios because the
+// failures they assert on are thrown errors: in this context that surfaces as a
+// rejected main(), while the live CLI turns it into a FATAL line and a non-zero
+// exit code - which the live harness reads as the run itself having failed.
+
+test('a failing apex script before the migration stops it before anything is inserted', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        apex: { beforeMigration: [writeApexScript('before', [UNCOMPILABLE_APEX])] }
+    }))).rejects.toThrow(/Apex script .* \(apex\.beforeMigration\) failed/);
+
+    expect(targetOrg.records('Account')).toHaveLength(0);
+});
+
+test('a failing apex script after the migration is let out only once the run has finished', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        apex: { afterMigration: [writeApexScript('after', [UNCOMPILABLE_APEX])] }
+    }))).rejects.toThrow(/Apex script .* \(apex\.afterMigration\) failed/);
+
+    // The migration itself is untouched by the failing script: it ran to the end,
+    // and the history file it leaves behind is what a re-run picks up.
+    expect(targetOrg.records('Account')).toHaveLength(1);
+    expect(Object.values(JSON.parse(fs.readFileSync(`${TARGET_ORG_ALIAS}__history.json`, 'utf8')))).toContain(targetOrg.records('Account')[0].Id);
+});
+
+test('apex scripts are refused for a file export, which has no target org to run them in', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    await expect(ctx.runMigration({
+        sourceOrg: ctx.sourceOrg.alias,
+        targetFile: './test-output.json',
+        recordIds: [account.id],
+        matchers: defaultMatchers,
+        apex: { beforeMigration: [writeApexScript('before', [insertAccount('never runs')])] }
+    })).rejects.toThrow(/cannot be combined with targetFile or targetSqlite/);
+});
+
+test('a missing apex script fails the run before it fetches anything', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        apex: { afterMigration: ['./apex_test_does_not_exist.apex'] }
+    }))).rejects.toThrow(/Apex script not found: \.\/apex_test_does_not_exist\.apex/);
+});
 
 // Lives here rather than in the shared scenarios because the failure it asserts on
 // is a thrown error: in this context that surfaces as a rejected main(), while the

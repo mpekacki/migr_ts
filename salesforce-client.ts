@@ -18,6 +18,25 @@ export interface SaveResult {
     errors: SaveError[];
 }
 
+/**
+ * The outcome of an Anonymous Apex execution, as the Tooling API reports it.
+ * Declared here rather than imported from jsforce so the fakes in the test suite
+ * can produce one without reaching into its internals, the way SaveResult works.
+ *
+ * A script that does not compile comes back with `compiled: false` and a
+ * `compileProblem`; one that throws comes back compiled but with `success: false`
+ * and an `exceptionMessage`.
+ */
+export interface ApexExecutionResult {
+    compiled: boolean;
+    compileProblem: string | null;
+    success: boolean;
+    line: number;
+    column: number;
+    exceptionMessage: string | null;
+    exceptionStackTrace: string | null;
+}
+
 export interface SalesforceClient {
     describeGlobal(): Promise<DescribeGlobalResult>;
     describeSObject(sObjectName: string): Promise<DescribeSObjectResult>;
@@ -29,6 +48,7 @@ export interface SalesforceClient {
     bulkCreate(records: any[]): Promise<SaveResult[]>;
     bulkUpdate(records: any[]): Promise<SaveResult[]>;
     update(sObjectName: string, record: any): Promise<void>;
+    executeAnonymous(apexCode: string): Promise<ApexExecutionResult>;
     getVersion(): string;
 }
 
@@ -134,6 +154,11 @@ export class DefaultSalesforceClient implements SalesforceClient {
 
     async update(sObjectName: string, record: any): Promise<void> {
         await this.connection.sobject(sObjectName).update(record);
+    }
+
+    /** Anonymous Apex goes through the Tooling API, not the REST data endpoints. */
+    async executeAnonymous(apexCode: string): Promise<ApexExecutionResult> {
+        return await this.connection.tooling.executeAnonymous(apexCode);
     }
 
     getVersion(): string {

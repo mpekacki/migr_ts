@@ -51,6 +51,17 @@ interface Options {
         /** Files larger than this are migrated without their contents. Defaults to 25. */
         maxFileSizeMb?: number;
     };
+    /**
+     * Anonymous Apex to run in the target org around the migration. Each entry is
+     * the path of a file holding one script, and the scripts of a phase run in the
+     * order they are listed.
+     */
+    apex?: {
+        /** Run after the migration is confirmed, before the first record is inserted. */
+        beforeMigration?: string[];
+        /** Run once every record has been inserted and the deferred updates are done. */
+        afterMigration?: string[];
+    };
 }
 
 interface Solver {

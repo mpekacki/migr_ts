@@ -38,10 +38,12 @@ import {
     extractFussyColumnSolver,
     fixContractStatusSolver,
     hasSavedRecord,
+    insertAccount,
     readFile,
     readLogEvents,
     retrieveRecord,
-    scenario
+    scenario,
+    writeApexScript
 } from './e2e-harness';
 
 // Reads a table out of a migr_ts SQLite export so the export can be inspected
@@ -1794,5 +1796,113 @@ export const e2eScenarios: E2EScenario[] = [
             expect(record.Fussy_Field_2__c).toBe('blocked');
         }
         expect(capturedOutput.filter(e => e.type === 'updating_record')).toHaveLength(2);
+    }),
+
+    scenario('apex scripts run in the target org around the migration', async (ctx: E2EContext) => {
+        const account = await createAccount(ctx.sourceOrg);
+        const names = {
+            beforeFirst: `apex-before-1-${Math.random()}`,
+            beforeSecond: `apex-before-2-${Math.random()}`,
+            after: `apex-after-${Math.random()}`
+        };
+
+        const config = createBasicConfig(ctx, [account.id], {
+            apex: {
+                beforeMigration: [
+                    writeApexScript('before1', [insertAccount(names.beforeFirst)]),
+                    writeApexScript('before2', [insertAccount(names.beforeSecond)])
+                ],
+                afterMigration: [writeApexScript('after', [insertAccount(names.after)])]
+            }
+        });
+
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config);
+
+        assertRecordMigrated(parsedOutput, account.id);
+        for (const name of Object.values(names)) {
+            expect(await ctx.targetOrg.findIds('Account', { Name: name })).toHaveLength(1);
+            // the scripts belong to the target org only - nothing runs in the source
+            expect(await ctx.sourceOrg.findIds('Account', { Name: name })).toHaveLength(0);
+        }
+
+        // Every script ran, in the order it was configured in, and each phase on its
+        // own side of the inserts.
+        const scriptPaths = capturedOutput
+            .filter(event => event.type === 'running_apex_script')
+            .map(event => event.data.filePath);
+        expect(scriptPaths).toEqual([
+            ...config.apex.beforeMigration,
+            ...config.apex.afterMigration
+        ]);
+        const types = capturedOutput.map(event => event.type);
+        const beforeScriptsEnd = types.indexOf('running_apex_script', types.indexOf('running_apex_script') + 1);
+        const afterScriptStart = types.lastIndexOf('running_apex_script');
+        expect(beforeScriptsEnd).toBeLessThan(types.indexOf('saving_records'));
+        expect(afterScriptStart).toBeGreaterThan(types.lastIndexOf('saving_records'));
+        expect(capturedOutput.filter(event => event.type === 'apex_script_done')).toHaveLength(3);
+        expect(capturedOutput.filter(event => event.type === 'apex_script_failed')).toHaveLength(0);
+    }),
+
+    scenario('apex scripts do not run when the migration is not confirmed', async (ctx: E2EContext) => {
+        const account = await createAccount(ctx.sourceOrg);
+        const beforeName = `apex-before-${Math.random()}`;
+
+        const config = createBasicConfig(ctx, [account.id], {
+            apex: {
+                beforeMigration: [writeApexScript('before', [insertAccount(beforeName)])]
+            }
+        });
+
+        const { capturedOutput } = await ctx.runMigration(config, ['n']);
+
+        expect(capturedOutput.some(event => event.type === 'aborted')).toBe(true);
+        expect(capturedOutput.some(event => event.type === 'running_apex_script')).toBe(false);
+        expect(await ctx.targetOrg.findIds('Account', { Name: beforeName })).toHaveLength(0);
+    }),
+
+    scenario('apex scripts do not run when there is nothing left to migrate', async (ctx: E2EContext) => {
+        const account = await createAccount(ctx.sourceOrg, `Cloud Kicks ${Math.random()}`);
+        const names = { before: `apex-before-${Math.random()}`, after: `apex-after-${Math.random()}` };
+
+        const config = createBasicConfig(ctx, [account.id], {
+            apex: {
+                beforeMigration: [writeApexScript('before', [insertAccount(names.before)])],
+                afterMigration: [writeApexScript('after', [insertAccount(names.after)])]
+            }
+        });
+
+        await ctx.runMigration(config, confirmMigration());
+
+        // Everything the second run fetches is in history already, so it writes
+        // nothing to the target org - and scripts that bracket a write have nothing
+        // to bracket. The empty input queue fails the run on any prompt.
+        const { capturedOutput } = await ctx.runMigration(config, []);
+
+        expect(capturedOutput.some(event => event.type === 'nothing_to_migrate')).toBe(true);
+        expect(capturedOutput.some(event => event.type === 'running_apex_script')).toBe(false);
+        // one apiece from the first run, and nothing from the second
+        for (const name of Object.values(names)) {
+            expect(await ctx.targetOrg.findIds('Account', { Name: name })).toHaveLength(1);
+        }
+    }),
+
+    scenario('apex scripts still close out a migration that is abandoned part way', async (ctx: E2EContext) => {
+        const account = await createAccount(ctx.sourceOrg, 'Cloud Kicks');
+        const contract = await createActivatedContract(ctx.sourceOrg, account.id);
+        const afterName = `apex-after-${Math.random()}`;
+
+        const config = createBasicConfig(ctx, [contract.id], {
+            apex: { afterMigration: [writeApexScript('after', [insertAccount(afterName)])] }
+        });
+
+        // 'h' quits at the contract's unhandled error, part way through the run.
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config, ['y', 'h']);
+
+        // The Account did land, so the run had committed to the target org - which
+        // is what the after scripts have to close out, or automation a before script
+        // switched off would stay off.
+        assertRecordMigrated(parsedOutput, account.id);
+        expect(capturedOutput.some(event => event.type === 'running_apex_script')).toBe(true);
+        expect(await ctx.targetOrg.findIds('Account', { Name: afterName })).toHaveLength(1);
     })
 ];
