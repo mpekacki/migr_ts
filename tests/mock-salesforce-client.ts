@@ -1,8 +1,8 @@
-import { SalesforceClient, DefaultSalesforceClient, AuthConfig } from '../salesforce-client';
+import { SalesforceClient, DefaultSalesforceClient, AuthConfig, ApexExecutionResult } from '../salesforce-client';
 
 interface ErrorConfig {
     recordId: string;
-    operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'retrieveBlob' | 'query' | 'update' | 'describeSObject' | 'describeGlobal' | 'find' | 'select';
+    operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'retrieveBlob' | 'query' | 'update' | 'executeAnonymous' | 'describeSObject' | 'describeGlobal' | 'find' | 'select';
     error: Error;
 }
 
@@ -26,7 +26,7 @@ export class MockSalesforceClient implements SalesforceClient {
     /**
      * Configure the client to throw an error for a specific record ID and operation
      */
-    configureError(recordId: string, operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'retrieveBlob' | 'query' | 'update' | 'describeSObject' | 'describeGlobal' | 'find' | 'select', error: Error): void {
+    configureError(recordId: string, operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'retrieveBlob' | 'query' | 'update' | 'executeAnonymous' | 'describeSObject' | 'describeGlobal' | 'find' | 'select', error: Error): void {
         this.errorConfigs.push({ recordId, operation, error });
     }
 
@@ -124,6 +124,12 @@ export class MockSalesforceClient implements SalesforceClient {
         const error = this.shouldThrowError('update');
         if (error) throw error;
         return this.defaultClient.update(sObjectName, record);
+    }
+
+    async executeAnonymous(apexCode: string): Promise<ApexExecutionResult> {
+        const error = this.shouldThrowError('executeAnonymous');
+        if (error) throw error;
+        return this.defaultClient.executeAnonymous(apexCode);
     }
 
     getVersion(): string {

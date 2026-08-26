@@ -12,6 +12,7 @@ import DescribeCache from './describe-cache';
 import FileTransfer from './files';
 import MigrationHistory from './history';
 import { applySolver, handleJsforceError as solveJsforceError } from './solvers';
+import ApexScripts, { validateApexOptions } from './apex';
 
 export interface ClientFactory {
     createSourceClient(orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined): Promise<SalesforceClient>;
@@ -82,9 +83,10 @@ class MigrationRunner {
     private isMigrateToFile: boolean;
     private isMigrateFromFile: boolean;
 
-    /** All three are set up by the first two steps of run() and used by everything after. */
+    /** All four are set up by the first two steps of run() and used by everything after. */
     private describes!: DescribeCache;
     private files!: FileTransfer;
+    private apex!: ApexScripts;
     private history!: MigrationHistory;
 
     private recordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
@@ -116,6 +118,7 @@ class MigrationRunner {
         }
         this.isMigrateToFile = options.targetFile !== undefined || options.targetSqlite !== undefined;
         this.isMigrateFromFile = options.sourceFile !== undefined || options.sourceSqlite !== undefined;
+        validateApexOptions(options, this.isMigrateToFile);
     }
 
     async run(): Promise<void> {
@@ -151,14 +154,45 @@ class MigrationRunner {
         }
 
         if (!this.isMigrateToFile) {
+            // The apex scripts bracket what the run writes to the target org: a run
+            // with nothing left to migrate writes nothing, so it runs neither phase.
+            // Past this point the run is committed to the target org, which is the
+            // whole condition on the before scripts - and on the after scripts,
+            // which ApexScripts then runs down every way out, the abandoned run
+            // included.
+            if (!nothingToMigrate) {
+                await this.apex.runBefore();
+            }
             const completed = await this.migrateToOrg();
             if (!completed) {
+                // Abandoned part way. saveAndExit has already written the report, so
+                // all that is left is to undo what the before scripts did.
+                await this.apex.runAfter();
                 return;
             }
             await this.updateClearedFields();
-            await this.saveAndExit();
+            await this.runAfterScripts();
         } else {
             this.migrateToFile();
+        }
+    }
+
+    /**
+     * The after scripts, then the run's report. A failing script must not cost the
+     * run that report - the migration itself is over and the summary is the only
+     * record of how it went - so the summary is written first and the failure let
+     * out once it is safely out.
+     */
+    private async runAfterScripts(): Promise<void> {
+        let failure: unknown;
+        try {
+            await this.apex.runAfter();
+        } catch (error) {
+            failure = error;
+        }
+        await this.saveAndExit();
+        if (failure) {
+            throw failure;
         }
     }
 
@@ -180,6 +214,7 @@ class MigrationRunner {
 
         this.describes = new DescribeCache(this.io, this.sourceClient, this.targetClient, this.isMigrateFromFile);
         this.files = new FileTransfer(this.io, this.describes, this.options, this.sourceClient, this.targetClient);
+        this.apex = new ApexScripts(this.io, this.options, this.targetClient);
     }
 
     private async validateMatchers(): Promise<void> {

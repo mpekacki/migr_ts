@@ -260,6 +260,23 @@ describe('migration state reducer', () => {
         expect(aborted.phase).toBe('Aborted');
     });
 
+    it('reports apex scripts and counts a failing one as an error', () => {
+        const s = initialState();
+        feed(s, 'running_apex_script', { phase: 'before', filePath: './setup.apex', index: 1, total: 1 });
+        expect(s.phase).toBe('Apex');
+        expect(s.feed[s.feed.length - 1].text).toContain('./setup.apex');
+
+        feed(s, 'apex_script_done', { phase: 'before', filePath: './setup.apex' });
+        expect(s.feed[s.feed.length - 1].glyph).toBe('ok');
+        expect(s.errors).toBe(0);
+
+        feed(s, 'apex_script_failed', { phase: 'after', filePath: './teardown.apex', failure: 'boom\nline 2' });
+        expect(s.errors).toBe(1);
+        expect(s.feed[s.feed.length - 1].glyph).toBe('err');
+        // only the first line of the failure reaches the feed
+        expect(s.feed[s.feed.length - 1].text).toBe('Apex script ./teardown.apex failed: boom');
+    });
+
     it('demotes a previous running entry when a new event arrives', () => {
         const s = initialState();
         feed(s, 'fetching_record', { sObjectName: 'Account', recordId: '001' });

@@ -10,6 +10,7 @@ export type Phase =
     | 'Resolving'
     | 'Saving'
     | 'Updating'
+    | 'Apex'
     | 'Complete'
     | 'Aborted';
 
@@ -235,6 +236,17 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             push(state, 'sub', `Deferred ${n} circular field(s)`, 1);
             break;
         }
+        case 'running_apex_script':
+            state.phase = 'Apex';
+            push(state, 'run', `Running apex script ${d.index}/${d.total} ${d.phase} migration: ${d.filePath}`);
+            break;
+        case 'apex_script_done':
+            push(state, 'ok', `Apex script ${d.filePath} finished`);
+            break;
+        case 'apex_script_failed':
+            state.errors++;
+            push(state, 'err', `Apex script ${d.filePath} failed: ${firstLine(d.failure)}`);
+            break;
         case 'error':
             state.errors++;
             push(state, 'err', d.message ?? 'error');

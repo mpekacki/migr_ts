@@ -43,7 +43,10 @@ export type IOEventType =
     | 'file_too_large'
     | 'file_download_failed'
     | 'file_document_mapped'
-    | 'file_document_unavailable';
+    | 'file_document_unavailable'
+    | 'running_apex_script'
+    | 'apex_script_done'
+    | 'apex_script_failed';
 
 class IOEvent {
     constructor(

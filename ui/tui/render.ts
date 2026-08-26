@@ -20,6 +20,7 @@ const PHASE_COLOR: Record<Phase, (s: string) => string> = {
     Resolving: ansi.magenta,
     Saving: ansi.blue,
     Updating: ansi.blue,
+    Apex: ansi.magenta,
     Complete: ansi.green,
     Aborted: ansi.red,
 };

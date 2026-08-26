@@ -9,7 +9,7 @@
  */
 
 import { DescribeGlobalResult, DescribeSObjectResult } from 'jsforce';
-import { SalesforceClient } from '../salesforce-client';
+import { ApexExecutionResult, SalesforceClient } from '../salesforce-client';
 import { ClientFactory } from '../app';
 
 export const FAKE_API_VERSION = '62.0';
@@ -98,6 +98,17 @@ export interface FakeSObjectDef {
 /** Returns an error when the record breaks the rule, mirroring a validation rule in the org. */
 export type FakeValidationRule = (context: { record: any, isNew: boolean, org: FakeSalesforceOrg }) => SaveFailure | null;
 
+/**
+ * One Apex statement the org knows how to carry out. There is no interpreter
+ * here: a statement that no handler recognises comes back as a compile error,
+ * the way a real org answers Apex it cannot parse.
+ */
+export interface FakeApexHandler {
+    /** Matched against a single statement, semicolon included. */
+    pattern: RegExp;
+    run: (match: RegExpMatchArray, org: FakeSalesforceOrg) => void;
+}
+
 export interface FakeOrgConfig {
     alias: string;
     instanceUrl: string;
@@ -106,6 +117,7 @@ export interface FakeOrgConfig {
     idTag: string;
     schema: FakeSObjectDef[];
     validationRules?: Record<string, FakeValidationRule[]>;
+    apexHandlers?: FakeApexHandler[];
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +181,7 @@ export class FakeSalesforceOrg {
     private readonly defsByName = new Map<string, FakeSObjectDef>();
     private readonly defsByPrefix = new Map<string, FakeSObjectDef>();
     private readonly validationRules: Record<string, FakeValidationRule[]>;
+    private readonly apexHandlers: FakeApexHandler[];
     private readonly recordsByType = new Map<string, Map<string, any>>();
     /** File contents, base64 encoded, keyed by "SObject:recordId:field" - see applyFields. */
     private readonly blobs = new Map<string, string>();
@@ -183,6 +196,7 @@ export class FakeSalesforceOrg {
         this.accessToken = config.accessToken;
         this.idTag = config.idTag;
         this.validationRules = config.validationRules ?? {};
+        this.apexHandlers = config.apexHandlers ?? [];
         for (const def of config.schema) {
             this.defsByName.set(def.name, def);
             this.defsByPrefix.set(def.keyPrefix, def);
@@ -458,6 +472,53 @@ export class FakeSalesforceOrg {
         return { totalSize: projected.length, done: true, records: projected };
     }
 
+    // --- anonymous apex ---
+
+    /**
+     * Runs the sliver of Apex this org understands - one statement per line, each
+     * one matched against the org's apexHandlers (see fake-test-org-schema.ts).
+     * Blank lines and `//` comments are ignored, anything else is a compile error,
+     * which is also how the failure path of an Apex script gets exercised.
+     */
+    executeAnonymous(apexCode: string): ApexExecutionResult {
+        const ok: ApexExecutionResult = {
+            compiled: true, compileProblem: null, success: true,
+            line: -1, column: -1, exceptionMessage: null, exceptionStackTrace: null
+        };
+        const lines = apexCode.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            const statement = lines[i].trim();
+            if (statement === '' || statement.startsWith('//')) {
+                continue;
+            }
+            const handler = this.apexHandlers.find(candidate => candidate.pattern.test(statement));
+            const match = handler && statement.match(handler.pattern);
+            if (!handler || !match) {
+                return {
+                    ...ok,
+                    compiled: false,
+                    compileProblem: `Unexpected token '${statement}'.`,
+                    success: false,
+                    line: i + 1,
+                    column: 1
+                };
+            }
+            try {
+                handler.run(match, this);
+            } catch (error) {
+                return {
+                    ...ok,
+                    success: false,
+                    line: i + 1,
+                    column: 1,
+                    exceptionMessage: `System.DmlException: ${error.message}`,
+                    exceptionStackTrace: `AnonymousBlock: line ${i + 1}, column 1`
+                };
+            }
+        }
+        return ok;
+    }
+
     // --- bulk operations, as used by the migration tool ---
 
     bulkCreate(records: any[]): SaveResult[] {
@@ -630,6 +691,10 @@ export class FakeSalesforceClient implements SalesforceClient {
 
     async update(sObjectName: string, record: any): Promise<void> {
         this.org.update(sObjectName, record);
+    }
+
+    async executeAnonymous(apexCode: string): Promise<ApexExecutionResult> {
+        return this.org.executeAnonymous(apexCode);
     }
 
     getVersion(): string {

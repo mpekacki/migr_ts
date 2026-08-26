@@ -141,6 +141,12 @@ function formatEvent(event: IOEvent): string {
             return `file ${d?.versionId} created ContentDocument ${d?.newDocumentId} for ${d?.documentId}`;
         case 'file_document_unavailable':
             return `ContentDocument ${d?.documentId} was not migrated: its version ${d?.versionId} never landed`;
+        case 'running_apex_script':
+            return `running apex script ${d?.index}/${d?.total} ${d?.phase} migration: ${d?.filePath}`;
+        case 'apex_script_done':
+            return `apex script ${d?.filePath} finished`;
+        case 'apex_script_failed':
+            return `apex script ${d?.filePath} failed: ${d?.failure}`;
         case 'error_updating_record': {
             // Show the whole error payload (status code, fields, stack, ...), the way
             // the insert path logs its SaveErrors - interpolating the object here used

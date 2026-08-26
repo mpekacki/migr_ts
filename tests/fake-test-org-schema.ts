@@ -12,6 +12,7 @@
 
 import { CONTRACT_STATUS_ERROR } from './e2e-harness';
 import {
+    FakeApexHandler,
     FakeChildRelationship,
     FakeFieldDef,
     FakeOrgConfig,
@@ -526,6 +527,30 @@ function buildValidationRules(isSourceOrg: boolean): Record<string, FakeValidati
 }
 
 // ---------------------------------------------------------------------------
+// Anonymous Apex
+// ---------------------------------------------------------------------------
+
+/**
+ * The only Apex the in-memory orgs understand, so `apex.beforeMigration` /
+ * `apex.afterMigration` can be exercised without an Apex runtime. Everything
+ * else comes back as a compile error - which is what the scenarios covering a
+ * failing script rely on, and is also what a real org says about the same
+ * script, so both e2e contexts agree.
+ *
+ * Scripts a scenario writes must therefore be valid Apex *and* one of these
+ * statements per line; e2e-harness.ts builds them so no scenario has to know.
+ */
+const apexHandlers: FakeApexHandler[] = [
+    {
+        // insert new Custom_Object_A__c(Name = 'x');
+        pattern: /^insert new (\w+)\(Name = '([^']*)'\);$/,
+        run: (match, org) => {
+            org.create(match[1], { Name: match[2] });
+        }
+    }
+];
+
+// ---------------------------------------------------------------------------
 // Org factories
 // ---------------------------------------------------------------------------
 
@@ -533,7 +558,8 @@ function createOrg(config: Omit<FakeOrgConfig, 'schema' | 'validationRules'>, is
     const org = new FakeSalesforceOrg({
         ...config,
         schema: buildSchema(isSourceOrg),
-        validationRules: buildValidationRules(isSourceOrg)
+        validationRules: buildValidationRules(isSourceOrg),
+        apexHandlers
     });
 
     const license = org.create('UserLicense', { Name: 'Salesforce', LicenseDefinitionKey: 'SFDC' });

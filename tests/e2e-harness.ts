@@ -51,7 +51,10 @@ export type InputHandler =
     | ((event: IOEvent, sendInput: (input: string) => void, exit: () => void) => void | Promise<void>);
 
 export interface MigrationRunResult {
-    /** The parsed `finished` payload, or null when the run was ended through `exit`. */
+    /**
+     * The parsed `finished` payload, or null when the run produced none - it was
+     * ended through `exit`, or the user declined the confirmation.
+     */
     parsedOutput: any;
     capturedOutput: IOEvent[];
 }
@@ -236,6 +239,43 @@ export async function createDuplicateCustObjCs(sourceOrg: TestOrg, targetOrg: Te
 }
 
 // ---------------------------------------------------------------------------
+// Anonymous Apex scripts
+// ---------------------------------------------------------------------------
+
+/**
+ * Writes an Anonymous Apex script for `apex.beforeMigration` /
+ * `apex.afterMigration` and returns the path to put in the config.
+ *
+ * The statements have to satisfy both contexts: real Apex for the live orgs,
+ * and one of the statements the in-memory orgs recognise (see the apexHandlers
+ * in fake-test-org-schema.ts). `insertAccount` is the one statement that does,
+ * which is enough - what these scenarios are about is when the scripts run and
+ * what happens when one fails, not what Apex can do.
+ *
+ * The file is written to the working directory, which is where the live suite
+ * runs the CLI from, and cleaned up by cleanupMigrationArtifacts.
+ */
+export function writeApexScript(name: string, statements: string[]): string {
+    const filePath = `./${APEX_SCRIPT_PREFIX}${name}.apex`;
+    fs.writeFileSync(filePath, statements.join('\n') + '\n');
+    return filePath;
+}
+
+/**
+ * A statement inserting an Account, so a script leaves a record behind to assert
+ * on. An Account because Name is the only field either org insists on - the
+ * custom objects have required lookups in the live orgs.
+ */
+export function insertAccount(name: string): string {
+    return `insert new Account(Name = '${name}');`;
+}
+
+/** Apex neither org can compile, for the scenarios about a script that fails. */
+export const UNCOMPILABLE_APEX = 'this is not apex at all';
+
+const APEX_SCRIPT_PREFIX = 'apex_test_';
+
+// ---------------------------------------------------------------------------
 // Input handlers
 // ---------------------------------------------------------------------------
 
@@ -336,7 +376,9 @@ export function hasSavedRecord(logEvents: any[], recordId: string) {
 
 /** Turns the captured events into the result a scenario works with. */
 export function toMigrationRunResult(capturedOutput: IOEvent[], exitCalled: boolean): MigrationRunResult {
-    if (exitCalled) {
+    // A run ends without a report in two ways: the app was closed under it, or the
+    // user declined the confirmation. Neither is a failure of the run.
+    if (exitCalled || capturedOutput.some(event => event.type === 'aborted')) {
         return { parsedOutput: null, capturedOutput };
     }
     expect(capturedOutput.length).toBeGreaterThan(1);
@@ -358,6 +400,11 @@ export function cleanupMigrationArtifacts(targetOrgAlias: string) {
     ];
     for (const file of files) {
         if (fs.existsSync(file)) {
+            fs.unlinkSync(file);
+        }
+    }
+    for (const file of fs.readdirSync('.')) {
+        if (file.startsWith(APEX_SCRIPT_PREFIX) && file.endsWith('.apex')) {
             fs.unlinkSync(file);
         }
     }
