@@ -31,13 +31,15 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
+    # Most merges here add something, so minor is the default and a `patch` label
+    # is what steps it down. `major` wins over both.
     - name: Determine bump level
       id: level
       env:
         LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
       run: |
-        level=patch
-        [[ " $LABELS " == *" minor "* ]] && level=minor
+        level=minor
+        [[ " $LABELS " == *" patch "* ]] && level=patch
         [[ " $LABELS " == *" major "* ]] && level=major
         echo "level=$level" >> "$GITHUB_OUTPUT"
 
