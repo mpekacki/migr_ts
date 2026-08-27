@@ -1142,6 +1142,85 @@ export const e2eScenarios: E2EScenario[] = [
         expect(await readFile(ctx.targetOrg, newVersionId)).toBe('round trip');
     }),
 
+    scenario('migrate a file attached to a record through a SQLite export', async (ctx: E2EContext) => {
+        const account = await createAccount(ctx.sourceOrg, `Files Inc ${Math.random()}`);
+        const file = await createFile(ctx.sourceOrg, 'Exported Scan', 'exported pages');
+        await attachFile(ctx.sourceOrg, file.documentId, account.id);
+
+        await ctx.runMigration({
+            sourceOrg: ctx.sourceOrg.alias,
+            targetSqlite: 'test-output.db',
+            recordIds: [account.id],
+            matchers: defaultMatchers,
+            relationships: {
+                Account: [{ name: 'ContentDocumentLinks' }]
+            }
+        });
+
+        // The contents travel base64 encoded in an ordinary column, and the document
+        // the version belongs to travels with them: the import needs it to map the
+        // source document onto the one the target creates for itself.
+        const exportedVersion = queryExportedRecords('./test-output.db', 'ContentVersion')
+            .find(row => row.Id === file.versionId);
+        expect(exportedVersion).toBeDefined();
+        expect(Buffer.from(String(exportedVersion.VersionData), 'base64').toString('utf8')).toBe('exported pages');
+        expect(exportedVersion.ContentDocumentId).toBe(file.documentId);
+
+        const { parsedOutput } = await ctx.runMigration({
+            sourceSqlite: 'test-output.db',
+            targetOrg: ctx.targetOrg.alias,
+            recordIds: [account.id],
+            matchers: defaultMatchers
+        });
+
+        const newAccountId = assertRecordMigrated(parsedOutput, account.id);
+        const newDocumentId = assertRecordMigrated(parsedOutput, file.documentId);
+
+        const links = await ctx.targetOrg.query(
+            `SELECT ContentDocumentId FROM ContentDocumentLink WHERE LinkedEntityId = '${newAccountId}'`
+        );
+        expect(links.records.map((link: any) => link.ContentDocumentId)).toEqual([newDocumentId]);
+
+        const versions = await ctx.targetOrg.query(`SELECT Id FROM ContentVersion WHERE ContentDocumentId = '${newDocumentId}'`);
+        expect(versions.records).toHaveLength(1);
+        expect(await readFile(ctx.targetOrg, versions.records[0].Id)).toBe('exported pages');
+    }),
+
+    scenario('a file left out of an export is not migrated as the path that served it', async (ctx: E2EContext) => {
+        const title = `Left Behind ${Date.now()}`;
+        const file = await createFile(ctx.sourceOrg, title, 'never exported');
+
+        await ctx.runMigration({
+            sourceOrg: ctx.sourceOrg.alias,
+            targetSqlite: 'test-output.db',
+            recordIds: [file.versionId],
+            matchers: defaultMatchers,
+            files: { enabled: false }
+        });
+
+        // A retrieve hands back the path of the endpoint serving the file rather than
+        // the file, so an export with the contents left behind has to carry nothing
+        // at all: that path is an ordinary string to everything downstream, and an
+        // import would insert it as the file itself.
+        const exportedVersion = queryExportedRecords('./test-output.db', 'ContentVersion')
+            .find(row => row.Id === file.versionId);
+        expect(exportedVersion).toBeDefined();
+        expect(exportedVersion.VersionData ?? null).toBeNull();
+
+        const { parsedOutput } = await ctx.runMigration({
+            sourceSqlite: 'test-output.db',
+            targetOrg: ctx.targetOrg.alias,
+            recordIds: [file.versionId],
+            matchers: defaultMatchers,
+            fullAuto: { enabled: true, unhandledErrorBehavior: 'skip' }
+        }, []);
+
+        // A version carrying no file is not one the target will take.
+        assertRecordSkipped(parsedOutput, file.versionId);
+        const versions = await ctx.targetOrg.query(`SELECT Id FROM ContentVersion WHERE Title = '${title}'`);
+        expect(versions.records).toHaveLength(0);
+    }),
+
     scenario('file over the size limit is migrated without its contents', async (ctx: E2EContext) => {
         const file = await createFile(ctx.sourceOrg, 'Big Document', 'a'.repeat(8192));
 

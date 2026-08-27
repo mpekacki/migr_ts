@@ -476,6 +476,22 @@ const oneBodyPerVersionRule: FakeValidationRule = ({ record }) => {
 };
 
 /**
+ * A version has to carry a file: either the contents or the id of a body that
+ * already exists. This is what a version whose file was left behind - too large,
+ * files turned off, download failed - runs into in the target org.
+ */
+const bodyRequiredPerVersionRule: FakeValidationRule = ({ record, isNew }) => {
+    if (!isNew || record.VersionData || record.ContentBodyId) {
+        return null;
+    }
+    return {
+        message: 'Required fields are missing: [VersionData]',
+        fields: ['VersionData'],
+        statusCode: 'REQUIRED_FIELD_MISSING'
+    };
+};
+
+/**
  * A file can only be shared with a record once. The platform links every new file
  * to its owner by itself, so migrating the source's owner link lands on this.
  */
@@ -512,7 +528,7 @@ const contractStatusRule: FakeValidationRule = ({ record, isNew }) => {
 function buildValidationRules(isSourceOrg: boolean): Record<string, FakeValidationRule[]> {
     return {
         Contract: [contractStatusRule],
-        ContentVersion: [oneBodyPerVersionRule],
+        ContentVersion: [oneBodyPerVersionRule, bodyRequiredPerVersionRule],
         ContentDocumentLink: [oneLinkPerEntityRule],
         Custom_Object_D__c: [
             fussyFieldOnCreateRule('Fussy_Field_1__c'),

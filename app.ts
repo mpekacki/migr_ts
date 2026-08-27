@@ -173,7 +173,11 @@ class MigrationRunner {
             await this.updateClearedFields();
             await this.runAfterScripts();
         } else {
-            this.migrateToFile();
+            // Awaited like every other way out of run(): the export writes its file
+            // before the first await, but the report that says what it wrote comes
+            // after it, and a write that fails has to reach main()'s error handling
+            // rather than escape as an unhandled rejection.
+            await this.migrateToFile();
         }
     }
 
