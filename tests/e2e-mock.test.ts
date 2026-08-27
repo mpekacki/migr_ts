@@ -247,6 +247,21 @@ test('a missing apex script fails the run before it fetches anything', async () 
     }))).rejects.toThrow(/Apex script not found: \.\/apex_test_does_not_exist\.apex/);
 });
 
+// Also a thrown error, and the one way to tell that the export is awaited: writing
+// it is the last thing a run does, so an unawaited write would leave main() to
+// resolve as if the run had succeeded and let the failure escape the process.
+test('an export that cannot be written fails the run', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    await expect(ctx.runMigration({
+        sourceOrg: ctx.sourceOrg.alias,
+        targetSqlite: './no_such_directory/test-output.db',
+        recordIds: [account.id],
+        matchers: defaultMatchers
+    })).rejects.toThrow(/unable to open database file/);
+});
+
 // Lives here rather than in the shared scenarios because the failure it asserts on
 // is a thrown error: in this context that surfaces as a rejected main(), while the
 // live CLI turns it into a FATAL line and a non-zero exit code.

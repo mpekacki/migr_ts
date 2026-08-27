@@ -110,13 +110,13 @@ export default class FileTransfer {
                 continue;
             }
             if (!this.enabled) {
-                delete record[field];
+                this.dropBlobField(record, fetchedRecord, field);
                 continue;
             }
             const size = Number(fetchedRecord[SIZE_FIELDS[field]]);
             if (Number.isFinite(size) && size > this.maxFileSizeBytes) {
                 this.io.fileTooLarge(recordId, sObjectName, field, size, this.maxFileSizeBytes);
-                delete record[field];
+                this.dropBlobField(record, fetchedRecord, field);
                 continue;
             }
             this.io.downloadingFile(recordId, sObjectName, field, Number.isFinite(size) ? size : undefined);
@@ -129,10 +129,23 @@ export default class FileTransfer {
                 // unreadable file is not worth ending the run over, so this is
                 // reported and carried on from rather than thrown.
                 this.io.fileDownloadFailed(recordId, sObjectName, field, error);
-                delete record[field];
+                this.dropBlobField(record, fetchedRecord, field);
             }
         }
         this.dropSourceOnlyFields(sObjectName, record);
+    }
+
+    /**
+     * Drops a blob field whose contents could not be supplied from both the record
+     * being migrated and the fetched record.
+     *
+     * The fetched one matters because it is what an export writes: left alone it
+     * still holds the endpoint path the retrieve handed back, which a later import
+     * would read as an ordinary field value and insert as the file itself.
+     */
+    private dropBlobField(record: any, fetchedRecord: any, field: string): void {
+        delete record[field];
+        delete fetchedRecord[field];
     }
 
     /** See {@link SOURCE_ONLY_FIELDS}. Unconditional: a version with no file to send still cannot claim the source's document. */
