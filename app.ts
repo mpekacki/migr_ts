@@ -29,7 +29,55 @@ const USER_INPUTS = {
     addSolver: 'a',
     skip: 's',
 };
-const CHUNKING_OBJECTS = ['User', 'UserRole', 'PermissionSetAssignment', 'BusinessHours'];
+/**
+ * SObjects that travel in chunks of their own, never sharing a composite insert
+ * with ordinary records. These are Salesforce's *setup* objects: a single
+ * transaction may touch setup objects or non-setup objects but not both, and
+ * mixing them earns a MIXED_DML_OPERATION naming the two offenders.
+ *
+ * The list has to be hardcoded because nothing in the API reports it. A describe
+ * carries no setup flag (`customSetting` covers only custom settings), and
+ * Tooling's EntityDefinition has none either - "setup object" is not even a
+ * property of the SObject: updating a User is allowed alongside an Account until
+ * the payload touches a field bearing on record access (UserRoleId, ProfileId,
+ * IsActive), which no per-object boolean could express. So this mirrors the list
+ * in the Apex Developer Guide, "sObjects That Can't Be Used Together in DML
+ * Operations":
+ * https://developer.salesforce.com/docs/atlas.en-us.apexcode.meta/apexcode/apex_dml_non_mix_sobjects.htm
+ *
+ * Names are matched against `attributes.type` exactly, so the casing is the API's
+ * and not the guide's - note `QueueSobject`, which the guide writes `QueueSObject`.
+ * The territory and forecasting entries only exist in orgs with those features
+ * turned on; a name that never turns up costs nothing.
+ *
+ * BusinessHours is not a setup object and is not in the guide - it is here
+ * because it needs isolating for its own reasons.
+ */
+const CHUNKING_OBJECTS = [
+    'AuthSession',
+    'ContentWorkspace',
+    'FieldPermissions',
+    'ForecastingShare',
+    'Group',
+    'GroupMember',
+    'ObjectPermissions',
+    'ObjectTerritory2AssignmentRule',
+    'ObjectTerritory2AssignmentRuleItem',
+    'PermissionSet',
+    'PermissionSetAssignment',
+    'QueueSobject',
+    'RuleTerritory2Association',
+    'SetupEntityAccess',
+    'Territory',
+    'Territory2',
+    'Territory2Model',
+    'User',
+    'UserPackageLicense',
+    'UserRole',
+    'UserTerritory',
+    'UserTerritory2Association',
+    'BusinessHours',
+];
 /**
  * Kept under the 37.5 MB of base64 a non-multipart request body may carry, with
  * room to spare for the rest of the payload. Only records carrying files come
