@@ -1802,6 +1802,30 @@ export const e2eScenarios: E2EScenario[] = [
         expect(fs.existsSync(`${ctx.targetOrg.alias}__history.json`)).toBe(false);
     }),
 
+    scenario('custom history file path in a directory that does not exist', async (ctx: E2EContext) => {
+        const account = await createAccount(ctx.sourceOrg, 'Custom History Test Account');
+
+        // Nothing creates this directory, and the trailing '/' has to name a
+        // directory on every platform - on Windows path.sep is '\', so reading it
+        // as a file name would write a file called `nested` instead.
+        const customHistoryPath = './custom_history_test_dir/nested/';
+        expect(fs.existsSync(customHistoryPath)).toBe(false);
+        const config = createBasicConfig(ctx, [account.id], {
+            historyFilePath: customHistoryPath
+        });
+
+        const { parsedOutput } = await ctx.runMigration(config);
+
+        const newAccountId = assertRecordMigrated(parsedOutput, account.id);
+
+        const historyFile = `${customHistoryPath}${ctx.targetOrg.alias}__history.json`;
+        expect(fs.existsSync(historyFile)).toBe(true);
+        const historyContent = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
+        expect(historyContent[account.id]).toBe(newAccountId);
+
+        expect(fs.existsSync(`${ctx.targetOrg.alias}__history.json`)).toBe(false);
+    }),
+
     scenario('solver with additional info from error', async (ctx: E2EContext) => {
         const recordTypes = await ctx.sourceOrg.findIds('RecordType', {
             SobjectType: 'Custom_Object_E__c',
