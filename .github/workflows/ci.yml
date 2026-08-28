@@ -9,6 +9,14 @@ env:
   TEST_ORG_A_ALIAS: testMigrationOrgA
   TEST_ORG_B_ALIAS: testMigrationOrgB
   SCRATCH_ORG_DURATION: 30
+  # A pull request from a fork is untrusted code, so GitHub passes it no secrets:
+  # DEVHUB_AUTH_URL arrives empty and there is no Dev Hub to raise scratch orgs
+  # in. Every org-dependent step is skipped for those runs and the suites that
+  # need an org are dropped from the test run, so a contributor still gets the
+  # lint, the build and everything that runs without an org. Never move this
+  # workflow to pull_request_target to "fix" that - it would run the fork's code
+  # with full access to the secrets below.
+  HAS_ORGS: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
 
 jobs:
   test:
@@ -29,22 +37,19 @@ jobs:
       run: npm ci
 
     - name: Install Salesforce CLI
+      if: env.HAS_ORGS == 'true'
       run: |
         npm install -g @salesforce/cli
         sf --version
 
-    - name: Cache Salesforce CLI data
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.sf
-          ~/.sfdx
-        key: sf-data-${{ runner.os }}-${{ github.repository }}
-        restore-keys: |
-          sf-data-${{ runner.os }}-${{ github.repository }}
-          sf-data-${{ runner.os }}-
+    # ~/.sf and ~/.sfdx are not a build cache, they are the CLI's credential
+    # store - the Dev Hub auth file lands there, next to the key that decrypts it
+    # on a headless runner. They were cached here once; nothing in them is worth
+    # keeping (each run raises its own scratch orgs), and a cache scoped to the
+    # default branch is readable by a pull request from a fork.
 
     - name: Authenticate to DevHub
+      if: env.HAS_ORGS == 'true'
       env:
         DEVHUB_AUTH_URL: ${{ secrets.DEVHUB_AUTH_URL }}
       run: |
@@ -55,6 +60,7 @@ jobs:
         rm devhub_auth.txt
 
     - name: Create scratch orgs
+      if: env.HAS_ORGS == 'true'
       run: |
         echo "Creating fresh scratch orgs for testing..."
         
@@ -110,13 +116,23 @@ jobs:
       run: npm run build
 
     - name: Run tests
+      if: env.HAS_ORGS == 'true'
       run: |
         echo "Starting test execution..."
         npm run test:ci
         echo "All tests completed"
 
+    - name: Run tests (no scratch orgs)
+      if: env.HAS_ORGS != 'true'
+      env:
+        MIGR_TS_TEST_NO_ORGS: '1'
+      run: |
+        echo "Starting test execution without scratch orgs..."
+        npm run test:ci
+        echo "All tests completed"
+
     - name: Cleanup scratch orgs
-      if: always()
+      if: always() && env.HAS_ORGS == 'true'
       run: |
         echo "Cleaning up scratch orgs..."
         
