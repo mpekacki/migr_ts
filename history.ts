@@ -19,6 +19,13 @@ export default class MigrationHistory {
     constructor(options: Options, isMigrateToFile: boolean) {
         this.filePath = resolveFilePath(options);
         this.persist = !isMigrateToFile;
+        if (this.persist) {
+            // Created up front rather than at the first write: that first write is
+            // `settle`, long after the run has started inserting into the target
+            // org, so a missing directory would fail the run with records already
+            // migrated and no history file to resume from.
+            fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+        }
         if (this.persist && fs.existsSync(this.filePath)) {
             Object.assign(this.old2new, JSON.parse(fs.readFileSync(this.filePath, 'utf8')) as Record<string, string>);
         }
@@ -67,13 +74,17 @@ export default class MigrationHistory {
 /**
  * historyFilePath may name the file itself or the directory to put it in; a path
  * that does not exist yet is read as a directory only if it ends in a separator.
+ * Both separators count on Windows - a config written with '/' is the usual way
+ * to name a directory there, and taking it for a file name would quietly write a
+ * file called `history` where `history/` was asked for.
  */
 function resolveFilePath(options: Options): string {
     if (!options.historyFilePath) {
         return path.join(process.cwd(), `${options.targetOrg}__history.json`);
     }
     const stats = fs.existsSync(options.historyFilePath) ? fs.statSync(options.historyFilePath) : null;
-    if ((stats && stats.isDirectory()) || (!stats && options.historyFilePath.endsWith(path.sep))) {
+    const namesADirectory = options.historyFilePath.endsWith(path.sep) || options.historyFilePath.endsWith('/');
+    if ((stats && stats.isDirectory()) || (!stats && namesADirectory)) {
         return path.join(options.historyFilePath, `${options.targetOrg}__history.json`);
     }
     return options.historyFilePath;
