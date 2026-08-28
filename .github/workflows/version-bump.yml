@@ -1,8 +1,13 @@
 name: Version bump
 
+# Merging a pull request is a push to main, and that is the event to bump on: a
+# `pull_request` run for a pull request raised from a *fork* is untrusted, so it
+# gets no secrets and a read-only token - the push below would fail with a 403,
+# and merging an outside contribution would silently skip its release. A push
+# made with GITHUB_TOKEN (the bump commit and its tag) starts no workflow run of
+# its own, so this does not re-trigger itself.
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches: [ main ]
 
 permissions:
@@ -13,7 +18,9 @@ concurrency:
 
 jobs:
   bump:
-    if: github.event.pull_request.merged == true
+    # Belt and braces against a release loop, should the push above ever be made
+    # with a token that does trigger workflows.
+    if: "!startsWith(github.event.head_commit.message, 'chore: release v')"
     runs-on: ubuntu-latest
 
     steps:
@@ -32,12 +39,17 @@ jobs:
       run: npm ci
 
     # Most merges here add something, so minor is the default and a `patch` label
-    # is what steps it down. `major` wins over both.
+    # is what steps it down. `major` wins over both. The labels belong to the pull
+    # request this commit arrived through, which the push event does not carry; a
+    # commit pushed straight to main has none and takes the default.
     - name: Determine bump level
       id: level
       env:
-        LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
+        LABELS=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+          --jq '.[].labels[].name' | tr '\n' ' ')
+        echo "labels: $LABELS"
         level=minor
         [[ " $LABELS " == *" patch "* ]] && level=patch
         [[ " $LABELS " == *" major "* ]] && level=major
