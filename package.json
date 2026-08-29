@@ -24,6 +24,9 @@
   ],
   "author": "Marcel Pekacki",
   "license": "ISC",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "description": "CLI tool for migrating Salesforce records between orgs, with automatic relationship resolution, circular dependency handling, and configurable error solvers",
   "repository": {
     "type": "git",

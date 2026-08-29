@@ -1,9 +1,10 @@
 {
-  "sourceOrg": "testMigrationOrgA",
-  "targetOrg": "testMigrationOrgB",
+  "sourceOrg": "myDevOrg",
+  "targetOrg": "myScratchOrg",
   "recordIds": [
-    "001RR00000tyjwbYAA"
+    "001XXXXXXXXXXXXXXX"
   ],
+  "relatedRecordDepthLimit": 5,
   "matchers": [
     {
       "sObjectType": "Profile",
@@ -626,6 +627,23 @@
       }
     ]
   },
+  "solvers": [
+    {
+      "message": "is already linked with the entity",
+      "action": "skip",
+      "hideError": true
+    },
+    {
+      "message": "duplicate value found: .* duplicates value on record with id: (\\w+)",
+      "action": "match"
+    },
+    {
+      "message": "REQUEST_LIMIT_EXCEEDED",
+      "action": "backoff",
+      "maxAttempts": 5,
+      "initialDelay": 2000
+    }
+  ],
   "files": {
     "enabled": true,
     "maxFileSizeMb": 25
