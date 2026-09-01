@@ -10,23 +10,42 @@ export interface SolverOutcome {
     matchedId?: string;
 }
 
+/** Which pass of the migration an error came from. */
+export type SolverPhase = 'insert' | 'update';
+
 /** What applySolver needs from the run in order to act on a record. */
 export interface SolverContext {
     io: IO;
+    /**
+     * The pass the error came from. Both hand their failures to the same solvers,
+     * but not every action means something in both: see appliesInPhase.
+     */
+    phase: SolverPhase;
     solvers?: SolverType[];
     /** Solvers already tried for this record and this message, so each is used once. */
     usedSolvers: (SolverType | undefined)[];
-    /** Sets a field, stashing the old value for the update pass that follows the insert. */
+    /** Sets a field - on insert, stashing the old value for the update pass that follows. */
     setField(field: string, value: string | null): void;
-    /** What that pass has stashed for this record so far, for reporting. */
-    stashedFields(): SObjectRecord<Schema, string>;
+    /** What that pass has stashed for this record so far, for reporting. Insert only. */
+    stashedFields?(): SObjectRecord<Schema, string>;
+}
+
+/**
+ * A match solver resolves an insert by naming a record that is already in the
+ * target, so the run can point at it instead of creating one. An update has no
+ * such way out - the record it is addressed to is the one the run created - so a
+ * match solver is passed over there, leaving the error to a solver that can act
+ * on it.
+ */
+function appliesInPhase(solver: SolverType, phase: SolverPhase): boolean {
+    return phase === 'insert' || solver.action !== 'match';
 }
 
 /**
  * Applies the first configured solver whose pattern matches a save error and
  * that this record has not already been through, mutating the record where the
  * solver says to. An unmatched error comes back unfixed for the caller to hand
- * to the user (or, in fullAuto, to record and move on).
+ * to the user (or, in fullAuto and in the update pass, to record and move on).
  */
 export function applySolver(
     recordId: string,
@@ -41,7 +60,9 @@ export function applySolver(
     if (ctx.usedSolvers.length > 0) {
         ctx.io.skippingPreviouslyUsedSolvers(ctx.usedSolvers);
     }
-    const solver = ctx.solvers.find(solver => new RegExp(solver.message).test(e.message) && !ctx.usedSolvers.includes(solver));
+    const solver = ctx.solvers.find(solver => appliesInPhase(solver, ctx.phase)
+        && new RegExp(solver.message).test(e.message)
+        && !ctx.usedSolvers.includes(solver));
     if (!solver) {
         return result;
     }
@@ -51,7 +72,10 @@ export function applySolver(
             ctx.setField(changeField.field, changeField.value);
         }
         ctx.io.fixingUsingSolver(e.message, solver.message, solver.action);
-        ctx.io.savedOldFieldsInToUpdateLater(ctx.stashedFields());
+        const stashed = ctx.stashedFields?.();
+        if (stashed) {
+            ctx.io.savedOldFieldsInToUpdateLater(stashed);
+        }
         result.errorFixed = true;
         result.retry = true;
     } else if (solver.action === 'skip') {

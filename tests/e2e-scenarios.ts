@@ -36,6 +36,7 @@ import {
     createTokenAuthConfig,
     defaultMatchers,
     extractFussyColumnSolver,
+    fixAlwaysFailsSolver,
     fixContractStatusSolver,
     hasSavedRecord,
     insertAccount,
@@ -934,43 +935,66 @@ export const e2eScenarios: E2EScenario[] = [
         }
     }),
 
-    scenario('failed later update', async (ctx: E2EContext) => {
+    scenario('failed later update, solved', async (ctx: E2EContext) => {
         const custObjD = await createRecord(ctx.sourceOrg, 'Custom_Object_D__c', { Fussy_Field_1__c: 'fail' });
 
         const config = createBasicConfig(ctx, [custObjD.id], {
-            solvers: [
-                {
-                    action: 'fix',
-                    message: 'Always fails on org B',
-                    changeFields: [
-                        {
-                            field: 'Fussy_Field_1__c',
-                            value: 'ok'
-                        }
-                    ]
-                }
-            ]
+            solvers: [fixAlwaysFailsSolver]
         });
 
-        const { parsedOutput } = await ctx.runMigration(config);
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config);
 
         const newCustObjDId = assertRecordMigrated(parsedOutput, custObjD.id);
 
-        // should be able to query the new record
+        // Restoring the stashed value in the update pass hits the same validation
+        // rule the insert did, and the same solver gets it past - so the field holds
+        // the solver's value rather than the update having failed on it.
         const newCustObjD = await retrieveRecord(ctx.targetOrg, 'Custom_Object_D__c', newCustObjDId);
         expect(newCustObjD.Fussy_Field_1__c).toEqual('ok');
 
-        // The record migrated, but restoring the stashed value in the update pass
-        // hits the same validation rule - and the output has to say so, or the run
-        // looks clean while the target field is left holding the solver's value.
-        const errors = parsedOutput.errors[custObjD.id];
-        const updateErrors = errors.filter((error: any) => error.phase === 'update');
+        // The output still has to say the source value did not survive: the error is
+        // reported, marked fixed, naming the solver that dealt with it.
+        const updateErrors = parsedOutput.errors[custObjD.id].filter((error: any) => error.phase === 'update');
         expect(updateErrors).toHaveLength(1);
         expect(updateErrors[0].message).toContain('Always fails on org B');
-        expect(updateErrors[0].fixed).toBe(false);
+        expect(updateErrors[0].fixed).toBe(true);
+        expect(updateErrors[0].solver).toMatchObject({ action: 'fix' });
         // and it has to say what the update was writing: the message names the rule,
         // only the payload names the value that tripped it.
         expect(updateErrors[0].fields).toMatchObject({ Fussy_Field_1__c: 'fail' });
+
+        // the record was sent again with what the solver changed
+        expect(capturedOutput.filter(e => e.type === 'updating_record')).toHaveLength(2);
+    }),
+
+    scenario('failed later update, unsolvable', async (ctx: E2EContext) => {
+        // Fussy_Field_2__c is refused on update and only on update, so the record
+        // inserts and then refuses every update the run sends it.
+        const custObjD = await createRecord(ctx.sourceOrg, 'Custom_Object_D__c', { Fussy_Field_1__c: 'fail', Fussy_Field_2__c: 'locked' });
+
+        const config = createBasicConfig(ctx, [custObjD.id], {
+            solvers: [fixAlwaysFailsSolver]
+        });
+
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config);
+
+        const newCustObjDId = assertRecordMigrated(parsedOutput, custObjD.id);
+
+        const newCustObjD = await retrieveRecord(ctx.targetOrg, 'Custom_Object_D__c', newCustObjDId);
+        expect(newCustObjD.Fussy_Field_1__c).toEqual('ok');
+
+        // No solver can act on the locked field, so nothing about this record's
+        // update is going to work - the output has to say so, or the run looks clean
+        // while the target field is left holding the solver's value.
+        const updateErrors = parsedOutput.errors[custObjD.id].filter((error: any) => error.phase === 'update');
+        expect(updateErrors).toHaveLength(1);
+        expect(updateErrors[0].message).toContain('locked after creation');
+        expect(updateErrors[0].fixed).toBe(false);
+        expect(updateErrors[0].fields).toMatchObject({ Fussy_Field_1__c: 'fail' });
+
+        // and the record is not sent again: the second attempt would be rejected for
+        // the same reason and reported all over again.
+        expect(capturedOutput.filter(e => e.type === 'updating_record')).toHaveLength(1);
     }),
 
     scenario('match by wrong field', async (ctx: E2EContext) => {
