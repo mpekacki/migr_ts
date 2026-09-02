@@ -119,9 +119,15 @@ Solvers come in two families, and which one an action belongs to decides what it
 Worth knowing:
 
 - Any solver may set `hideError: true`, which keeps the matched error out of the output and out of the error count entirely. Useful for the expected, uninteresting failures — see the `DUPLICATE_VALUE` note under [Files](#files).
-- Each solver is used **once per record per message**, so a solver that does not actually resolve an error cannot spin on it. If a record produces the same error again, the next matching solver is tried instead.
+- Each solver is used **once per record per message per pass**, so a solver that does not actually resolve an error cannot spin on it. If a record produces the same error again, the next matching solver is tried instead.
 - A `match` or `extract_column` whose pattern captures nothing leaves the error unresolved rather than silently succeeding.
 - An error no solver matches goes to the user, who can write a solver on the spot (`addSolver`) and have it applied to every later error in the run. Under `fullAuto` it falls to `unhandledErrorBehavior` instead.
+
+**Solvers apply to the update pass too.** The values a `fix` solver stashed, and the lookups cleared to break a circular dependency, are written back after every record is inserted, and that write can be rejected in its own right — a validation rule that fires on update, a lookup pointing at a record that never made it, a bad picklist value. Those failures go through the same solvers, and the record is updated again with what the solver changed. Three things differ from the insert pass:
+
+- `match` does nothing here and is passed over — the record is already in the target, and the update is addressed to it — so the error falls to the next matching solver.
+- `fix` has nothing to stash for later: the update pass *is* the later pass, so the solver's value is what the field ends up holding. An error the solver dealt with is still reported, marked as fixed and naming the solver, so the run says the source value did not survive.
+- Nothing is put to the user here: the update pass is the last thing a run does, so an error no solver matches is reported and the run finishes.
 
 ### Files
 

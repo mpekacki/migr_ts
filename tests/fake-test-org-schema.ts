@@ -422,6 +422,23 @@ const alwaysFailsOnOrgBRule: FakeValidationRule = ({ record }) => {
     return null;
 };
 
+/**
+ * FussyValidation4: the mirror image of FussyValidation1 - the value is only
+ * rejected on update. A record holding it inserts happily and then refuses every
+ * update it is sent, which is how a scenario reaches an update failure that no
+ * solver can do anything about.
+ */
+const lockedAfterCreateRule: FakeValidationRule = ({ record, isNew }) => {
+    if (!isNew && record.Fussy_Field_2__c === 'locked') {
+        return {
+            message: `Field 'Fussy_Field_2__c' is locked after creation.`,
+            fields: ['Fussy_Field_2__c'],
+            statusCode: 'FIELD_CUSTOM_VALIDATION_EXCEPTION'
+        };
+    }
+    return null;
+};
+
 /** The Enhanced record type is only exposed through a permission set the target org's user does not have. */
 const enhancedRecordTypeNotVisibleRule: FakeValidationRule = ({ record, org }) => {
     if (!record.RecordTypeId) {
@@ -533,6 +550,7 @@ function buildValidationRules(isSourceOrg: boolean): Record<string, FakeValidati
         Custom_Object_D__c: [
             fussyFieldOnCreateRule('Fussy_Field_1__c'),
             fussyFieldOnCreateRule('Fussy_Field_2__c'),
+            lockedAfterCreateRule,
             ...(isSourceOrg ? [] : [alwaysFailsOnOrgBRule])
         ],
         Custom_Object_E__c: [

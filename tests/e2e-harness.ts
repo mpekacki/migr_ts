@@ -123,6 +123,22 @@ export const fixContractStatusSolver = {
     ]
 };
 
+/**
+ * Gets a Custom_Object_D__c past the rule that only the target org has. The rule
+ * fires on update as well as on create, so the value the solver stashes trips it
+ * again when the update pass writes it back.
+ */
+export const fixAlwaysFailsSolver = {
+    action: 'fix',
+    message: 'Always fails on org B',
+    changeFields: [
+        {
+            field: 'Fussy_Field_1__c',
+            value: 'ok'
+        }
+    ]
+};
+
 export function extractFussyColumnSolver(replaceWith: string | null, additionalOptions: any = {}) {
     return {
         action: 'extract_column',

@@ -11,7 +11,7 @@ import { FixSolver, Options, SolverType } from './config';
 import DescribeCache from './describe-cache';
 import FileTransfer from './files';
 import MigrationHistory from './history';
-import { applySolver, handleJsforceError as solveJsforceError } from './solvers';
+import { applySolver, handleJsforceError as solveJsforceError, SolverPhase } from './solvers';
 import ApexScripts, { validateApexOptions } from './apex';
 
 export interface ClientFactory {
@@ -84,6 +84,27 @@ const CHUNKING_OBJECTS = [
  * anywhere near it.
  */
 const MAX_CHUNK_BYTES = 30 * 1024 * 1024;
+/**
+ * How many times the update pass may send the same record. A solver is used once
+ * per record and message, so the passes normally run out well before this - the
+ * cap is there for the solver whose error comes back worded differently every
+ * time, which would otherwise keep the run going round forever.
+ */
+const MAX_UPDATE_ATTEMPTS = 10;
+
+/**
+ * The update pass's counterpart to setFieldWithLaterUpdate: there is no later
+ * pass to stash the old value for - this is that pass - so a solver's change is
+ * simply what the next attempt sends, and a null takes the field out of the
+ * payload altogether.
+ */
+function setUpdateField(record: any, field: string, value: string | null): void {
+    if (value === null) {
+        delete record[field];
+    } else {
+        record[field] = value;
+    }
+}
 
 // Utility function to limit concurrent promise execution
 async function executeConcurrently<T>(
@@ -142,10 +163,10 @@ class MigrationRunner {
     private lookupFieldsBySObjectType: Record<string, Field[]> = {};
     /**
      * Every error the run reports, keyed by source record id. `phase` says which
-     * pass it came from: an insert error can still be fixed by a solver or by the
-     * user, an update error cannot - nothing runs after the update pass. `fields`
-     * is the payload an update was writing, so the output says what it was trying
-     * to set and not just that it failed.
+     * pass it came from: solvers act on both, but only an insert error can also be
+     * put to the user, since the update pass is the last thing the run does.
+     * `fields` is the payload an update was writing, so the output says what it was
+     * trying to set and not just that it failed.
      */
     private errors: Record<string, { message: string, fixed: boolean, solver?: SolverType, phase: 'insert' | 'update', fields?: Record<string, any> }[]> = {};
     private recordAddedReasons: Record<string, string> = {};
@@ -864,11 +885,23 @@ class MigrationRunner {
         return released;
     }
 
+    /**
+     * The solvers this record has already been through for this exact message in
+     * this pass, so each is used once. By message, because a solver that acts on
+     * one offending field at a time - extract_column - has to come round again for
+     * the next field the org complains about; by pass, because the two are solved
+     * independently, and a solver spent on the insert is still owed to the update.
+     */
+    private usedSolvers(recordId: string, phase: SolverPhase, e: SaveError): (SolverType | undefined)[] {
+        return this.errors[recordId]?.filter(error => error.phase === phase && error.message === e.message).map(error => error.solver) ?? [];
+    }
+
     private async handleSaveError(recordId: string, record: SObjectRecord<Schema, string>, e: SaveError): Promise<{ retry: boolean, retryAll: boolean, matchedId?: string, solverAdded: boolean, exit: boolean, hidden: boolean }> {
         const applied = applySolver(recordId, record, e, {
             io: this.io,
+            phase: 'insert',
             solvers: this.options.solvers,
-            usedSolvers: this.errors[recordId]?.filter(error => error.message === e.message).map(error => error.solver) ?? [],
+            usedSolvers: this.usedSolvers(recordId, 'insert', e),
             setField: (field, value) => this.setFieldWithLaterUpdate(recordId, record, field, value),
             stashedFields: () => this.toUpdateLater[recordId],
         });
@@ -1016,7 +1049,31 @@ class MigrationRunner {
         }
     }
 
+    /**
+     * The deferred values go in, and a failure here gets the same solvers an
+     * insert failure does: a record a solver acted on is updated again with what
+     * the solver changed, until nothing is left that a solver can act on.
+     */
     private async updateClearedFields(): Promise<void> {
+        let pending = await this.collectRecordsToUpdate();
+        for (let attempt = 1; Object.keys(pending).length > 0; attempt++) {
+            if (attempt > MAX_UPDATE_ATTEMPTS) {
+                for (const recordId of Object.keys(pending)) {
+                    this.reportUpdateError(recordId, pending[recordId], new Error(`Giving up after ${MAX_UPDATE_ATTEMPTS} update attempts`));
+                }
+                return;
+            }
+            pending = await this.updateRecords(pending);
+        }
+    }
+
+    /**
+     * The stashed values, addressed to the records the target actually holds: every
+     * id the run replaced along the way now resolves to its new one, and so does
+     * the id of the record being updated. A record that never made it into the
+     * target has nothing to update.
+     */
+    private async collectRecordsToUpdate(): Promise<Record<string, any>> {
         const recordsToUpdate: Record<string, any> = {};
         for (const recordId of Object.keys(this.toUpdateLater)) {
             const record = this.toUpdateLater[recordId];
@@ -1041,55 +1098,125 @@ class MigrationRunner {
             }
             recordsToUpdate[recordId] = record;
         }
+        return recordsToUpdate;
+    }
 
-        if (Object.keys(recordsToUpdate).length > 0) {
-            const chunks: Record<string, any>[] = this.chunking.getChunks(recordsToUpdate);
-            for (let i = 0; i < chunks.length; i++) {
-                const chunk = chunks[i];
-                this.io.updatingRecord(chunk);
-                try {
-                    const updateResults = await this.targetClient!.bulkUpdate(Object.values(chunk));
-                    for (let j = 0; j < updateResults.length; j++) {
-                        const recordId = Object.keys(chunk)[j];
-                        const result = updateResults[j];
-                        if (!result.success) {
-                            // Hand over the SaveErrors themselves, not just their joined
-                            // messages: the status code and the offending field names are
-                            // what make an update failure actionable.
-                            this.reportUpdateError(recordId, recordsToUpdate[recordId], result.errors);
-                        }
-                    }
-                } catch (jsforceError) {
-                    try {
-                        const errorResult = await this.handleJsforceError(
-                            jsforceError,
-                            `bulk update ${Object.keys(chunk).length} records`,
-                            () => this.targetClient!.bulkUpdate(Object.values(chunk))
-                        );
-
-                        if (!errorResult.success && !errorResult.shouldSkip) {
-                            for (const recordId of Object.keys(chunk)) {
-                                this.reportUpdateError(recordId, recordsToUpdate[recordId], jsforceError);
-                            }
-                        } else if (errorResult.shouldSkip) {
-                            this.io.error(`Skipping bulk update for ${Object.keys(chunk).length} records due to jsforce error: ${jsforceError.message}`);
-                        }
-                    } catch {
-                        for (const recordId of Object.keys(chunk)) {
-                            this.reportUpdateError(recordId, recordsToUpdate[recordId], jsforceError);
-                        }
-                    }
+    /**
+     * One pass of the update. Records whose failure a solver acted on come back to
+     * be tried again with what it changed; every other record is done with, updated
+     * or reported.
+     */
+    private async updateRecords(records: Record<string, any>): Promise<Record<string, any>> {
+        const toRetry: Record<string, any> = {};
+        const chunks: Record<string, any>[] = this.chunking.getChunks(records);
+        for (const chunk of chunks) {
+            this.io.updatingRecord(chunk);
+            const updateResults = await this.updateChunk(chunk);
+            for (let j = 0; j < updateResults.length; j++) {
+                const recordId = Object.keys(chunk)[j];
+                const result = updateResults[j];
+                if (result.success) {
+                    continue;
+                }
+                if (this.handleUpdateErrors(recordId, records[recordId], result.errors)) {
+                    toRetry[recordId] = records[recordId];
                 }
             }
+        }
+        return toRetry;
+    }
+
+    /**
+     * The update counterpart of insertChunk: an error thrown by the call itself is
+     * offered to the whole-operation solvers, and what it leaves unresolved is
+     * turned into a failure for every record in the chunk - in the shape the org
+     * reports a single record's failure in, so the record-level solvers get their
+     * turn at it too.
+     */
+    private async updateChunk(chunk: Record<string, any>): Promise<SaveResult[]> {
+        try {
+            return await this.targetClient!.bulkUpdate(Object.values(chunk));
+        } catch (jsforceError) {
+            let message = `Jsforce error: ${jsforceError.message}`;
+            try {
+                const errorResult = await this.handleJsforceError(
+                    jsforceError,
+                    `bulk update ${Object.keys(chunk).length} records`,
+                    () => this.targetClient!.bulkUpdate(Object.values(chunk))
+                );
+
+                if (errorResult.success && errorResult.result) {
+                    return errorResult.result;
+                } else if (errorResult.shouldSkip) {
+                    message = `Skipped due to jsforce error: ${jsforceError.message}`;
+                    this.io.error(`Skipping bulk update for ${Object.keys(chunk).length} records due to jsforce error: ${jsforceError.message}`);
+                } else {
+                    throw jsforceError;
+                }
+            } catch {
+                this.io.error(`Unhandled jsforce error in bulkUpdate: ${jsforceError.message}`);
+            }
+            return Object.keys(chunk).map(() => ({
+                id: '',
+                success: false,
+                errors: [{ message, fields: [] }]
+            }));
         }
     }
 
     /**
-     * A record failed the update pass. Report it and keep it in this.errors, so the
-     * run's output names it too - without this the record looks fully migrated
-     * there while its deferred lookup is still empty in the target. There is no
-     * `record_no_id` counterpart on purpose: a record with no target id was skipped
-     * or matched away during the insert pass, which is not an error of its own.
+     * Every failure the org reported for one record's update, through the solvers.
+     * Says whether the record is worth updating again.
+     */
+    private handleUpdateErrors(recordId: string, record: any, errors: SaveError[]): boolean {
+        // The payload as this attempt sent it: a solver acting on one failure
+        // changes the record the next attempt will send, and the report has to name
+        // what the org actually rejected.
+        const attempted = { ...record };
+        const outcomes = errors.map(e => ({
+            e,
+            applied: applySolver(recordId, record, e, {
+                io: this.io,
+                phase: 'update',
+                solvers: this.options.solvers,
+                usedSolvers: this.usedSolvers(recordId, 'update', e),
+                setField: (field, value) => setUpdateField(record, field, value),
+            })
+        }));
+
+        if (!outcomes.every(outcome => outcome.applied.errorFixed)) {
+            // One failure no solver could act on is the end of this record's update:
+            // it would be rejected for that reason however often it is sent. So the
+            // failures a solver did act on are reported alongside it - nothing was
+            // actually gotten past - and as the SaveErrors themselves rather than
+            // their joined messages, since the status code and the offending field
+            // names are what make an update failure actionable.
+            this.reportUpdateError(recordId, attempted, errors);
+            return false;
+        }
+        for (const { e, applied } of outcomes) {
+            if (applied.solver?.hideError) {
+                continue;
+            }
+            if (!(recordId in this.errors)) {
+                this.errors[recordId] = [];
+            }
+            this.errors[recordId].push({ message: e.message, fixed: true, solver: applied.solver, phase: 'update', fields: updatedFields(attempted) });
+        }
+        // Every action that resolves an update failure either changes the record and
+        // asks for it to be sent again, or skips it - and a skip is a decision that
+        // this record's update is not to happen, whatever the others changed.
+        return outcomes.some(outcome => outcome.applied.retry)
+            && !outcomes.some(outcome => outcome.applied.solver?.action === 'skip');
+    }
+
+    /**
+     * A record failed the update pass and no solver could act on it. Report it and
+     * keep it in this.errors, so the run's output names it too - without this the
+     * record looks fully migrated there while its deferred lookup is still empty in
+     * the target. There is no `record_no_id` counterpart on purpose: a record with
+     * no target id was skipped or matched away during the insert pass, which is not
+     * an error of its own.
      */
     private reportUpdateError(recordId: string, record: any, error: any): void {
         const sObjectName = record.attributes!.type;
