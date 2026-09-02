@@ -7,8 +7,10 @@ import fs from 'fs';
 import { UI } from './ui/ui';
 import { TerminalKitUI } from './ui/terminal-kit/terminal';
 import { TuiUI } from './ui/tui/tui';
+import { VERSION } from './version';
 
 program
+    .version(VERSION, '-v, --version', 'Print the version and exit')
     .requiredOption('-c, --config-json <config-json>', 'The path to the config file')
     .option('-o, --output-file <output-file>', 'The path to save output logs')
     .option('-d, --debug', 'Enable debug mode')
@@ -28,6 +30,17 @@ const options: Options = JSON.parse(fs.readFileSync(opts.configJson, 'utf8')) as
 let outputStream: fs.WriteStream | undefined;
 if (opts.outputFile) {
     outputStream = fs.createWriteStream(opts.outputFile, { flags: 'w' });
+}
+
+// The full-screen TUI carries the version in its title bar; the plain UI has no
+// such frame, so print it. Either way the log file opens with it, so a report
+// always says which build produced it.
+const banner = `migr_ts v${VERSION}`;
+if (usePlain) {
+    console.log(banner);
+}
+if (outputStream) {
+    outputStream.write(banner + '\n');
 }
 
 // Make sure the alternate screen is always restored, even on Ctrl+C.

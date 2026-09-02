@@ -1,5 +1,6 @@
 import { ansi, padTo, takeLastColumns, truncate, visibleLength, wrapAnsi } from './ansi';
 import { FeedEntry, Glyph, MigrationState, Phase } from './state';
+import { VERSION } from '../../version';
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -9,7 +10,7 @@ const B = {
     h: '─', v: '│', lt: '├', rt: '┤',
 };
 
-const TITLE = ' migr_ts ';
+const TITLE = ` migr_ts v${VERSION} `;
 
 const PHASE_COLOR: Record<Phase, (s: string) => string> = {
     Starting: ansi.cyan,
@@ -90,7 +91,9 @@ export function buildFrame(
         `${B.v} ${padTo(content, inner)} ${B.v}`;
 
     // ── Top border with title ──────────────────────────────────────────────
-    const titleBar = B.h + ansi.boldOn(ansi.cyan(TITLE)) + B.h;
+    // The title carries the version, so on a narrow terminal it has to give way
+    // rather than push the top border past the frame's width.
+    const titleBar = B.h + ansi.boldOn(ansi.cyan(truncate(TITLE, w - 4))) + B.h;
     const titleFill = w - 2 - visibleLength(titleBar);
     lines.push(B.tl + titleBar + B.h.repeat(Math.max(0, titleFill)) + B.tr);
 

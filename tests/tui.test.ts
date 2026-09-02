@@ -2,6 +2,7 @@ import IOEvent, { IOEventType } from '../ioevent';
 import { applyEvent, buildFinalSummary, initialState, MigrationState, pushConsole } from '../ui/tui/state';
 import { buildFrame, maxScrollOffset, maxFeedScrollOffset, bodyHeightFor, inputCursorCol } from '../ui/tui/render';
 import { padTo, stripAnsi, truncate, visibleLength, wrapAnsi, takeLastColumns, ansi } from '../ui/tui/ansi';
+import { VERSION } from '../version';
 
 function feed(state: MigrationState, type: IOEventType, data?: unknown) {
     applyEvent(state, new IOEvent('output', type, data));
@@ -562,6 +563,18 @@ describe('frame renderer', () => {
         expect(frame[0]).toContain('migr_ts');
         expect(frame[frame.length - 1]).toContain('└');
         expect(frame[frame.length - 1]).toContain('┘');
+    });
+
+    it('names the running version in the title', () => {
+        const frame = build(initialState());
+        expect(stripAnsi(frame[0])).toContain(`migr_ts v${VERSION}`);
+    });
+
+    it('keeps the title row within the frame on a narrow terminal', () => {
+        for (const width of [24, 30, 40]) {
+            const frame = build(initialState(), width, 24);
+            expect(visibleLength(frame[0])).toBe(Math.max(24, width));
+        }
     });
 
     it('wraps a long feed entry instead of cutting it off at the edge', () => {
