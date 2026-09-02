@@ -4,6 +4,7 @@ import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
+const pkg = require('./package.json');
 const args = process.argv.slice(2);
 const outfile = (args.find(a => a.startsWith('--outfile=')) || '--outfile=bundle.js').slice('--outfile='.length);
 
@@ -34,5 +35,8 @@ await build({
     // every file of that directory - including an extension-less README that it
     // would otherwise try to parse as JS.
     loader: { '': 'empty' },
+    // The bundle ships without the package.json it was built from, so version.ts
+    // reads the version through this placeholder instead of off disk.
+    define: { __MIGR_TS_VERSION__: JSON.stringify(pkg.version) },
     plugins: [terminalKitNoLazyRequire],
 });
