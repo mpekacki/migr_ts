@@ -35,6 +35,7 @@ export type IOEventType =
     | 'invalid_regex'
     | 'invalid_input'
     | 'looking_for_circular_dependencies'
+    | 'circular_dependency_progress'
     | 'found_circular_dependency'
     | 'record_no_id'
     | 'error_updating_record'

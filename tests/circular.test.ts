@@ -1,12 +1,12 @@
-import { scanForCircularDependency } from '../circular';
+import { CircularScanProgress, scanForCircularDependency } from '../circular';
 
 describe('scanForCircularDependency', () => {
-    it('should return empty array if no circular dependency is found', () => {
-        expect(scanForCircularDependency([], {})).toEqual([]);
+    it('should return empty array if no circular dependency is found', async () => {
+        expect(await scanForCircularDependency([], {})).toEqual([]);
     });
 
-    it('should indicate a field to clear if circular dependency is found in 2 records', () => {
-        expect(scanForCircularDependency([
+    it('should indicate a field to clear if circular dependency is found in 2 records', async () => {
+        expect(await scanForCircularDependency([
             {
                 "Lookup_to_B__c": "a01KO000000ZOGxYAO",
                 "attributes":
@@ -36,8 +36,8 @@ describe('scanForCircularDependency', () => {
         ]);
     });
 
-    it('should indicate a field to clear if circular dependency is found in 3 records', () => {
-        expect(scanForCircularDependency([
+    it('should indicate a field to clear if circular dependency is found in 3 records', async () => {
+        expect(await scanForCircularDependency([
                 {
                     "Lookup_to_B__c": "a01KO000000ZOGxYAO",
                     "attributes":
@@ -88,8 +88,8 @@ describe('scanForCircularDependency', () => {
         ]);
     });
 
-    it('should indicate only one field to clear if circular dependency is found in 2 records when no fields are required', () => {
-        expect(scanForCircularDependency([
+    it('should indicate only one field to clear if circular dependency is found in 2 records when no fields are required', async () => {
+        expect(await scanForCircularDependency([
             {
                 "Lookup_to_B__c": "a01KO000000ZOGxYAO",
                 "attributes":
@@ -117,8 +117,8 @@ describe('scanForCircularDependency', () => {
         ]);
     });
 
-    it('should find circular dependency when ids are inside text fields', () => {
-        expect(scanForCircularDependency([
+    it('should find circular dependency when ids are inside text fields', async () => {
+        expect(await scanForCircularDependency([
             {
                 "Id": "a00KO0000016wtaYAA",
                 "Description__c": "Here is some other id: a01KO000000ZOGxYAO",
@@ -145,8 +145,8 @@ describe('scanForCircularDependency', () => {
         ]);
     })
 
-    it('should detect 2 independent circular dependencies', () => {
-        expect(scanForCircularDependency([
+    it('should detect 2 independent circular dependencies', async () => {
+        expect(await scanForCircularDependency([
             {
                 "Id": "1",
                 "Lookup__c": "2"
@@ -163,7 +163,7 @@ describe('scanForCircularDependency', () => {
         ], {})).toHaveLength(2);
     })
 
-    it('should work for a large number of records and complete under 10 seconds', () => {
+    it('should work for a large number of records and complete under 10 seconds', async () => {
         const records = [];
         const num = 10000;
         const createId = (i: number) => `a00KO0000016wtaYAA${i.toString().padStart(num.toString().length, '0')}`;
@@ -190,13 +190,32 @@ describe('scanForCircularDependency', () => {
         }
         records[records.length - 1].Lookup__c = createId(0);
         
+        const progress: CircularScanProgress[] = [];
         const startTime = performance.now();
-        const result = scanForCircularDependency(records, { });
+        const result = await scanForCircularDependency(records, { }, p => progress.push(p));
         const endTime = performance.now();
-        
+
         const executionTime = (endTime - startTime) / 1000; // Convert to seconds
-        
+
         expect(executionTime).toBeLessThan(10); // Should complete in under 10 seconds
         expect(result.length).toEqual(1);
+        // A scan this long must not sit silent: it reports where it is, and each
+        // report stays inside the record set it is reading.
+        expect(progress.length).toBeGreaterThan(0);
+        for (const p of progress) {
+            expect(p.total).toEqual(num);
+            expect(p.done).toBeGreaterThan(0);
+            expect(p.done).toBeLessThanOrEqual(num);
+            expect(p.pass).toBeGreaterThanOrEqual(1);
+        }
+    })
+
+    it('should report no progress for a scan that finishes immediately', async () => {
+        const progress: CircularScanProgress[] = [];
+        await scanForCircularDependency([
+            { "Id": "1", "Lookup__c": "2" },
+            { "Id": "2", "Lookup__c": "1" }
+        ], {}, p => progress.push(p));
+        expect(progress).toEqual([]);
     })
 });

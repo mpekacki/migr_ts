@@ -1038,7 +1038,11 @@ class MigrationRunner {
             Id: Object.keys(this.recordsByIds).find(key => this.recordsByIds[key] === record)
         }));
         this.io.lookingForCircularDependencies(requiredLookupFieldsBySObjectType, records);
-        const toClear = scanForCircularDependency(records, requiredLookupFieldsBySObjectType);
+        const toClear = await scanForCircularDependency(
+            records,
+            requiredLookupFieldsBySObjectType,
+            progress => this.io.circularDependencyProgress(progress)
+        );
         if (toClear.length > 0) {
             this.io.foundCircularDependency(toClear);
             for (const clear of toClear) {

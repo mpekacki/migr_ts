@@ -276,6 +276,15 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'looking_for_circular_dependencies', { requiredLookupFieldsBySObjectType, records }));
     }
 
+    /**
+     * How far the scan has got. It is the one step of a run that can take a long
+     * while with nothing else to say, so it says where it is instead of leaving
+     * the screen on 'looking for circular dependencies' until it is done.
+     */
+    public circularDependencyProgress(progress: { pass: number, cleared: number, stage: 'graph' | 'search', done: number, total: number }) {
+        this.onOutput(this.buildIOEvent('output', 'circular_dependency_progress', { ...progress }));
+    }
+
     public foundCircularDependency(toClear: { recordId: string, field: string }[]) {
         this.onOutput(this.buildIOEvent('output', 'found_circular_dependency', { toClear }));
     }
