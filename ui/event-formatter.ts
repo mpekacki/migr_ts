@@ -118,6 +118,8 @@ function formatEvent(event: IOEvent): string {
             return `invalid input: ${d?.input}`;
         case 'looking_for_circular_dependencies':
             return `looking for circular dependencies with ${JSON.stringify(d?.requiredLookupFieldsBySObjectType)} for records ${JSON.stringify(d?.records)}`;
+        case 'circular_dependency_progress':
+            return `looking for circular dependencies: pass ${d?.pass}, ${d?.cleared} deferred so far, ${d?.stage === 'graph' ? 'mapping' : 'searching'} ${d?.done}/${d?.total} records`;
         case 'found_circular_dependency':
             return `found circular dependency: ${JSON.stringify(d?.toClear)}`;
         case 'record_no_id':

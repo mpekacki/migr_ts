@@ -89,6 +89,20 @@ function push(state: MigrationState, glyph: Glyph, text: string, indent = 0) {
     }
 }
 
+/**
+ * Progress of the step already running: rewrite that line in place rather than
+ * push one per tick, which would bury the rest of the feed under it. If anything
+ * else has been printed since, the step gets a fresh line to keep moving on.
+ */
+function updateRun(state: MigrationState, text: string) {
+    const last = state.feed[state.feed.length - 1];
+    if (last && last.glyph === 'run') {
+        last.text = text;
+        return;
+    }
+    push(state, 'run', text);
+}
+
 /** A raw console.* line captured while the TUI owns the screen. */
 export function pushConsole(state: MigrationState, text: string) {
     state.feed.push({ glyph: 'sub', indent: 0, text });
@@ -229,8 +243,15 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             break;
         }
         case 'looking_for_circular_dependencies':
+            state.phase = 'Resolving';
             push(state, 'run', 'Resolving circular dependencies');
             break;
+        case 'circular_dependency_progress': {
+            const doing = d.stage === 'graph' ? 'mapping' : 'searching';
+            const deferred = d.cleared > 0 ? `, ${d.cleared} deferred` : '';
+            updateRun(state, `Resolving circular dependencies - pass ${d.pass}${deferred} (${doing} ${d.done}/${d.total})`);
+            break;
+        }
         case 'found_circular_dependency': {
             const n = Array.isArray(d.toClear) ? d.toClear.length : 0;
             push(state, 'sub', `Deferred ${n} circular field(s)`, 1);
