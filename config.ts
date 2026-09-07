@@ -35,9 +35,17 @@ interface Options {
         }[];
     };
     solvers: SolverType[];
+    /** Which of the run's prompts to answer without the user. */
     fullAuto?: {
-        enabled: boolean;
-        unhandledErrorBehavior: 'skip' | 'saveAndExit';
+        /** Run without any interactive prompt at all. Implies `skipConfirmation`. */
+        enabled?: boolean;
+        /**
+         * Skip only the confirmation prompt. An error no solver handles still
+         * goes to the user, unlike `enabled`.
+         */
+        skipConfirmation?: boolean;
+        /** What `enabled` does with an error no solver handles. Required with `enabled`. */
+        unhandledErrorBehavior?: 'skip' | 'saveAndExit';
     };
     anonymization?: {
         emailFields?: {
@@ -119,7 +127,30 @@ interface FallbackSolver extends Solver {
 
 type SolverType = FixSolver | SkipSolver | MatchSolver | ExtractSolver | AppendRandomSolver | RetrySolver | BackoffSolver | FallbackSolver;
 
+const UNHANDLED_ERROR_BEHAVIORS = ['skip', 'saveAndExit'];
+
+/**
+ * Rejects a fullAuto block the run could not honour, before it has done any
+ * work. `unhandledErrorBehavior` is what stands between the user and a run that
+ * drops records on its own, so neither a misspelled value nor a missing one may
+ * pass quietly for the `skip` the code would otherwise fall through to.
+ */
+function validateFullAutoOptions(options: Options): void {
+    const fullAuto = options.fullAuto;
+    if (fullAuto === undefined) {
+        return;
+    }
+    const legal = UNHANDLED_ERROR_BEHAVIORS.map(behavior => `'${behavior}'`).join(' or ');
+    if (fullAuto.unhandledErrorBehavior !== undefined && !UNHANDLED_ERROR_BEHAVIORS.includes(fullAuto.unhandledErrorBehavior)) {
+        throw new Error(`fullAuto.unhandledErrorBehavior must be ${legal}, not '${fullAuto.unhandledErrorBehavior}'`);
+    }
+    if (fullAuto.enabled && fullAuto.unhandledErrorBehavior === undefined) {
+        throw new Error(`fullAuto.enabled needs fullAuto.unhandledErrorBehavior (${legal}) to say what to do with an error no solver handles`);
+    }
+}
+
 export {
+    validateFullAutoOptions,
     Options,
     Solver,
     FixSolver,

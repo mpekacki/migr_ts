@@ -45,7 +45,7 @@ node bundle.js -c config.json
 
 ### Before you point it at something you care about
 
-The tool **inserts records into the target org**. It asks for confirmation first, showing what it is about to migrate and why each record was pulled in — but `fullAuto.enabled` skips that prompt, so read a run's plan at least once before automating it.
+The tool **inserts records into the target org**. It asks for confirmation first, showing what it is about to migrate and why each record was pulled in — but `fullAuto.enabled` and `fullAuto.skipConfirmation` both skip that prompt, so read a run's plan at least once before automating it.
 
 It also **writes a history file** — `{targetOrg}__history.json` in the working directory, unless `historyFilePath` says otherwise. That file is what makes a run resumable: a re-run skips records already mapped in it. Delete it to force a fresh migration, and keep in mind it holds source-to-target ID pairs for the org you migrated into.
 
@@ -66,8 +66,9 @@ Two cheap ways to rehearse: set `targetSqlite` (or `targetFile`) to export the r
 | `relationships` | Child relationships to fetch explicitly (e.g. `Account` → `Contacts`) |
 | `maxConcurrentRequests` | API request parallelism (default: 10) |
 | `historyFilePath` | Where to keep the resume history. Names either the file itself or a directory to put it in (end it with a separator to mean a directory). Defaults to `{targetOrg}__history.json` in the working directory |
-| `fullAuto.enabled` | Run without interactive prompts |
-| `fullAuto.unhandledErrorBehavior` | What `fullAuto` does with an error no solver handles: `skip` the record and carry on, or `saveAndExit` |
+| `fullAuto.enabled` | Run without any interactive prompt. Implies `fullAuto.skipConfirmation` |
+| `fullAuto.skipConfirmation` | Skip only the confirmation prompt — an error no solver handles still goes to the user. For a run whose record set you already trust but whose errors you still want to see |
+| `fullAuto.unhandledErrorBehavior` | What `fullAuto.enabled` does with an error no solver handles: `skip` the record and carry on, or `saveAndExit`. Required with `enabled` |
 | `anonymization.emailFields` | Obfuscate or sanitize email addresses. `mode` is `obfuscate` (replaces the address with a hash) or `sanitize` (rewrites `a@b.com` to `a.at.b.com`); `template` sets the resulting address, either a bare domain or a pattern containing `{0}` (default `{0}@example.com`) |
 | `files.enabled` | Migrate file contents (default: `true`) |
 | `files.maxFileSizeMb` | Files larger than this are migrated without their contents (default: 25) |
@@ -121,7 +122,7 @@ Worth knowing:
 - Any solver may set `hideError: true`, which keeps the matched error out of the output and out of the error count entirely. Useful for the expected, uninteresting failures — see the `DUPLICATE_VALUE` note under [Files](#files).
 - Each solver is used **once per record per message per pass**, so a solver that does not actually resolve an error cannot spin on it. If a record produces the same error again, the next matching solver is tried instead.
 - A `match` or `extract_column` whose pattern captures nothing leaves the error unresolved rather than silently succeeding.
-- An error no solver matches goes to the user, who can write a solver on the spot (`addSolver`) and have it applied to every later error in the run. Under `fullAuto` it falls to `unhandledErrorBehavior` instead.
+- An error no solver matches goes to the user, who can write a solver on the spot (`addSolver`) and have it applied to every later error in the run. Under `fullAuto.enabled` it falls to `unhandledErrorBehavior` instead; `fullAuto.skipConfirmation` on its own still brings it to the user.
 
 **Solvers apply to the update pass too.** The values a `fix` solver stashed, and the lookups cleared to break a circular dependency, are written back after every record is inserted, and that write can be rejected in its own right — a validation rule that fires on update, a lookup pointing at a record that never made it, a bad picklist value. Those failures go through the same solvers, and the record is updated again with what the solver changed. Three things differ from the insert pass:
 

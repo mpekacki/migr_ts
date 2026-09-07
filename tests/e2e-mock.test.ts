@@ -247,6 +247,24 @@ test('a missing apex script fails the run before it fetches anything', async () 
     }))).rejects.toThrow(/Apex script not found: \.\/apex_test_does_not_exist\.apex/);
 });
 
+test('full auto without an unhandled error behavior fails the run rather than dropping records', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        fullAuto: { enabled: true }
+    }))).rejects.toThrow(/fullAuto\.enabled needs fullAuto\.unhandledErrorBehavior/);
+});
+
+test('a misspelled unhandled error behavior fails the run instead of quietly meaning skip', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        fullAuto: { enabled: true, unhandledErrorBehavior: 'saveAndExist' }
+    }))).rejects.toThrow(/fullAuto\.unhandledErrorBehavior must be 'skip' or 'saveAndExit', not 'saveAndExist'/);
+});
+
 // Also a thrown error, and the one way to tell that the export is awaited: writing
 // it is the last thing a run does, so an unawaited write would leave main() to
 // resolve as if the run had succeeded and let the failure escape the process.

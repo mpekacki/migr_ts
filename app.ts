@@ -7,7 +7,7 @@ import IOEvent from './ioevent';
 import IO, { serializeError, updatedFields } from './io';
 import { preprocessData } from './preprocess-data';
 import { readRecordsFromSqlite, writeRecordsToSqlite } from './sqlite-store';
-import { FixSolver, Options, SolverType } from './config';
+import { FixSolver, Options, SolverType, validateFullAutoOptions } from './config';
 import DescribeCache from './describe-cache';
 import FileTransfer from './files';
 import MigrationHistory from './history';
@@ -188,6 +188,7 @@ class MigrationRunner {
         this.isMigrateToFile = options.targetFile !== undefined || options.targetSqlite !== undefined;
         this.isMigrateFromFile = options.sourceFile !== undefined || options.sourceSqlite !== undefined;
         validateApexOptions(options, this.isMigrateToFile);
+        validateFullAutoOptions(options);
     }
 
     async run(): Promise<void> {
@@ -210,11 +211,14 @@ class MigrationRunner {
         this.io.fetchedRecords(Object.keys(this.recordsByIds).length);
 
         // With nothing left to migrate there is nothing to confirm - say why and
-        // carry on to the reporting the run would have produced anyway.
+        // carry on to the reporting the run would have produced anyway. Two flags
+        // open this door: `enabled` answers every prompt of the run, while
+        // `skipConfirmation` answers only this one and leaves an unhandled error
+        // to the user.
         const nothingToMigrate = Object.keys(this.recordsByIds).length === 0;
         if (nothingToMigrate) {
             this.io.nothingToMigrate({ ...this.alreadyMigratedCountsBySObjectType });
-        } else if (!this.options.fullAuto?.enabled) {
+        } else if (!(this.options.fullAuto?.enabled || this.options.fullAuto?.skipConfirmation)) {
             const confirmed = await this.confirmMigration();
             if (!confirmed) {
                 this.io.aborted();
