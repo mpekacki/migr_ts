@@ -243,7 +243,14 @@ class MigrationRunner {
                 await this.apex.runAfter();
                 return;
             }
-            await this.updateClearedFields();
+            const updated = await this.updateClearedFields();
+            if (!updated) {
+                // Abandoned part way through the update pass, the same way the
+                // insert pass is abandoned and for the same reason: saveAndExit has
+                // written the report, leaving only the before scripts to undo.
+                await this.apex.runAfter();
+                return;
+            }
             await this.runAfterScripts();
         } else {
             // Awaited like every other way out of run(): the export writes its file
@@ -922,7 +929,7 @@ class MigrationRunner {
                 this.io.error(JSON.stringify(e));
             }
             if (!this.options.fullAuto?.enabled) {
-                const resolution = await this.handleErrorInteractively(recordId, record, e);
+                const resolution = await this.handleErrorInteractively(recordId, record, e, 'insert');
                 if (resolution.exit) {
                     return { retry, retryAll, matchedId, solverAdded: false, exit: true, hidden: false };
                 }
@@ -954,16 +961,29 @@ class MigrationRunner {
         return { retry, retryAll, matchedId, solverAdded: false, exit: false, hidden: false };
     }
 
-    private async handleErrorInteractively(recordId: string, record: SObjectRecord<Schema, string>, e: SaveError): Promise<{ solver?: SolverType, errorFixed: boolean, retry: boolean, retryAll: boolean, matchedId?: string, solverAdded: boolean, exit: boolean }> {
+    /**
+     * An error no solver could deal with, put to the user. The two passes take the
+     * same answers bar one: `match` names a record already in the target to point
+     * at instead of inserting, which an update - addressed to the record the run
+     * has already created - has no use for, so there it is not an answer at all.
+     * The other difference is what `fix` does with the values the user gives:
+     * during the insert they replace fields whose original values are stashed for
+     * the update pass to write back, while during the update pass - which is that
+     * pass - they are simply what the next attempt sends.
+     */
+    private async handleErrorInteractively(recordId: string, record: SObjectRecord<Schema, string>, e: SaveError, phase: SolverPhase): Promise<{ solver?: SolverType, errorFixed: boolean, retry: boolean, retryAll: boolean, matchedId?: string, solverAdded: boolean, exit: boolean }> {
         const result: { solver?: SolverType, errorFixed: boolean, retry: boolean, retryAll: boolean, matchedId?: string, solverAdded: boolean, exit: boolean } = { errorFixed: false, retry: false, retryAll: false, solverAdded: false, exit: false };
+        const setField = (field: string, value: string | null) => phase === 'insert'
+            ? this.setFieldWithLaterUpdate(recordId, record, field, value)
+            : setUpdateField(record, field, value);
         let inputOk;
         do {
             inputOk = true;
-            const userInput = await this.io.askForInput(recordId, e.message, e);
+            const userInput = await this.io.askForInput(phase, recordId, e.message, e);
             if (userInput === USER_INPUTS.fix) {
                 let fieldsToUpdate;
                 while (!fieldsToUpdate) {
-                    const fieldsJson = await this.io.askForFieldsToUpdate();
+                    const fieldsJson = await this.io.askForFieldsToUpdate(phase);
                     try {
                         fieldsToUpdate = JSON.parse(fieldsJson);
                     } catch {
@@ -976,7 +996,7 @@ class MigrationRunner {
                     changeFields: []
                 };
                 for (const field of Object.keys(fieldsToUpdate)) {
-                    this.setFieldWithLaterUpdate(recordId, record, field, fieldsToUpdate[field]);
+                    setField(field, fieldsToUpdate[field]);
                     solver.changeFields.push({ field, value: fieldsToUpdate[field] });
                 }
                 result.solver = solver;
@@ -987,7 +1007,7 @@ class MigrationRunner {
             } else if (userInput === USER_INPUTS.retryAll) {
                 result.retryAll = true;
                 result.retry = true;
-            } else if (userInput === USER_INPUTS.match) {
+            } else if (userInput === USER_INPUTS.match && phase === 'insert') {
                 result.matchedId = await this.io.askForMatch();
             } else if (userInput === USER_INPUTS.saveAndExit) {
                 await this.saveAndExit();
@@ -995,7 +1015,7 @@ class MigrationRunner {
             } else if (userInput === USER_INPUTS.addSolver) {
                 let newSolver;
                 while (!newSolver) {
-                    const solverJson = await this.io.askForSolver();
+                    const solverJson = await this.io.askForSolver(phase);
                     try {
                         newSolver = JSON.parse(solverJson);
                         new RegExp(newSolver.message);
@@ -1059,20 +1079,30 @@ class MigrationRunner {
 
     /**
      * The deferred values go in, and a failure here gets the same solvers an
-     * insert failure does: a record a solver acted on is updated again with what
-     * the solver changed, until nothing is left that a solver can act on.
+     * insert failure does - and then the same user: a record a solver acted on is
+     * updated again with what the solver changed, until nothing is left that a
+     * solver can act on and what remains has been put to the user.
+     *
+     * Says whether the pass ran to the end. It does not when the user answers one
+     * of its errors with save-and-exit, which leaves the records still pending
+     * un-updated - the report is already written by then.
      */
-    private async updateClearedFields(): Promise<void> {
+    private async updateClearedFields(): Promise<boolean> {
         let pending = await this.collectRecordsToUpdate();
         for (let attempt = 1; Object.keys(pending).length > 0; attempt++) {
             if (attempt > MAX_UPDATE_ATTEMPTS) {
                 for (const recordId of Object.keys(pending)) {
                     this.reportUpdateError(recordId, pending[recordId], new Error(`Giving up after ${MAX_UPDATE_ATTEMPTS} update attempts`));
                 }
-                return;
+                return true;
             }
-            pending = await this.updateRecords(pending);
+            const pass = await this.updateRecords(pending);
+            if (pass.exit) {
+                return false;
+            }
+            pending = pass.pending;
         }
+        return true;
     }
 
     /**
@@ -1110,12 +1140,17 @@ class MigrationRunner {
     }
 
     /**
-     * One pass of the update. Records whose failure a solver acted on come back to
-     * be tried again with what it changed; every other record is done with, updated
-     * or reported.
+     * One pass of the update. Records whose failure a solver or the user acted on
+     * come back to be tried again with what that changed; every other record is
+     * done with, updated or reported.
+     *
+     * `retryAll` is the user's answer to send the rest of this pass's failures
+     * again without being asked about each one, and so lasts exactly as long as the
+     * pass does - the next one asks again.
      */
-    private async updateRecords(records: Record<string, any>): Promise<Record<string, any>> {
+    private async updateRecords(records: Record<string, any>): Promise<{ pending: Record<string, any>, exit: boolean }> {
         const toRetry: Record<string, any> = {};
+        let retryAll = false;
         const chunks: Record<string, any>[] = this.chunking.getChunks(records);
         for (const chunk of chunks) {
             this.io.updatingRecord(chunk);
@@ -1124,14 +1159,22 @@ class MigrationRunner {
                 const recordId = Object.keys(chunk)[j];
                 const result = updateResults[j];
                 if (result.success) {
+                    // An error an earlier attempt reported has been gotten past -
+                    // the record holds the values the update was sent to write.
+                    this.errors[recordId]?.filter(error => error.phase === 'update').forEach(error => error.fixed = true);
                     continue;
                 }
-                if (this.handleUpdateErrors(recordId, records[recordId], result.errors)) {
+                const outcome = await this.handleUpdateErrors(recordId, records[recordId], result.errors, retryAll);
+                if (outcome.exit) {
+                    return { pending: toRetry, exit: true };
+                }
+                retryAll = outcome.retryAll;
+                if (outcome.retry) {
                     toRetry[recordId] = records[recordId];
                 }
             }
         }
-        return toRetry;
+        return { pending: toRetry, exit: false };
     }
 
     /**
@@ -1173,49 +1216,83 @@ class MigrationRunner {
     }
 
     /**
-     * Every failure the org reported for one record's update, through the solvers.
-     * Says whether the record is worth updating again.
+     * Every failure the org reported for one record's update, through the solvers
+     * and - for what they could not act on - to the user, exactly as the insert
+     * pass does. Says whether the record is worth updating again, whether the user
+     * asked for the rest of the pass to be retried unasked, and whether they asked
+     * the run to stop.
      */
-    private handleUpdateErrors(recordId: string, record: any, errors: SaveError[]): boolean {
+    private async handleUpdateErrors(recordId: string, record: any, errors: SaveError[], retryAll: boolean): Promise<{ retry: boolean, retryAll: boolean, exit: boolean }> {
+        if (retryAll) {
+            return { retry: true, retryAll, exit: false };
+        }
         // The payload as this attempt sent it: a solver acting on one failure
         // changes the record the next attempt will send, and the report has to name
         // what the org actually rejected.
         const attempted = { ...record };
-        const outcomes = errors.map(e => ({
-            e,
-            applied: applySolver(recordId, record, e, {
+        const outcomes: { e: SaveError, solver?: SolverType, errorFixed: boolean, retry: boolean, reported: boolean }[] = [];
+        for (const e of errors) {
+            const applied = applySolver(recordId, record, e, {
                 io: this.io,
                 phase: 'update',
                 solvers: this.options.solvers,
                 usedSolvers: this.usedSolvers(recordId, 'update', e),
                 setField: (field, value) => setUpdateField(record, field, value),
-            })
-        }));
+            });
+            const outcome = { e, solver: applied.solver, errorFixed: applied.errorFixed, retry: applied.retry, reported: true };
+            outcomes.push(outcome);
+            if (outcome.errorFixed) {
+                continue;
+            }
+            if (!this.options.fullAuto?.enabled) {
+                const resolution = await this.handleErrorInteractively(recordId, record, e, 'update');
+                if (resolution.exit) {
+                    return { retry: false, retryAll, exit: true };
+                }
+                if (resolution.solver) {
+                    outcome.solver = resolution.solver;
+                }
+                outcome.errorFixed = resolution.errorFixed;
+                outcome.retry = outcome.retry || resolution.retry;
+                retryAll = resolution.retryAll;
+                // A solver added here has not been tried on anything yet: send the
+                // record again and let applySolver find it on the failure that comes
+                // back, which is what puts the solver's name in the report.
+                outcome.reported = !resolution.solverAdded;
+            } else if (this.options.fullAuto?.unhandledErrorBehavior === 'saveAndExit') {
+                await this.saveAndExit();
+                return { retry: false, retryAll, exit: true };
+            }
+            // fullAuto with 'skip' behavior: fall through and report the error
+        }
 
-        if (!outcomes.every(outcome => outcome.applied.errorFixed)) {
-            // One failure no solver could act on is the end of this record's update:
+        if (!outcomes.every(outcome => outcome.errorFixed || outcome.retry)) {
+            // One failure nothing could act on is the end of this record's update:
             // it would be rejected for that reason however often it is sent. So the
             // failures a solver did act on are reported alongside it - nothing was
             // actually gotten past - and as the SaveErrors themselves rather than
             // their joined messages, since the status code and the offending field
             // names are what make an update failure actionable.
             this.reportUpdateError(recordId, attempted, errors);
-            return false;
+            return { retry: false, retryAll, exit: false };
         }
-        for (const { e, applied } of outcomes) {
-            if (applied.solver?.hideError) {
+        for (const outcome of outcomes) {
+            if (outcome.solver?.hideError || !outcome.reported) {
                 continue;
             }
             if (!(recordId in this.errors)) {
                 this.errors[recordId] = [];
             }
-            this.errors[recordId].push({ message: e.message, fixed: true, solver: applied.solver, phase: 'update', fields: updatedFields(attempted) });
+            this.errors[recordId].push({ message: outcome.e.message, fixed: outcome.errorFixed, solver: outcome.solver, phase: 'update', fields: updatedFields(attempted) });
         }
         // Every action that resolves an update failure either changes the record and
         // asks for it to be sent again, or skips it - and a skip is a decision that
         // this record's update is not to happen, whatever the others changed.
-        return outcomes.some(outcome => outcome.applied.retry)
-            && !outcomes.some(outcome => outcome.applied.solver?.action === 'skip');
+        return {
+            retry: outcomes.some(outcome => outcome.retry) && !outcomes.some(outcome => outcome.solver?.action === 'skip'),
+            retryAll,
+            exit: false
+        };
     }
 
     /**

@@ -76,6 +76,21 @@ export function recordForLogging(record: any): any {
     return trimmed ?? record;
 }
 
+/**
+ * Which pass of the migration an error came from. Structurally the same as
+ * solvers.ts's SolverPhase and deliberately declared again rather than imported:
+ * this layer depends on ioevent.ts and config.ts and on nothing above it.
+ */
+export type ErrorPhase = 'insert' | 'update';
+
+/**
+ * The input event carrying an error no solver could deal with. One per pass,
+ * because the two do not offer the user the same way out - see the formatter.
+ */
+function errorEvent(phase: ErrorPhase): IOEventType {
+    return phase === 'update' ? 'update_error' : 'insert_error';
+}
+
 class IO {
     private readonly onOutput: (output: IOEvent) => void;
     private readonly onInput: (input: IOEvent) => Promise<string>;
@@ -244,24 +259,25 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'hidden_error', { recordId }));
     }
 
-    public async askForInput(recordId: string, message: string, errorDetails?: any): Promise<string> {
-        return await this.onInput(this.buildIOEvent('input', 'insert_error', { recordId, error: message, errorDetails }));
+    public async askForInput(phase: ErrorPhase, recordId: string, message: string, errorDetails?: any): Promise<string> {
+        return await this.onInput(this.buildIOEvent('input', errorEvent(phase), { recordId, error: message, errorDetails }));
     }
 
-    public async askForFieldsToUpdate(): Promise<string> {
-        return await this.onInput(this.buildIOEvent('input', 'insert_error', {}));
+    public async askForFieldsToUpdate(phase: ErrorPhase): Promise<string> {
+        return await this.onInput(this.buildIOEvent('input', errorEvent(phase), {}));
     }
 
     public invalidJson() {
         this.onOutput(this.buildIOEvent('output', 'invalid_json'));
     }
 
+    /** Insert only: an update has no record to match away to. */
     public async askForMatch(): Promise<string> {
         return await this.onInput(this.buildIOEvent('input', 'insert_error', {}));
     }
 
-    public async askForSolver(): Promise<string> {
-        return await this.onInput(this.buildIOEvent('input', 'insert_error', {}));
+    public async askForSolver(phase: ErrorPhase): Promise<string> {
+        return await this.onInput(this.buildIOEvent('input', errorEvent(phase), {}));
     }
 
     public invalidRegex() {

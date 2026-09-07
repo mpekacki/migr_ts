@@ -967,7 +967,7 @@ export const e2eScenarios: E2EScenario[] = [
         expect(capturedOutput.filter(e => e.type === 'updating_record')).toHaveLength(2);
     }),
 
-    scenario('failed later update, unsolvable', async (ctx: E2EContext) => {
+    scenario('failed later update, skipped by the user', async (ctx: E2EContext) => {
         // Fussy_Field_2__c is refused on update and only on update, so the record
         // inserts and then refuses every update the run sends it.
         const custObjD = await createRecord(ctx.sourceOrg, 'Custom_Object_D__c', { Fussy_Field_1__c: 'fail', Fussy_Field_2__c: 'locked' });
@@ -976,16 +976,28 @@ export const e2eScenarios: E2EScenario[] = [
             solvers: [fixAlwaysFailsSolver]
         });
 
-        const { parsedOutput, capturedOutput } = await ctx.runMigration(config);
+        // No solver can act on the locked field, so the failure goes to the user
+        // just as an insert failure does, and they leave it alone.
+        let prompts = 0;
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config, (ioEvent, sendInput) => {
+            if (ioEvent.type === 'confirm_migration') {
+                sendInput('y');
+            } else if (ioEvent.type === 'update_error' && ioEvent.data?.recordId) {
+                prompts++;
+                expect(ioEvent.data.error).toContain('locked after creation');
+                sendInput('s');
+            }
+        });
+        expect(prompts).toBe(1);
 
         const newCustObjDId = assertRecordMigrated(parsedOutput, custObjD.id);
 
         const newCustObjD = await retrieveRecord(ctx.targetOrg, 'Custom_Object_D__c', newCustObjDId);
         expect(newCustObjD.Fussy_Field_1__c).toEqual('ok');
 
-        // No solver can act on the locked field, so nothing about this record's
-        // update is going to work - the output has to say so, or the run looks clean
-        // while the target field is left holding the solver's value.
+        // Nothing about this record's update is going to work now - the output has
+        // to say so, or the run looks clean while the target field is left holding
+        // the solver's value.
         const updateErrors = parsedOutput.errors[custObjD.id].filter((error: any) => error.phase === 'update');
         expect(updateErrors).toHaveLength(1);
         expect(updateErrors[0].message).toContain('locked after creation');
@@ -995,6 +1007,48 @@ export const e2eScenarios: E2EScenario[] = [
         // and the record is not sent again: the second attempt would be rejected for
         // the same reason and reported all over again.
         expect(capturedOutput.filter(e => e.type === 'updating_record')).toHaveLength(1);
+    }),
+
+    scenario('failed later update, fixed by the user', async (ctx: E2EContext) => {
+        const custObjD = await createRecord(ctx.sourceOrg, 'Custom_Object_D__c', { Fussy_Field_1__c: 'fail', Fussy_Field_2__c: 'locked' });
+
+        const config = createBasicConfig(ctx, [custObjD.id], {
+            solvers: [fixAlwaysFailsSolver]
+        });
+
+        // The user unlocks the field the org refuses the update on. There is no
+        // later pass to stash the old value in - this is that pass - so the value
+        // they give is simply what the next attempt sends.
+        let prompts = 0;
+        const { parsedOutput } = await ctx.runMigration(config, (ioEvent, sendInput) => {
+            if (ioEvent.type === 'confirm_migration') {
+                sendInput('y');
+            } else if (ioEvent.type === 'update_error' && ioEvent.data?.recordId) {
+                prompts++;
+                expect(ioEvent.data.error).toContain('locked after creation');
+                sendInput('f');
+            } else if (ioEvent.type === 'update_error') {
+                sendInput(JSON.stringify({ Fussy_Field_2__c: 'unlocked' }));
+            }
+        });
+        expect(prompts).toBe(1);
+
+        const newCustObjDId = assertRecordMigrated(parsedOutput, custObjD.id);
+
+        const newCustObjD = await retrieveRecord(ctx.targetOrg, 'Custom_Object_D__c', newCustObjDId);
+        expect(newCustObjD.Fussy_Field_2__c).toEqual('unlocked');
+        // the solver still has the last word on the field it acts on
+        expect(newCustObjD.Fussy_Field_1__c).toEqual('ok');
+
+        // The error is reported as dealt with, naming the fix the user made - the
+        // same shape a configured solver's fix is reported in.
+        const updateErrors = parsedOutput.errors[custObjD.id].filter((error: any) => error.phase === 'update');
+        const lockedError = updateErrors.find((error: any) => error.message.includes('locked after creation'));
+        expect(lockedError.fixed).toBe(true);
+        expect(lockedError.solver).toMatchObject({
+            action: 'fix',
+            changeFields: [{ field: 'Fussy_Field_2__c', value: 'unlocked' }]
+        });
     }),
 
     scenario('match by wrong field', async (ctx: E2EContext) => {
@@ -2052,5 +2106,26 @@ export const e2eScenarios: E2EScenario[] = [
         assertRecordMigrated(parsedOutput, account.id);
         expect(capturedOutput.some(event => event.type === 'running_apex_script')).toBe(true);
         expect(await ctx.targetOrg.findIds('Account', { Name: afterName })).toHaveLength(1);
+    }),
+
+    scenario('apex scripts still close out a migration abandoned in the update pass', async (ctx: E2EContext) => {
+        const custObjD = await createRecord(ctx.sourceOrg, 'Custom_Object_D__c', { Fussy_Field_1__c: 'fail', Fussy_Field_2__c: 'locked' });
+        const afterName = `apex-after-${Math.random()}`;
+
+        const config = createBasicConfig(ctx, [custObjD.id], {
+            solvers: [fixAlwaysFailsSolver],
+            apex: { afterMigration: [writeApexScript('after', [insertAccount(afterName)])] }
+        });
+
+        // 'h' quits at the update the org refuses, which is as much a way out of the
+        // run as quitting at an insert - and the after scripts have to close it out
+        // just the same.
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config, ['y', 'h']);
+
+        assertRecordMigrated(parsedOutput, custObjD.id);
+        expect(capturedOutput.some(event => event.type === 'running_apex_script')).toBe(true);
+        expect(await ctx.targetOrg.findIds('Account', { Name: afterName })).toHaveLength(1);
+        // the report is written once, before the scripts that close the run out
+        expect(capturedOutput.filter(event => event.type === 'finished')).toHaveLength(1);
     })
 ];

@@ -91,6 +91,24 @@ describe('event-formatter', () => {
             expect(format(event)).toBe('Enter input:');
         });
 
+        it('should format update_error without the match option', () => {
+            const event = new IOEvent('input', 'update_error', { recordId: '001', error: 'field is locked' });
+            const result = format(event);
+            expect(result).toContain('recordId: 001');
+            expect(result).toContain('field is locked');
+            expect(result).toContain('updating record');
+            expect(result).toContain('Fix (f)');
+            expect(result).toContain('Skip (s)');
+            // an update is addressed to the record the run created - there is
+            // nothing to match away to
+            expect(result).not.toContain('Match (m)');
+        });
+
+        it('should format update_error without recordId as generic input prompt', () => {
+            const event = new IOEvent('input', 'update_error', {});
+            expect(format(event)).toBe('Enter input:');
+        });
+
         it('should format error', () => {
             const event = new IOEvent('output', 'error', { message: 'something went wrong' });
             expect(format(event)).toBe('error: something went wrong');

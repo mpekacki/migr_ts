@@ -92,24 +92,9 @@ function formatEvent(event: IOEvent): string {
             return `error: ${d?.message}`;
         case 'hidden_error':
             return `error on record ${d?.recordId} hidden by solver`;
-        case 'insert_error': {
-            if (d?.recordId && d?.error) {
-                const options = [
-                    { key: 'f', label: 'Fix' },
-                    { key: 'r', label: 'Retry' },
-                    { key: 'ra', label: 'Retry All' },
-                    { key: 'm', label: 'Match' },
-                    { key: 'h', label: 'Save and Exit' },
-                    { key: 'a', label: 'Add Solver' },
-                    { key: 's', label: 'Skip' }
-                ];
-                const optionsList = options.map(opt => `- ${opt.label} (${opt.key})`).join('\n');
-                // show the whole error payload (status code, fields, ...) - the same data the activity log shows
-                const errorText = d.errorDetails ? JSON.stringify(d.errorDetails) : d.error;
-                return `recordId: ${d.recordId}, no solver found for error: ${errorText}\nPlease provide input to resolve the error:\nAvailable options:\n${optionsList}:`;
-            }
-            return `Enter input:`;
-        }
+        case 'insert_error':
+        case 'update_error':
+            return formatErrorPrompt(event.type === 'insert_error', d);
         case 'invalid_json':
             return 'invalid JSON, please try again';
         case 'invalid_regex':
@@ -180,6 +165,36 @@ function formatBytes(bytes: number | undefined): string {
         unit++;
     }
     return `${value.toFixed(1)} ${units[unit]}`;
+}
+
+/**
+ * The question put to the user when no solver could deal with an error, and the
+ * answers it takes. The update pass offers one option fewer: there is no record
+ * to match away to - the record an update is addressed to is the one the run
+ * created - so `m` is not among its answers either.
+ *
+ * Without a record and a message the event is one of the follow-up questions
+ * (the fields to change, the solver to add), which speak for themselves in the
+ * line that asked them.
+ */
+function formatErrorPrompt(isInsert: boolean, d: any): string {
+    if (!d?.recordId || !d?.error) {
+        return `Enter input:`;
+    }
+    const options = [
+        { key: 'f', label: 'Fix' },
+        { key: 'r', label: 'Retry' },
+        { key: 'ra', label: 'Retry All' },
+        ...(isInsert ? [{ key: 'm', label: 'Match' }] : []),
+        { key: 'h', label: 'Save and Exit' },
+        { key: 'a', label: 'Add Solver' },
+        { key: 's', label: 'Skip' }
+    ];
+    const optionsList = options.map(opt => `- ${opt.label} (${opt.key})`).join('\n');
+    // show the whole error payload (status code, fields, ...) - the same data the activity log shows
+    const errorText = d.errorDetails ? JSON.stringify(d.errorDetails) : d.error;
+    const phase = isInsert ? 'inserting' : 'updating';
+    return `recordId: ${d.recordId}, no solver found for error ${phase} record: ${errorText}\nPlease provide input to resolve the error:\nAvailable options:\n${optionsList}:`;
 }
 
 /** IO serializes errors to plain objects; anything else is printed as it comes. */
