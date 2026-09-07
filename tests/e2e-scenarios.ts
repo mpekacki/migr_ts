@@ -1674,6 +1674,27 @@ export const e2eScenarios: E2EScenario[] = [
         assertRecordMigrated(parsedOutput, contract2.id);
     }),
 
+    scenario('skip confirmation only - an unhandled error still goes to the user', async (ctx: E2EContext) => {
+        const { account, contract, contract2 } = await createFullAutoTestRecords(ctx.sourceOrg);
+
+        const config = createBasicConfig(ctx, [contract.id, contract2.id], {
+            fullAuto: {
+                skipConfirmation: true
+            }
+        });
+
+        // The single queued input answers the error prompt. Had the run asked to
+        // confirm, it would have eaten the 's' and aborted instead.
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config, ['s']);
+
+        expect(capturedOutput.some(event => event.type === 'confirm_migration')).toBe(false);
+        expect(capturedOutput.some(event => event.type === 'insert_error')).toBe(true);
+
+        assertRecordMigrated(parsedOutput, account.id);
+        assertRecordSkipped(parsedOutput, contract.id);
+        assertRecordMigrated(parsedOutput, contract2.id);
+    }),
+
     scenario('anonymize email fields', async (ctx: E2EContext) => {
         const uniqueEmail = `test+${Date.now()}@example.com`;
         const contact = await createRecord(ctx.sourceOrg, 'Contact', { FirstName: 'John', LastName: 'Doe', Email: uniqueEmail });
