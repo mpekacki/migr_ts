@@ -1,6 +1,7 @@
 export type IOEventType =
     | 'confirm_migration'
     | 'insert_error'
+    | 'update_error'
     | 'creating_record'
     | 'updating_record'
     | 'using_solver'

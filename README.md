@@ -124,11 +124,12 @@ Worth knowing:
 - A `match` or `extract_column` whose pattern captures nothing leaves the error unresolved rather than silently succeeding.
 - An error no solver matches goes to the user, who can write a solver on the spot (`addSolver`) and have it applied to every later error in the run. Under `fullAuto.enabled` it falls to `unhandledErrorBehavior` instead; `fullAuto.skipConfirmation` on its own still brings it to the user.
 
-**Solvers apply to the update pass too.** The values a `fix` solver stashed, and the lookups cleared to break a circular dependency, are written back after every record is inserted, and that write can be rejected in its own right — a validation rule that fires on update, a lookup pointing at a record that never made it, a bad picklist value. Those failures go through the same solvers, and the record is updated again with what the solver changed. Three things differ from the insert pass:
+**Solvers apply to the update pass too.** The values a `fix` solver stashed, and the lookups cleared to break a circular dependency, are written back after every record is inserted, and that write can be rejected in its own right — a validation rule that fires on update, a lookup pointing at a record that never made it, a bad picklist value. Those failures go through the same solvers, and the record is updated again with what the solver changed; what no solver can act on goes to the user, exactly as an insert failure does. Two things differ from the insert pass:
 
-- `match` does nothing here and is passed over — the record is already in the target, and the update is addressed to it — so the error falls to the next matching solver.
-- `fix` has nothing to stash for later: the update pass *is* the later pass, so the solver's value is what the field ends up holding. An error the solver dealt with is still reported, marked as fixed and naming the solver, so the run says the source value did not survive.
-- Nothing is put to the user here: the update pass is the last thing a run does, so an error no solver matches is reported and the run finishes.
+- `match` does nothing here and is passed over — the record is already in the target, and the update is addressed to it — so the error falls to the next matching solver. It is not among the answers the user is offered either.
+- `fix` has nothing to stash for later: the update pass *is* the later pass, so the value — the solver's, or the one the user types — is what the field ends up holding. An error a solver dealt with is still reported, marked as fixed and naming the solver, so the run says the source value did not survive.
+
+Everything else is as it is during the insert: `r`/`ra` send the record again, `a` writes a solver on the spot, `s` leaves the record's update undone and reports it, and `h` writes the report and stops the run — with the `afterMigration` scripts still closing it out.
 
 ### Files
 
