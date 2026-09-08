@@ -42,6 +42,25 @@ function appliesInPhase(solver: SolverType, phase: SolverPhase): boolean {
 }
 
 /**
+ * Whether a solver is addressed to an error. `message` is a regular expression
+ * tested against the error text, so it matches anywhere in it - unless the
+ * solver says `exact`, which compares the two literally and in full instead.
+ */
+export function solverMatches(solver: SolverType, message: string): boolean {
+    return solver.exact ? solver.message === message : new RegExp(solver.message).test(message);
+}
+
+/**
+ * The first capture group of a solver's pattern, which is how `match` and
+ * `extract_column` read the value they act on out of the error. An exact solver
+ * has no pattern to capture with, so it never yields one - validateSolverOptions
+ * rejects that combination before the run starts.
+ */
+function capturedFromMessage(solver: SolverType, message: string): string | undefined {
+    return solver.exact ? undefined : new RegExp(solver.message).exec(message)?.[1];
+}
+
+/**
  * Applies the first configured solver whose pattern matches a save error and
  * that this record has not already been through, mutating the record where the
  * solver says to. An unmatched error comes back unfixed for the caller to hand
@@ -61,7 +80,7 @@ export function applySolver(
         ctx.io.skippingPreviouslyUsedSolvers(ctx.usedSolvers);
     }
     const solver = ctx.solvers.find(solver => appliesInPhase(solver, ctx.phase)
-        && new RegExp(solver.message).test(e.message)
+        && solverMatches(solver, e.message)
         && !ctx.usedSolvers.includes(solver));
     if (!solver) {
         return result;
@@ -82,7 +101,7 @@ export function applySolver(
         ctx.io.skippingRecordUsingSolver(recordId, solver.message);
         result.errorFixed = true;
     } else if (solver.action === 'match') {
-        const matchId = new RegExp(solver.message).exec(e.message)?.[1];
+        const matchId = capturedFromMessage(solver, e.message);
         if (matchId) {
             // Only report the match once it actually produced an id - a solver
             // whose pattern captures nothing leaves the error unresolved.
@@ -96,7 +115,7 @@ export function applySolver(
         if (solver.fromFields) {
             columnName = e.fields[0];
         } else {
-            columnName = new RegExp(solver.message).exec(e.message)?.[1];
+            columnName = capturedFromMessage(solver, e.message);
         }
         if (columnName) {
             ctx.setField(columnName, solver.replaceWith);
@@ -129,7 +148,7 @@ export async function handleJsforceError(
 ): Promise<{ success: boolean, result?: any, shouldSkip?: boolean }> {
     const errorMessage = error.message || error.toString();
 
-    const solver = solvers?.find(solver => new RegExp(solver.message).test(errorMessage));
+    const solver = solvers?.find(solver => solverMatches(solver, errorMessage));
 
     if (solver) {
         if (solver.action === 'retry') {

@@ -80,13 +80,20 @@ Two cheap ways to rehearse: set `targetSqlite` (or `targetFile`) to export the r
 
 A solver is an error handler: a pattern, and what to do when an error matches it. Every solver has a `message` and an `action`.
 
-**`message` is a regular expression**, not a literal — it is compiled with `new RegExp(...)` and tested against the error text Salesforce returned. That means `.`, `(`, `[` and friends carry their regex meaning and need escaping if you want them literally. Solvers are tried in the order they are listed and the first match wins, so put the specific ones first.
+**`message` is a regular expression by default**, not a literal — it is compiled with `new RegExp(...)` and tested against the error text Salesforce returned. That means `.`, `(`, `[` and friends carry their regex meaning and need escaping if you want them literally. Solvers are tried in the order they are listed and the first match wins, so put the specific ones first.
+
+**`exact: true` turns that off**: the solver then matches only an error whose text is `message` in full, compared literally. Use it for the validation rule message that is full of punctuation, and for the message that is a prefix of another one the solver must not act on.
 
 ```json
 {
   "solvers": [
     {
       "message": "FIELD_CUSTOM_VALIDATION_EXCEPTION",
+      "action": "skip"
+    },
+    {
+      "message": "Choose a valid contract status and save your changes. Ask your admin for details.",
+      "exact": true,
       "action": "skip"
     },
     {
@@ -121,7 +128,7 @@ Worth knowing:
 
 - Any solver may set `hideError: true`, which keeps the matched error out of the output and out of the error count entirely. Useful for the expected, uninteresting failures — see the `DUPLICATE_VALUE` note under [Files](#files).
 - Each solver is used **once per record per message per pass**, so a solver that does not actually resolve an error cannot spin on it. If a record produces the same error again, the next matching solver is tried instead.
-- A `match` or `extract_column` whose pattern captures nothing leaves the error unresolved rather than silently succeeding.
+- A `match` or `extract_column` whose pattern captures nothing leaves the error unresolved rather than silently succeeding. An exact solver has no pattern and so can never capture: `exact` is refused on `match`, and on `extract_column` unless it takes the column from `fromFields`.
 - An error no solver matches goes to the user, who can write a solver on the spot (`addSolver`) and have it applied to every later error in the run. Under `fullAuto.enabled` it falls to `unhandledErrorBehavior` instead; `fullAuto.skipConfirmation` on its own still brings it to the user.
 
 **Solvers apply to the update pass too.** The values a `fix` solver stashed, and the lookups cleared to break a circular dependency, are written back after every record is inserted, and that write can be rejected in its own right — a validation rule that fires on update, a lookup pointing at a record that never made it, a bad picklist value. Those failures go through the same solvers, and the record is updated again with what the solver changed; what no solver can act on goes to the user, exactly as an insert failure does. Two things differ from the insert pass:

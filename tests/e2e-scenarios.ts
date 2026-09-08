@@ -313,6 +313,35 @@ export const e2eScenarios: E2EScenario[] = [
         ]);
     }),
 
+    scenario('migrate record with error - solver matching the message exactly', async (ctx: E2EContext) => {
+        const account = await createAccount(ctx.sourceOrg, 'Cloud Kicks');
+        const contract = await createActivatedContract(ctx.sourceOrg, account.id);
+
+        const config = createBasicConfig(ctx, [contract.id], {
+            solvers: [
+                // A prefix of the error, which as a pattern would match it and
+                // skip the record - as an exact solver it is simply not the message.
+                {
+                    action: 'skip',
+                    message: CONTRACT_STATUS_ERROR.split('.')[0],
+                    exact: true
+                },
+                { ...fixContractStatusSolver, exact: true }
+            ]
+        });
+
+        const { parsedOutput } = await ctx.runMigration(config);
+
+        const newContractId = assertRecordMigrated(parsedOutput, contract.id);
+
+        const newContract = await retrieveRecord(ctx.targetOrg, 'Contract', newContractId);
+        expect(newContract.Status).toEqual('Activated');
+
+        assertFixedErrors(parsedOutput, contract.id, [
+            { action: 'fix', changeFields: [{ field: 'Status', value: 'Draft' }] }
+        ]);
+    }),
+
     scenario('hide error from output if solver says so', async (ctx: E2EContext) => {
         const account = await createAccount(ctx.sourceOrg, 'Cloud Kicks');
         const contract = await createActivatedContract(ctx.sourceOrg, account.id);
