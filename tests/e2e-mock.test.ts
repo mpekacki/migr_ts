@@ -22,6 +22,7 @@ import IOEvent from '../ioevent';
 import { getFormatter } from '../ui/event-formatter';
 import {
     E2EContext,
+    FUSSY_FIELD_ERROR,
     InputHandler,
     MigrationRunResult,
     TestOrg,
@@ -263,6 +264,19 @@ test('a misspelled unhandled error behavior fails the run instead of quietly mea
     await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
         fullAuto: { enabled: true, unhandledErrorBehavior: 'saveAndExist' }
     }))).rejects.toThrow(/fullAuto\.unhandledErrorBehavior must be 'skip' or 'saveAndExit', not 'saveAndExist'/);
+});
+
+test('an exact solver that could never capture fails the run instead of matching errors and resolving none', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        solvers: [{ action: 'match', message: 'duplicates value on record', exact: true }]
+    }))).rejects.toThrow(/'match' solver reads the id it matches on out of a capture group/);
+
+    await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        solvers: [{ action: 'extract_column', message: FUSSY_FIELD_ERROR, exact: true, replaceWith: null }]
+    }))).rejects.toThrow(/'extract_column' solver reads the column name out of a capture group/);
 });
 
 // Also a thrown error, and the one way to tell that the export is awaited: writing

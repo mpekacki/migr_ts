@@ -74,6 +74,13 @@ interface Options {
 
 interface Solver {
     message: string;
+    /**
+     * Compare `message` to the whole error text literally instead of compiling it
+     * as a regular expression. For the message that carries regex punctuation of
+     * its own, and for the one that is a prefix of another message the solver
+     * must not act on.
+     */
+    exact?: boolean;
     hideError?: boolean;
 }
 
@@ -149,8 +156,31 @@ function validateFullAutoOptions(options: Options): void {
     }
 }
 
+/**
+ * Rejects a solver that could never act. An exact solver has no pattern, so it
+ * has no capture group either, and reading a value out of one is the whole of
+ * what `match` and `extract_column` do - the exception being an
+ * `extract_column` that takes the column off the error's `fields` instead.
+ * Left alone the combination matches errors and then resolves none of them,
+ * which is worth hearing about before the run rather than in the middle of it.
+ */
+function validateSolverOptions(options: Options): void {
+    for (const solver of options.solvers ?? []) {
+        if (!solver.exact) {
+            continue;
+        }
+        if (solver.action === 'match') {
+            throw new Error(`A 'match' solver reads the id it matches on out of a capture group, so it cannot be exact: '${solver.message}'`);
+        }
+        if (solver.action === 'extract_column' && !solver.fromFields) {
+            throw new Error(`An 'extract_column' solver reads the column name out of a capture group, so it cannot be exact unless it takes the column from the error's fields (fromFields): '${solver.message}'`);
+        }
+    }
+}
+
 export {
     validateFullAutoOptions,
+    validateSolverOptions,
     Options,
     Solver,
     FixSolver,

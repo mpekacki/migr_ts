@@ -7,7 +7,7 @@ import IOEvent from './ioevent';
 import IO, { serializeError, updatedFields } from './io';
 import { preprocessData } from './preprocess-data';
 import { readRecordsFromSqlite, writeRecordsToSqlite } from './sqlite-store';
-import { FixSolver, Options, SolverType, validateFullAutoOptions } from './config';
+import { FixSolver, Options, SolverType, validateFullAutoOptions, validateSolverOptions } from './config';
 import DescribeCache from './describe-cache';
 import FileTransfer from './files';
 import MigrationHistory from './history';
@@ -189,6 +189,7 @@ class MigrationRunner {
         this.isMigrateFromFile = options.sourceFile !== undefined || options.sourceSqlite !== undefined;
         validateApexOptions(options, this.isMigrateToFile);
         validateFullAutoOptions(options);
+        validateSolverOptions(options);
     }
 
     async run(): Promise<void> {
@@ -1018,7 +1019,12 @@ class MigrationRunner {
                     const solverJson = await this.io.askForSolver(phase);
                     try {
                         newSolver = JSON.parse(solverJson);
-                        new RegExp(newSolver.message);
+                        // An exact solver's message is never compiled, so it is
+                        // free to be something that is not a valid pattern - which
+                        // is half of why one would write it exact.
+                        if (!newSolver.exact) {
+                            new RegExp(newSolver.message);
+                        }
                     } catch {
                         newSolver = null;
                         this.io.invalidJson();
