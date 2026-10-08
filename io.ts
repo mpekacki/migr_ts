@@ -136,8 +136,8 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'malformed_id', { recordId, sObjectName }));
     }
 
-    public queryingForRelatedRecords(soql: string) {
-        this.onOutput(this.buildIOEvent('output', 'querying_related_records', { soql }));
+    public queryingForRelatedRecords(soql: string, sObjectName: string, recordId: string, relationships: string[]) {
+        this.onOutput(this.buildIOEvent('output', 'querying_related_records', { soql, sObjectName, recordId, relationships }));
     }
 
     public relatedRecords(relationshipName: string, count: number) {
@@ -183,8 +183,8 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'record_settled', { count }));
     }
 
-    public queryingForExistingRecord(soql: string) {
-        this.onOutput(this.buildIOEvent('output', 'querying_existing_record', { soql }));
+    public queryingForExistingRecord(soql: string, sObjectName: string, recordId: string, conditions: Record<string, unknown>) {
+        this.onOutput(this.buildIOEvent('output', 'querying_existing_record', { soql, sObjectName, recordId, conditions }));
     }
 
     public foundExistingRecord(recordId: string, sObjectName: string) {

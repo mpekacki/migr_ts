@@ -500,7 +500,7 @@ class MigrationRunner {
             selector.include(relationship.name).select('Id').end();
         }
         selector.where(`Id = '${recordId}'`);
-        this.io.queryingForRelatedRecords(await selector.toSOQL());
+        this.io.queryingForRelatedRecords(await selector.toSOQL(), sObjectName, recordId, relationships.map(r => r.name));
         let relsResults: any[] = [];
 
         try {
@@ -709,7 +709,12 @@ class MigrationRunner {
             );
         }
         const selector = this.targetClient!.find(sObjectName, conditions).select('Id');
-        this.io.queryingForExistingRecord('SELECT Id FROM ' + sObjectName + ' WHERE ' + Object.entries(conditions).map(([k, v]) => `${k} = '${v}'`).join(' AND '));
+        this.io.queryingForExistingRecord(
+            'SELECT Id FROM ' + sObjectName + ' WHERE ' + Object.entries(conditions).map(([k, v]) => `${k} = '${v}'`).join(' AND '),
+            sObjectName,
+            recordId,
+            conditions
+        );
         let migratedRecord: any[] = [];
 
         try {

@@ -98,6 +98,31 @@ describe('wrapAnsi', () => {
 });
 
 describe('migration state reducer', () => {
+    it('names the object, record and relationships of a related-records query', () => {
+        const s = initialState();
+        feed(s, 'querying_related_records', {
+            soql: "SELECT Id, (SELECT Id FROM Contacts) FROM Account WHERE Id = '0015g00000QqWxYAAV'",
+            sObjectName: 'Account',
+            recordId: '0015g00000QqWxYAAV',
+            relationships: ['Contacts', 'Opportunities'],
+        });
+        expect(s.phase).toBe('Fetching');
+        expect(s.feed[s.feed.length - 1].text)
+            .toBe('Querying related records of Account 0015g00000QqWxYAAV (Contacts, Opportunities)');
+    });
+
+    it('names the object, record and matcher criteria of an existing-record query', () => {
+        const s = initialState();
+        feed(s, 'querying_existing_record', {
+            soql: "SELECT Id FROM Contact WHERE Email = 'a@b.com' AND AccountId = '0015g00000RrXyZAAV'",
+            sObjectName: 'Contact',
+            recordId: '0035g00000LmNoPAAZ',
+            conditions: { Email: 'a@b.com', AccountId: '0015g00000RrXyZAAV' },
+        });
+        expect(s.feed[s.feed.length - 1].text)
+            .toBe("Querying for existing Contact matching 0035g00000LmNoPAAZ where Email = 'a@b.com' AND AccountId = '0015g00000RrXyZAAV'");
+    });
+
     it('captures source and target from starting_migration', () => {
         const s = initialState();
         feed(s, 'starting_migration', { options: { sourceOrg: 'prod', targetOrg: 'sandbox' } });
