@@ -165,10 +165,12 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
         case 'file_document_unavailable':
             push(state, 'warn', `ContentDocument ${d.documentId} not migrated: version ${d.versionId} never landed`);
             break;
-        case 'querying_related_records':
+        case 'querying_related_records': {
             state.phase = 'Fetching';
-            push(state, 'run', 'Querying related records');
+            const rels = Array.isArray(d.relationships) && d.relationships.length ? ` (${d.relationships.join(', ')})` : '';
+            push(state, 'run', `Querying related records of ${d.sObjectName} ${d.recordId}${rels}`);
             break;
+        }
         case 'related_records':
             if (d.count > 0) push(state, 'sub', `${d.relationshipName}: ${d.count}`, 1);
             break;
@@ -190,9 +192,11 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             // Mid-pass progress: the queue shrank, but the phase is unchanged.
             state.remaining = d.count ?? state.remaining;
             break;
-        case 'querying_existing_record':
-            push(state, 'run', 'Querying for existing record', 1);
+        case 'querying_existing_record': {
+            const criteria = Object.entries(d.conditions ?? {}).map(([k, v]) => `${k} = '${v}'`).join(' AND ');
+            push(state, 'run', `Querying for existing ${d.sObjectName} matching ${d.recordId}${criteria ? ` where ${criteria}` : ''}`, 1);
             break;
+        }
         case 'found_existing_record':
             state.matched++;
             push(state, 'sub', `Matched existing ${d.sObjectName} ${d.recordId}`, 1);
