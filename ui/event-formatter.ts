@@ -1,4 +1,5 @@
 import IOEvent from '../ioevent';
+import { formatLevelCounts } from './tui/state';
 
 function formatEvent(event: IOEvent): string {
     const d = event.data;
@@ -25,8 +26,10 @@ function formatEvent(event: IOEvent): string {
             return `querying for related records: ${d?.soql}`;
         case 'related_records':
             return `related records of ${d?.relationshipName}: ${d?.count}`;
-        case 'fetched_records':
-            return `fetched ${d?.count} records`;
+        case 'fetched_records': {
+            const levels = formatLevelCounts(d?.countsByDepth);
+            return `fetched ${d?.count} records${levels ? ` (${levels})` : ''}`;
+        }
         case 'nothing_to_migrate': {
             const alreadyMigrated: Record<string, number> = d?.alreadyMigrated || {};
             const total = Object.values(alreadyMigrated).reduce((sum, n) => sum + n, 0);

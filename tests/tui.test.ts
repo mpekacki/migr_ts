@@ -272,6 +272,23 @@ describe('migration state reducer', () => {
         expect(s.total).toBe(7);
         feed(s, 'records_so_far', { count: 42 });
         expect(s.total).toBe(42);
+        expect(s.fetchLevels).toBeNull(); // no depth given, nothing to break down
+    });
+
+    it('tracks the records per fetch level until fetching is over', () => {
+        const s = initialState();
+        feed(s, 'starting_migration', { options: { relatedRecordDepthLimit: 3 } });
+        expect(s.depthLimit).toBe(3);
+
+        feed(s, 'records_so_far', { count: 3, depth: 2, countsByDepth: { 1: 3 } });
+        expect(s.fetchLevels).toEqual({ current: 2, counts: { 1: 3 } });
+        // a describe in mid-fetch changes the phase, not the levels
+        feed(s, 'describing_sobject', { sObjectName: 'Contact' });
+        expect(s.fetchLevels).not.toBeNull();
+
+        feed(s, 'fetched_records', { count: 5, countsByDepth: { 1: 3, 2: 2 } });
+        expect(s.fetchLevels).toBeNull();
+        expect(s.feed[s.feed.length - 1].text).toBe('Fetched 5 records (L1 3 · L2 2)');
     });
 
     it('marks done on finished and aborted', () => {
@@ -532,6 +549,46 @@ describe('frame renderer', () => {
         feed(s, 'records_so_far', { count: 17 });
         const frame = stripAnsi(build(s).join('\n'));
         expect(frame).toContain('Records 0/17');
+    });
+
+    it('shows the records per fetch level in place of the counters while fetching', () => {
+        const s = initialState();
+        feed(s, 'starting_migration', { options: { sourceOrg: 'prod', targetOrg: 'sandbox', relatedRecordDepthLimit: 3 } });
+        feed(s, 'records_so_far', { count: 42, depth: 3, countsByDepth: { 1: 3, 2: 17, 3: 22 } });
+        const frame = stripAnsi(build(s, 80).join('\n'));
+        expect(frame).toContain('Fetched 42   L1 3 · L2 17 · L3 22   limit 3');
+        expect(frame).not.toContain('Records');
+    });
+
+    it('shows a fetch level from the moment its wave starts', () => {
+        const s = initialState();
+        feed(s, 'records_so_far', { count: 4, depth: 2, countsByDepth: { 1: 4 } });
+        expect(stripAnsi(build(s, 80).join('\n'))).toContain('Fetched 4   L1 4 · L2 0');
+    });
+
+    it('gives the counters back once fetching is over', () => {
+        const s = initialState();
+        feed(s, 'records_so_far', { count: 20, depth: 2, countsByDepth: { 1: 3, 2: 17 } });
+        feed(s, 'fetched_records', { count: 20, countsByDepth: { 1: 3, 2: 17 } });
+        const frame = stripAnsi(build(s, 80).join('\n'));
+        expect(frame).toContain('Records 0/20');
+        expect(frame).not.toContain('Fetched 20   L1');
+        expect(frame).toContain('Fetched 20 records (L1 3 · L2 17)');
+    });
+
+    it('drops the depth limit, then the shallowest levels, on a narrow terminal', () => {
+        const s = initialState();
+        feed(s, 'starting_migration', { options: { relatedRecordDepthLimit: 9 } });
+        const countsByDepth = { 1: 1, 2: 20, 3: 300, 4: 4000, 5: 5000, 6: 600, 7: 70 };
+        feed(s, 'records_so_far', { count: 9991, depth: 7, countsByDepth });
+
+        const narrow = build(s, 52);
+        for (const line of narrow) expect(visibleLength(line)).toBe(52);
+        const text = stripAnsi(narrow.join('\n'));
+        expect(text).toContain('Fetched 9991   … ');
+        expect(text).toContain('L7 70');      // the level being fetched always stays
+        expect(text).not.toContain('L1 1 ');
+        expect(text).not.toContain('limit 9');
     });
 
     it('shows every outcome counter when they have something to report', () => {

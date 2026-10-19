@@ -25,6 +25,16 @@ describe('event-formatter', () => {
             expect(format(event)).toBe('records so far: 5');
         });
 
+        it('should format fetched_records with the records per fetch level', () => {
+            const event = new IOEvent('output', 'fetched_records', { count: 22, countsByDepth: { 2: 17, 1: 3, 3: 0, 4: 2 } });
+            expect(format(event)).toBe('fetched 22 records (L1 3 · L2 17 · L4 2)');
+        });
+
+        it('should format fetched_records without levels', () => {
+            expect(format(new IOEvent('output', 'fetched_records', { count: 4, countsByDepth: {} }))).toBe('fetched 4 records');
+            expect(format(new IOEvent('output', 'fetched_records', { count: 4 }))).toBe('fetched 4 records');
+        });
+
         it('should format fetching_record with reason', () => {
             const event = new IOEvent('output', 'fetching_record', { recordId: '001', sObjectName: 'Account', reason: 'lookup' });
             expect(format(event)).toBe('fetching record 001 of type Account (via lookup)');

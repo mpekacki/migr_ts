@@ -116,8 +116,8 @@ export function buildFrame(
     const bar = progressBar(pct, Math.min(20, Math.max(8, inner - 28)));
     lines.push(row(`${phaseGlyph} ${phaseLabel} ${bar} ${String(pct).padStart(3)}%`));
 
-    // ── Header: counters ────────────────────────────────────────────────────
-    lines.push(row(counterLine(state, inner)));
+    // ── Header: counters (while fetching, the records per fetch level) ──────
+    lines.push(row(state.fetchLevels ? levelLine(state, inner) : counterLine(state, inner)));
 
     // ── Separator ───────────────────────────────────────────────────────────
     lines.push(border(B.lt, B.rt));
@@ -207,6 +207,41 @@ function counterLine(state: MigrationState, inner: number): string {
     while (visibleLength(line) > inner && optional.some(c => c.count === 0)) {
         const drop = optional.findIndex(c => c.count === 0);
         optional = optional.filter((_, i) => i !== drop);
+        line = join();
+    }
+    return line;
+}
+
+/**
+ * The counters row while fetching runs, when every outcome counter is still zero:
+ * how many records each fetch level has brought in, up to the level being fetched
+ * now - which shows from the moment its wave starts, before it has any records.
+ * On a narrow terminal the depth limit goes first, then the shallowest levels.
+ */
+function levelLine(state: MigrationState, inner: number): string {
+    const { current, counts } = state.fetchLevels!;
+    const fetched = `${ansi.gray('Fetched')} ${ansi.boldOn(String(state.total))}`;
+    let levels: string[] = [];
+    for (let depth = 1; depth <= current; depth++) {
+        const count = String(counts[depth] ?? 0);
+        levels.push(`${ansi.gray(`L${depth}`)} ${depth === current ? ansi.boldOn(count) : count}`);
+    }
+    let limit = state.depthLimit ? ansi.gray(`limit ${state.depthLimit}`) : '';
+    let elided = false;
+    const join = () => [
+        fetched,
+        (elided ? ansi.gray('… ') : '') + levels.join(ansi.gray(' · ')),
+        limit,
+    ].filter(Boolean).join('   ');
+
+    let line = join();
+    while (visibleLength(line) > inner && (limit || levels.length > 1)) {
+        if (limit) {
+            limit = '';
+        } else {
+            levels = levels.slice(1);
+            elided = true;
+        }
         line = join();
     }
     return line;

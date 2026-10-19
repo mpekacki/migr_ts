@@ -116,8 +116,8 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'checking_matchers'));
     }
 
-    public recordsSoFar(count: number) {
-        this.onOutput(this.buildIOEvent('output', 'records_so_far', { count }));
+    public recordsSoFar(count: number, depth?: number, countsByDepth?: Record<number, number>) {
+        this.onOutput(this.buildIOEvent('output', 'records_so_far', { count, depth, countsByDepth }));
     }
 
     public fetchingRecord(recordId: string, sObjectName: string, reason?: string) {
@@ -144,8 +144,8 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'related_records', { relationshipName, count }));
     }
 
-    public fetchedRecords(count: number) {
-        this.onOutput(this.buildIOEvent('output', 'fetched_records', { count }));
+    public fetchedRecords(count: number, countsByDepth?: Record<number, number>) {
+        this.onOutput(this.buildIOEvent('output', 'fetched_records', { count, countsByDepth }));
     }
 
     public nothingToMigrate(alreadyMigrated: Record<string, number>) {
