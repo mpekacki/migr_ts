@@ -288,8 +288,9 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'invalid_input', { input }));
     }
 
-    public lookingForCircularDependencies(requiredLookupFieldsBySObjectType: Record<string, string[]>, records: any[]) {
-        this.onOutput(this.buildIOEvent('output', 'looking_for_circular_dependencies', { requiredLookupFieldsBySObjectType, records }));
+    /** Counts, not the records themselves: the queue can run to tens of thousands, files included. */
+    public lookingForCircularDependencies(requiredLookupFieldsBySObjectType: Record<string, string[]>, records: number, dependencies: number) {
+        this.onOutput(this.buildIOEvent('output', 'looking_for_circular_dependencies', { requiredLookupFieldsBySObjectType, records, dependencies }));
     }
 
     /**
@@ -297,7 +298,7 @@ class IO {
      * while with nothing else to say, so it says where it is instead of leaving
      * the screen on 'looking for circular dependencies' until it is done.
      */
-    public circularDependencyProgress(progress: { pass: number, cleared: number, stage: 'graph' | 'search', done: number, total: number }) {
+    public circularDependencyProgress(progress: { stage: 'scc' | 'break', cleared: number, done: number, total: number }) {
         this.onOutput(this.buildIOEvent('output', 'circular_dependency_progress', { ...progress }));
     }
 
