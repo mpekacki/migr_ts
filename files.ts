@@ -176,6 +176,16 @@ export default class FileTransfer {
         return this.heldDocuments.has(documentId);
     }
 
+    /**
+     * The version a held document waits for, as the field that would name it -
+     * the document's queued copy has no such field, so without this the
+     * circular-dependency scan cannot see what the document is waiting on.
+     */
+    heldFor(documentId: string): { field: string, versionId: string } | undefined {
+        const versionId = this.heldDocuments.get(documentId);
+        return versionId ? { field: LATEST_VERSION_FIELD, versionId } : undefined;
+    }
+
     release(documentId: string): void {
         this.heldDocuments.delete(documentId);
     }

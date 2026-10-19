@@ -1,7 +1,7 @@
 import { Field, Schema, SObjectRecord } from 'jsforce';
 import { SalesforceClient, DefaultSalesforceClient, AuthConfig, SaveError, SaveResult } from './salesforce-client';
 import * as fs from 'fs';
-import { scanForCircularDependency } from './circular';
+import { breakCircularDependencies, CircularRecord, Dependency } from './circular';
 import Chunks from './chunks';
 import IOEvent from './ioevent';
 import IO, { serializeError, updatedFields } from './io';
@@ -715,34 +715,46 @@ class MigrationRunner {
 
     private async resolveRecordReferences(recordId: string, record: SObjectRecord<Schema, string>, sObjectName: string): Promise<boolean> {
         let recordReady = true;
-        const blobFields = await this.files.blobFields(sObjectName);
-        for (const field of Object.keys(record)) {
-            if (blobFields.includes(field)) {
-                continue;
-            }
-            if (record[field]) {
-                const matches = String(record[field])?.match(ID_REGEX);
-                if (matches) {
-                    for (const match of matches) {
-                        try {
-                            await this.describes.getSObjectType(match);
-                        } catch {
-                            // do nothing, it was some random string
-                            continue;
-                        }
-                        if (!this.history.has(match) && match in this.recordsByIds && match !== recordId) {
-                            recordReady = false;
-                        } else if (this.history.has(match)) {
-                            record[field] = record[field].replace(match, this.history.get(match));
-                            if (record[field] === '') {
-                                delete record[field];
-                            }
-                        }
-                    }
+        await this.forEachReferencedId(record, sObjectName, (field, id) => {
+            if (this.isWaitingOn(recordId, id)) {
+                recordReady = false;
+            } else if (this.history.has(id)) {
+                record[field] = record[field].replace(id, this.history.get(id));
+                if (record[field] === '') {
+                    delete record[field];
                 }
             }
-        }
+        });
         return recordReady;
+    }
+
+    /**
+     * Every id a record's fields name - lookups and ids written into text alike,
+     * blob fields aside (megabytes of base64 turn up runs that only look like
+     * ids). The insert loop and the circular-dependency scan both read a record's
+     * references through here, so they cannot disagree about what it waits on.
+     */
+    private async forEachReferencedId(record: SObjectRecord<Schema, string>, sObjectName: string, visit: (field: string, id: string) => void): Promise<void> {
+        const blobFields = await this.files.blobFields(sObjectName);
+        for (const field of Object.keys(record)) {
+            if (blobFields.includes(field) || !record[field]) {
+                continue;
+            }
+            for (const match of String(record[field]).match(ID_REGEX) ?? []) {
+                try {
+                    await this.describes.getSObjectType(match);
+                } catch {
+                    // do nothing, it was some random string
+                    continue;
+                }
+                visit(field, match);
+            }
+        }
+    }
+
+    /** Whether `id` names a record still in the queue, which `recordId` then has to wait for. */
+    private isWaitingOn(recordId: string, id: string): boolean {
+        return !this.history.has(id) && id in this.recordsByIds && id !== recordId;
     }
 
     private async findExistingRecordId(recordId: string, sObjectName: string): Promise<{ migratedRecordId: string, skipRecord: boolean }> {
@@ -1121,29 +1133,36 @@ class MigrationRunner {
 
     private async resolveCircularDependencies(): Promise<void> {
         const requiredLookupFieldsBySObjectType: Record<string, string[]> = {};
-        const allLookupFieldsBySObjectType: Record<string, string[]> = {};
         const uniqueSObjectTypes = [...new Set(Object.values(this.recordsByIds).map(record => record.attributes!.type))];
-        const describePromises: Promise<void>[] = [];
-        for (const sObjectName of uniqueSObjectTypes) {
-            describePromises.push((async () => {
-                requiredLookupFieldsBySObjectType[sObjectName] = (await this.describes.getSObject(sObjectName)).fields
-                    .filter(field => field.type === 'reference' && !field.nillable && field.createable)
-                    .map(field => field.name);
-                allLookupFieldsBySObjectType[sObjectName] = (await this.describes.getSObject(sObjectName)).fields
-                    .filter(field => field.type === 'reference' && field.createable)
-                    .map(field => field.name);
-            })());
-        }
-        await Promise.all(describePromises);
-        const records = Object.values(this.recordsByIds).map(record => ({
-            attributes: record.attributes,
-            ...Object.fromEntries(Object.entries(record)),
-            Id: Object.keys(this.recordsByIds).find(key => this.recordsByIds[key] === record)
+        await Promise.all(uniqueSObjectTypes.map(async sObjectName => {
+            requiredLookupFieldsBySObjectType[sObjectName] = (await this.describes.getSObject(sObjectName)).fields
+                .filter(field => field.type === 'reference' && !field.nillable && field.createable)
+                .map(field => field.name);
         }));
-        this.io.lookingForCircularDependencies(requiredLookupFieldsBySObjectType, records);
-        const toClear = await scanForCircularDependency(
+
+        // The graph is what the insert loop waits on, read off the same references.
+        const records: CircularRecord[] = [];
+        const dependencies: Dependency[] = [];
+        for (const [recordId, record] of Object.entries(this.recordsByIds)) {
+            const sObjectType = record.attributes!.type;
+            const requiredLookups = requiredLookupFieldsBySObjectType[sObjectType];
+            records.push({ id: recordId, sObjectType, stashed: recordId in this.toUpdateLater });
+            await this.forEachReferencedId(record, sObjectType, (field, id) => {
+                if (this.isWaitingOn(recordId, id)) {
+                    dependencies.push({ recordId, field, dependsOn: id, required: requiredLookups.includes(field) });
+                }
+            });
+            const held = this.files.heldFor(recordId);
+            if (held && held.versionId in this.recordsByIds) {
+                // Not a field that can be cleared: the document only exists once its version does.
+                dependencies.push({ recordId, field: held.field, dependsOn: held.versionId, required: true });
+            }
+        }
+
+        this.io.lookingForCircularDependencies(requiredLookupFieldsBySObjectType, records.length, dependencies.length);
+        const { toClear, unbreakable } = await breakCircularDependencies(
             records,
-            requiredLookupFieldsBySObjectType,
+            dependencies,
             progress => this.io.circularDependencyProgress(progress)
         );
         if (toClear.length > 0) {
@@ -1151,6 +1170,12 @@ class MigrationRunner {
             for (const clear of toClear) {
                 this.setFieldWithLaterUpdate(clear.recordId, this.recordsByIds[clear.recordId], clear.field, '');
             }
+        } else if (unbreakable.length > 0) {
+            const cycles = unbreakable.map(cycle => cycle.map(step => `${step.recordId}.${step.field} -> ${step.dependsOn}`).join(', '));
+            throw new Error(
+                'Cannot find record ready to migrate: these records wait on each other through required lookups only, '
+                + `which cannot be left empty for later: ${cycles.join('; ')}`
+            );
         } else {
             throw new Error('Cannot find record ready to migrate. Circular dependency?');
         }

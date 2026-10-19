@@ -268,9 +268,9 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             push(state, 'run', 'Resolving circular dependencies');
             break;
         case 'circular_dependency_progress': {
-            const doing = d.stage === 'graph' ? 'mapping' : 'searching';
+            const doing = d.stage === 'scc' ? 'mapping' : 'breaking cycles';
             const deferred = d.cleared > 0 ? `, ${d.cleared} deferred` : '';
-            updateRun(state, `Resolving circular dependencies - pass ${d.pass}${deferred} (${doing} ${d.done}/${d.total})`);
+            updateRun(state, `Resolving circular dependencies${deferred} (${doing} ${d.done}/${d.total})`);
             break;
         }
         case 'found_circular_dependency': {

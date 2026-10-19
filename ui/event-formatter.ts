@@ -105,9 +105,9 @@ function formatEvent(event: IOEvent): string {
         case 'invalid_input':
             return `invalid input: ${d?.input}`;
         case 'looking_for_circular_dependencies':
-            return `looking for circular dependencies with ${JSON.stringify(d?.requiredLookupFieldsBySObjectType)} for records ${JSON.stringify(d?.records)}`;
+            return `looking for circular dependencies among ${d?.records} records (${d?.dependencies} references) with required lookups ${JSON.stringify(d?.requiredLookupFieldsBySObjectType)}`;
         case 'circular_dependency_progress':
-            return `looking for circular dependencies: pass ${d?.pass}, ${d?.cleared} deferred so far, ${d?.stage === 'graph' ? 'mapping' : 'searching'} ${d?.done}/${d?.total} records`;
+            return `looking for circular dependencies: ${d?.cleared} deferred so far, ${d?.stage === 'scc' ? 'mapping' : 'breaking cycles,'} ${d?.done}/${d?.total} records`;
         case 'found_circular_dependency':
             return `found circular dependency: ${JSON.stringify(d?.toClear)}`;
         case 'record_no_id':
