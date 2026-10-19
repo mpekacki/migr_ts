@@ -361,6 +361,11 @@ class MigrationRunner {
         }
     }
 
+    /** How many requests fetching and matching each keep in flight at once. */
+    private get maxConcurrency(): number {
+        return this.options.maxConcurrentRequests || 10;
+    }
+
     private async fetchRecords(recordIdsToFetch: string[]): Promise<void> {
         let depth = 0;
         while (recordIdsToFetch.length > 0) {
@@ -369,8 +374,7 @@ class MigrationRunner {
 
             const fetchFunctions = recordIdsToFetch.map(recordId => () => this.fetchRecordAndDiscoverIds(recordId, depth));
 
-            const maxConcurrency = this.options.maxConcurrentRequests || 10;
-            const rawResults = await executeConcurrently(fetchFunctions, maxConcurrency);
+            const rawResults = await executeConcurrently(fetchFunctions, this.maxConcurrency);
 
             const newIdsArrays: string[][] = [];
             for (let i = 0; i < rawResults.length; i++) {
@@ -615,30 +619,65 @@ class MigrationRunner {
         return true;
     }
 
+    /**
+     * Matcher queries run in parallel, so the pass goes in waves: find every record
+     * whose references are all settled, query the target for all of them at once,
+     * then settle the matches in queue order. A match can be what a record further
+     * on was waiting for - its lookup, or the value a matcher of its own compares
+     * against - so a wave that settled anything is followed by another. One that
+     * only queued inserts is the last: nothing becomes ready until those land.
+     */
     private async collectRecordsReadyToInsert(): Promise<{ toInsert: Record<string, SObjectRecord<Schema, string>>, anyRecordProcessed: boolean }> {
         let anyRecordProcessed = false;
         const toInsert: Record<string, SObjectRecord<Schema, string>> = {};
-        for (const recordId of Object.keys(this.recordsByIds)) {
-            const record = this.recordsByIds[recordId];
-            const sObjectName = await this.describes.getSObjectType(recordId, record);
-            if (this.files.isHeld(recordId)) {
-                // A ContentDocument has no createable field: it comes into being with
-                // the ContentVersion carrying its file. It waits here until that
-                // version lands and hands over the id the target gave the document.
-                continue;
+        let settledAny = true;
+        while (settledAny) {
+            settledAny = false;
+            const ready: { recordId: string, sObjectName: string }[] = [];
+            for (const recordId of Object.keys(this.recordsByIds)) {
+                if (recordId in toInsert) {
+                    continue;
+                }
+                const record = this.recordsByIds[recordId];
+                const sObjectName = await this.describes.getSObjectType(recordId, record);
+                if (this.files.isHeld(recordId)) {
+                    // A ContentDocument has no createable field: it comes into being with
+                    // the ContentVersion carrying its file. It waits here until that
+                    // version lands and hands over the id the target gave the document.
+                    continue;
+                }
+                if (await this.resolveRecordReferences(recordId, record, sObjectName)) {
+                    ready.push({ recordId, sObjectName });
+                }
             }
-            const recordReady = await this.resolveRecordReferences(recordId, record, sObjectName);
-            if (recordReady) {
-                anyRecordProcessed = true;
-                const { migratedRecordId, skipRecord } = await this.findExistingRecordId(recordId, sObjectName);
+            if (ready.length === 0) {
+                break;
+            }
+            anyRecordProcessed = true;
+
+            const outcomes = await executeConcurrently(
+                ready.map(({ recordId, sObjectName }) => () => this.findExistingRecordId(recordId, sObjectName)),
+                this.maxConcurrency
+            );
+            // executeConcurrently hands back a failure in place of its result; a
+            // matcher that cannot be evaluated still has to stop the run.
+            const failure = outcomes.find(outcome => outcome instanceof Error);
+            if (failure) {
+                throw failure;
+            }
+
+            for (let i = 0; i < ready.length; i++) {
+                const { recordId, sObjectName } = ready[i];
+                const { migratedRecordId, skipRecord } = outcomes[i];
                 const isObjectCreatable = (await this.describes.getSObject(sObjectName)).createable;
                 if (!migratedRecordId && !skipRecord && isObjectCreatable) {
                     toInsert[recordId] = {
-                        attributes: record.attributes,
-                        ...record
+                        attributes: this.recordsByIds[recordId].attributes,
+                        ...this.recordsByIds[recordId]
                     } as SObjectRecord<Schema, string>;
                 } else {
                     this.setNewRecordId(recordId, migratedRecordId!);
+                    settledAny = true;
                 }
             }
         }

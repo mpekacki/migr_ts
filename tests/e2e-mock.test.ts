@@ -294,6 +294,35 @@ test('an export that cannot be written fails the run', async () => {
     })).rejects.toThrow(/unable to open database file/);
 });
 
+// Lives here rather than in the shared scenarios because it reads concurrency off
+// the order of IO events, which only an in-process run delivers without delay. A
+// query job announces its query before its first await, so with three in flight
+// three Account queries go out before the first of them comes back.
+test('matcher queries run maxConcurrentRequests at a time', async () => {
+    const ctx = createContext();
+    const names = Array.from({ length: 15 }, (_, i) => `Parallel-${i}`);
+    const sourceIds = (await ctx.sourceOrg.createAll('Account', names.map(Name => ({ Name })))).map(result => result.id);
+    const targetIds = (await ctx.targetOrg.createAll('Account', names.map(Name => ({ Name })))).map(result => result.id);
+
+    const { parsedOutput, capturedOutput } = await ctx.runMigration(createBasicConfig(ctx, sourceIds, {
+        matchers: [...defaultMatchers, {
+            sObjectType: 'Account',
+            fieldMappings: [{ sourceField: 'Name', targetField: 'Name' }],
+            whenMissing: 'create'
+        }],
+        maxConcurrentRequests: 3
+    }));
+
+    const accountEvents = capturedOutput.filter(event => event.data?.sObjectName === 'Account'
+        && (event.type === 'querying_existing_record' || event.type === 'found_existing_record'));
+    const firstFound = accountEvents.findIndex(event => event.type === 'found_existing_record');
+    expect(firstFound).toBe(3);
+    expect(accountEvents.filter(event => event.type === 'found_existing_record')).toHaveLength(15);
+
+    expect(targetOrg.records('Account')).toHaveLength(15);
+    expect(sourceIds.map(id => parsedOutput.allMigratedRecords[id])).toEqual(targetIds);
+});
+
 // Lives here rather than in the shared scenarios because the failure it asserts on
 // is a thrown error: in this context that surfaces as a rejected main(), while the
 // live CLI turns it into a FATAL line and a non-zero exit code.
