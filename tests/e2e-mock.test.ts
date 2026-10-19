@@ -294,6 +294,35 @@ test('an export that cannot be written fails the run', async () => {
     })).rejects.toThrow(/unable to open database file/);
 });
 
+// Lives here rather than in the shared scenarios because it reads the progress
+// events themselves, which the live suite only sees as formatted log lines.
+test('fetch progress counts the records per fetch depth', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+    await ctx.sourceOrg.createAll('Contact', [
+        { LastName: 'Depth-1', AccountId: account.id },
+        { LastName: 'Depth-2', AccountId: account.id }
+    ]);
+
+    const { capturedOutput } = await ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        relationships: { Account: [{ name: 'Contacts' }] },
+        relatedRecordDepthLimit: 2
+    }));
+
+    const progress = capturedOutput.filter(event => event.type === 'records_so_far');
+    for (const event of progress) {
+        const counted = Object.values(event.data.countsByDepth as Record<number, number>).reduce((sum, n) => sum + n, 0);
+        expect(counted).toBe(event.data.count);
+    }
+    // 1: the Account. 2: its two Contacts and the User owning it. 3: that User's
+    // Profile - past the limit, which stops relationship queries, not lookups.
+    const last = progress[progress.length - 1].data;
+    expect(last.countsByDepth).toEqual({ 1: 1, 2: 3, 3: 1 });
+
+    const fetched = capturedOutput.find(event => event.type === 'fetched_records')!.data;
+    expect(fetched.countsByDepth).toEqual(last.countsByDepth);
+});
+
 // Lives here rather than in the shared scenarios because it reads concurrency off
 // the order of IO events, which only an in-process run delivers without delay. A
 // query job announces its query before its first await, so with three in flight

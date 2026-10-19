@@ -173,6 +173,13 @@ class MigrationRunner {
     private toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
     /** Fetched records dropped by removeAlreadyMigratedRecords, counted per SObject type. */
     private alreadyMigratedCountsBySObjectType: Record<string, number> = {};
+    /**
+     * The fetch wave each record arrived in - the same depth relatedRecordDepthLimit
+     * is checked against, 1 being the configured recordIds.
+     */
+    private fetchDepthsByIds: Record<string, number> = {};
+    /** fetchDepthsByIds counted per depth, kept as it fills so progress is cheap to report. */
+    private recordCountsByDepth: Record<number, number> = {};
 
     constructor(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>, clientFactory?: ClientFactory) {
         this.options = options;
@@ -209,7 +216,7 @@ class MigrationRunner {
         this.removeAlreadyMigratedRecords();
         this.applyPreprocessing();
 
-        this.io.fetchedRecords(Object.keys(this.recordsByIds).length);
+        this.io.fetchedRecords(Object.keys(this.recordsByIds).length, this.countRemainingRecordsByDepth());
 
         // With nothing left to migrate there is nothing to confirm - say why and
         // carry on to the reporting the run would have produced anyway. Two flags
@@ -370,7 +377,7 @@ class MigrationRunner {
         let depth = 0;
         while (recordIdsToFetch.length > 0) {
             depth++;
-            this.io.recordsSoFar(Object.keys(this.recordsByIds).length);
+            this.io.recordsSoFar(Object.keys(this.recordsByIds).length, depth, { ...this.recordCountsByDepth });
 
             const fetchFunctions = recordIdsToFetch.map(recordId => () => this.fetchRecordAndDiscoverIds(recordId, depth));
 
@@ -414,7 +421,13 @@ class MigrationRunner {
         // reads the record.
         await this.files.download(recordId, sObjectName, record, recordFields);
         this.recordsByIds[recordId] = record;
-        this.io.recordsSoFar(Object.keys(this.recordsByIds).length);
+        // The first wave is not de-duplicated, so a record id listed twice in the
+        // config is fetched twice - and must still be counted once.
+        if (!(recordId in this.fetchDepthsByIds)) {
+            this.fetchDepthsByIds[recordId] = depth;
+            this.recordCountsByDepth[depth] = (this.recordCountsByDepth[depth] || 0) + 1;
+        }
+        this.io.recordsSoFar(Object.keys(this.recordsByIds).length, depth, { ...this.recordCountsByDepth });
         const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
         if (lookupFields.length > 0) {
             this.lookupFieldsBySObjectType[sObjectName] = lookupFields;
@@ -555,6 +568,22 @@ class MigrationRunner {
                 delete this.recordsByIds[recordId];
             }
         }
+    }
+
+    /**
+     * The records left to migrate, counted per fetch depth. Taken after
+     * removeAlreadyMigratedRecords so it adds up to the fetched count reported
+     * with it; records loaded from a file were never fetched and count nowhere.
+     */
+    private countRemainingRecordsByDepth(): Record<number, number> {
+        const counts: Record<number, number> = {};
+        for (const recordId of Object.keys(this.recordsByIds)) {
+            const depth = this.fetchDepthsByIds[recordId];
+            if (depth !== undefined) {
+                counts[depth] = (counts[depth] || 0) + 1;
+            }
+        }
+        return counts;
     }
 
     private applyPreprocessing(): void {

@@ -54,6 +54,14 @@ export interface MigrationState {
      * screen then comes from an earlier run, so it must not read as "created".
      */
     alreadyMigrated: Record<string, number> | null;
+    /** The configured relatedRecordDepthLimit, shown next to the fetch levels. */
+    depthLimit: number | null;
+    /**
+     * Records fetched so far per fetch depth (1 = the configured recordIds), and
+     * the depth being fetched now. Set only while fetching runs - its own field
+     * rather than the phase, which a describe in mid-fetch switches away.
+     */
+    fetchLevels: { current: number; counts: Record<number, number> } | null;
     done: boolean;
 }
 
@@ -74,6 +82,8 @@ export function initialState(): MigrationState {
         overlay: null,
         finalSummary: null,
         alreadyMigrated: null,
+        depthLimit: null,
+        fetchLevels: null,
         done: false,
     };
 }
@@ -119,6 +129,7 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             const o = d.options ?? {};
             state.source = o.sourceSqlite ?? o.sourceFile ?? o.sourceOrgUrl ?? o.sourceOrg ?? '—';
             state.target = o.targetSqlite ?? o.targetFile ?? o.targetOrgUrl ?? o.targetOrg ?? '—';
+            state.depthLimit = o.relatedRecordDepthLimit || null;
             state.phase = 'Starting';
             push(state, 'run', 'Starting migration');
             break;
@@ -134,6 +145,9 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
         case 'records_so_far':
             state.phase = 'Fetching';
             state.total = d.count ?? state.total;
+            if (typeof d.depth === 'number') {
+                state.fetchLevels = { current: d.depth, counts: d.countsByDepth ?? {} };
+            }
             break;
         case 'fetching_record': {
             state.phase = 'Fetching';
@@ -174,10 +188,13 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
         case 'related_records':
             if (d.count > 0) push(state, 'sub', `${d.relationshipName}: ${d.count}`, 1);
             break;
-        case 'fetched_records':
+        case 'fetched_records': {
             state.total = d.count ?? state.total;
-            push(state, 'ok', `Fetched ${d.count} records`);
+            state.fetchLevels = null;
+            const levels = formatLevelCounts(d.countsByDepth);
+            push(state, 'ok', `Fetched ${d.count} records${levels ? ` (${levels})` : ''}`);
             break;
+        }
         case 'nothing_to_migrate': {
             state.alreadyMigrated = d.alreadyMigrated ?? {};
             const counts = formatTypeCounts(d.alreadyMigrated);
@@ -486,6 +503,17 @@ function formatAttemptedValues(fields?: Record<string, any>): string {
 function firstLine(text?: string): string {
     if (typeof text !== 'string') return '';
     return text.split('\n')[0].trim();
+}
+
+/** `L1 3 · L2 17` - the levels that hold any records, shallowest first. */
+export function formatLevelCounts(countsByDepth?: Record<number, number>): string {
+    if (!countsByDepth) return '';
+    return Object.entries(countsByDepth)
+        .map(([depth, count]) => [Number(depth), count] as const)
+        .filter(([, count]) => count > 0)
+        .sort(([a], [b]) => a - b)
+        .map(([depth, count]) => `L${depth} ${count}`)
+        .join(' · ');
 }
 
 export function formatTypeCounts(recordCountsByType?: Record<string, number>): string {
