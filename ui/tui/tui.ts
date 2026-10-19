@@ -6,6 +6,12 @@ import { bodyHeightFor, buildFrame, inputCursorCol, maxFeedScrollOffset, maxScro
 import { applyEvent, initialState, MigrationState, pushConsole } from './state';
 
 const SPINNER_MS = 90;
+/**
+ * The least time between two repaints driven by events. A settled chunk sends a
+ * few events per record, and painting each one made a 200-record chunk paint
+ * hundreds of frames nobody could see.
+ */
+const FRAME_MS = 33;
 
 type ConsoleMethod = 'log' | 'info' | 'warn' | 'error' | 'debug';
 
@@ -20,6 +26,8 @@ export class TuiUI implements UI {
     private prev: string[] = [];
     private spinnerFrame = 0;
     private spinnerTimer: NodeJS.Timeout | null = null;
+    private lastFrame = 0;
+    private frameTimer: NodeJS.Timeout | null = null;
     private promptActive = false;
     private awaitingExit = false;
     private closed = false;
@@ -51,8 +59,12 @@ export class TuiUI implements UI {
     display(event: IOEvent): string {
         const logLine = this.formatter(event);
         applyEvent(this.state, event);
-        if (this.state.done) this.stopSpinner();
-        this.redraw();
+        if (this.state.done) {
+            this.stopSpinner();
+            this.redraw();
+        } else {
+            this.requestRedraw();
+        }
         return logLine;
     }
 
@@ -216,8 +228,31 @@ export class TuiUI implements UI {
         };
     }
 
+    /**
+     * Repaint for an event: now if the last frame is at least FRAME_MS old,
+     * otherwise once that much time has passed, taking in every event since.
+     */
+    private requestRedraw(): void {
+        if (this.frameTimer) return;
+        const wait = this.lastFrame + FRAME_MS - Date.now();
+        if (wait <= 0) {
+            this.redraw();
+            return;
+        }
+        this.frameTimer = setTimeout(() => {
+            this.frameTimer = null;
+            this.redraw();
+        }, wait);
+        this.frameTimer.unref?.();
+    }
+
     private redraw(): void {
+        if (this.frameTimer) {
+            clearTimeout(this.frameTimer);
+            this.frameTimer = null;
+        }
         if (this.closed) return;
+        this.lastFrame = Date.now();
         const { width, height } = this.dims();
         const frame = buildFrame(
             this.state, this.spinnerFrame, width, height,

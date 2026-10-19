@@ -1,6 +1,6 @@
 import IOEvent, { IOEventType } from '../ioevent';
 import { applyEvent, buildFinalSummary, initialState, MigrationState, pushConsole } from '../ui/tui/state';
-import { buildFrame, maxScrollOffset, maxFeedScrollOffset, bodyHeightFor, inputCursorCol } from '../ui/tui/render';
+import { buildFrame, maxScrollOffset, maxFeedScrollOffset, bodyHeightFor, inputCursorCol, renderFeed, renderFeedTail } from '../ui/tui/render';
 import { padTo, stripAnsi, truncate, visibleLength, wrapAnsi, takeLastColumns, ansi } from '../ui/tui/ansi';
 import { VERSION } from '../version';
 
@@ -728,6 +728,19 @@ describe('frame renderer', () => {
         const inputLine = frame[frame.length - 2];
         expect(inputLine).toContain('>');
         expect(inputLine).toContain('yes');
+    });
+
+    it('renders the tail of the feed exactly as the end of the whole feed', () => {
+        const s = initialState();
+        for (let i = 0; i < 500; i++) {
+            // Every seventh entry wraps onto several lines.
+            pushConsole(s, i % 7 === 0 ? `entry ${i} ${'wrapping text '.repeat(12)}` : `entry ${i}`);
+        }
+        const whole = renderFeed(s.feed, 0, false, 40);
+        for (const count of [1, 5, 18, 60]) {
+            expect(renderFeedTail(s.feed, 0, false, 40, count)).toEqual(whole.slice(-count));
+        }
+        expect(renderFeedTail(s.feed.slice(0, 2), 0, false, 40, 18)).toEqual(renderFeed(s.feed.slice(0, 2), 0, false, 40));
     });
 });
 
