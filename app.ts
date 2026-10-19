@@ -159,6 +159,12 @@ class MigrationRunner {
     private history!: MigrationHistory;
 
     private recordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
+    /**
+     * How many records recordsByIds holds, kept as it changes: the count is
+     * reported each time a record settles, and counting the keys every time
+     * costs as much as the queue is long.
+     */
+    private queuedCount = 0;
     private fetchedRecordsByIds: Record<string, SObjectRecord<Schema, string>> = {};
     private lookupFieldsBySObjectType: Record<string, Field[]> = {};
     /**
@@ -183,7 +189,14 @@ class MigrationRunner {
 
     constructor(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>, clientFactory?: ClientFactory) {
         this.options = options;
-        this.io = new IO(onOutput, onInput);
+        // A prompt can wait indefinitely, and a user who closes the app there has
+        // to find every record settled so far in the history file - so the file
+        // is brought up to date before the question goes out, not left to the
+        // write the history would otherwise make a moment later.
+        this.io = new IO(onOutput, question => {
+            this.history?.flush();
+            return onInput(question);
+        });
         this.chunking = new Chunks(CHUNKING_OBJECTS, 200, 10, MAX_CHUNK_BYTES);
         this.clientFactory = clientFactory;
         if (options.sourceFile !== undefined && options.sourceSqlite !== undefined) {
@@ -200,6 +213,17 @@ class MigrationRunner {
     }
 
     async run(): Promise<void> {
+        try {
+            await this.runMigration();
+        } finally {
+            // A run that throws has still settled whatever it inserted before it
+            // did, and the history file is what keeps a re-run from inserting it
+            // again.
+            this.history?.flush();
+        }
+    }
+
+    private async runMigration(): Promise<void> {
         this.io.startingMigration(this.options);
 
         await this.initializeClients();
@@ -354,7 +378,7 @@ class MigrationRunner {
             // An export carries the fields naming the file's body and document in the
             // source org; the target has to make its own.
             this.files.dropSourceOnlyFields(sObjectName, recordForMigration);
-            this.recordsByIds[recordId] = recordForMigration;
+            this.queueRecord(recordId, recordForMigration);
         }
 
         // Only once every record is loaded, so a document is held back only when the
@@ -420,7 +444,7 @@ class MigrationRunner {
         // file, so the contents are downloaded into both maps before anything else
         // reads the record.
         await this.files.download(recordId, sObjectName, record, recordFields);
-        this.recordsByIds[recordId] = record;
+        this.queueRecord(recordId, record);
         // The first wave is not de-duplicated, so a record id listed twice in the
         // config is fetched twice - and must still be counted once.
         if (!(recordId in this.fetchDepthsByIds)) {
@@ -565,8 +589,22 @@ class MigrationRunner {
                 if (sObjectType) {
                     this.alreadyMigratedCountsBySObjectType[sObjectType] = (this.alreadyMigratedCountsBySObjectType[sObjectType] || 0) + 1;
                 }
-                delete this.recordsByIds[recordId];
+                this.dequeueRecord(recordId);
             }
+        }
+    }
+
+    private queueRecord(recordId: string, record: SObjectRecord<Schema, string>): void {
+        if (!(recordId in this.recordsByIds)) {
+            this.queuedCount++;
+        }
+        this.recordsByIds[recordId] = record;
+    }
+
+    private dequeueRecord(recordId: string): void {
+        if (recordId in this.recordsByIds) {
+            this.queuedCount--;
+            delete this.recordsByIds[recordId];
         }
     }
 
@@ -839,8 +877,9 @@ class MigrationRunner {
         for (const chunk of chunks) {
             this.io.savingRecords(chunk);
             const savedRecords = await this.insertChunk(chunk);
+            const chunkRecordIds = Object.keys(chunk);
             for (let i = 0; i < savedRecords.length; i++) {
-                const recordId = Object.keys(chunk)[i];
+                const recordId = chunkRecordIds[i];
                 const record = this.recordsByIds[recordId];
                 const result = await this.processSaveResult(recordId, record, savedRecords[i], retryAll);
                 if (result.exit) {
@@ -1506,11 +1545,11 @@ class MigrationRunner {
 
     private setNewRecordId(recordId: string, newRecordId: string): void {
         this.history.settle(recordId, newRecordId);
-        delete this.recordsByIds[recordId];
+        this.dequeueRecord(recordId);
         delete this.fetchedRecordsByIds[recordId];
         // Every record leaves the queue through here - created, matched, skipped
         // or given up on - so this is the one place the remaining count is exact.
-        this.io.recordSettled(Object.keys(this.recordsByIds).length);
+        this.io.recordSettled(this.queuedCount);
     }
 
     private setFieldWithLaterUpdate(recordId: string, record: SObjectRecord<Schema, string>, field: string, value: string | null): void {

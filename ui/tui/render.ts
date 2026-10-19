@@ -142,8 +142,7 @@ export function buildFrame(
         visible = bodyLines.slice(winStart, winStart + bodyHeight);
     } else {
         // The activity feed auto-follows: always show the latest lines.
-        const bodyLines = renderFeed(state.feed, spinnerFrame, state.done, inner);
-        visible = bodyLines.slice(-bodyHeight);
+        visible = renderFeedTail(state.feed, spinnerFrame, state.done, inner, bodyHeight);
     }
     for (let i = 0; i < bodyHeight; i++) {
         lines.push(row(visible[i] ?? ''));
@@ -252,20 +251,37 @@ function levelLine(state: MigrationState, inner: number): string {
  * continuation lines that hang under the first line's text, so long error
  * messages stay fully readable instead of running off the right edge.
  */
-function renderFeed(feed: FeedEntry[], spinnerFrame: number, done: boolean, inner: number): string[] {
+export function renderFeed(feed: FeedEntry[], spinnerFrame: number, done: boolean, inner: number): string[] {
     const out: string[] = [];
-    for (const e of feed) {
-        const indent = '  '.repeat(e.indent);
-        const g = glyphStr(e.glyph, spinnerFrame, done);
-        const text = e.glyph === 'sub' || e.glyph === 'info' ? ansi.gray(e.text) : e.text;
-        const head = `${indent}${g} `;            // glyph is always one column
-        const hang = ' '.repeat(indent.length + 2);
-        const textWidth = Math.max(1, inner - visibleLength(head));
-        const wrapped = wrapAnsi(text, textWidth);
-        out.push(head + wrapped[0]);
-        for (let i = 1; i < wrapped.length; i++) out.push(hang + wrapped[i]);
-    }
+    for (const e of feed) out.push(...renderEntry(e, spinnerFrame, done, inner));
     return out;
+}
+
+/**
+ * The last `count` lines renderFeed would produce, rendering only the entries
+ * that reach them. The feed is repainted on every frame and holds up to
+ * FEED_CAP entries, of which only the last screenful is ever shown.
+ */
+export function renderFeedTail(feed: FeedEntry[], spinnerFrame: number, done: boolean, inner: number, count: number): string[] {
+    const blocks: string[][] = [];
+    let lines = 0;
+    for (let i = feed.length - 1; i >= 0 && lines < count; i--) {
+        const block = renderEntry(feed[i], spinnerFrame, done, inner);
+        blocks.push(block);
+        lines += block.length;
+    }
+    return blocks.reverse().flat().slice(-count);
+}
+
+function renderEntry(e: FeedEntry, spinnerFrame: number, done: boolean, inner: number): string[] {
+    const indent = '  '.repeat(e.indent);
+    const g = glyphStr(e.glyph, spinnerFrame, done);
+    const text = e.glyph === 'sub' || e.glyph === 'info' ? ansi.gray(e.text) : e.text;
+    const head = `${indent}${g} `;            // glyph is always one column
+    const hang = ' '.repeat(indent.length + 2);
+    const textWidth = Math.max(1, inner - visibleLength(head));
+    const wrapped = wrapAnsi(text, textWidth);
+    return [head + wrapped[0], ...wrapped.slice(1).map(line => hang + line)];
 }
 
 /** Wrap lines wider than `inner` so nothing is silently cut horizontally. */
