@@ -1182,6 +1182,48 @@ export const e2eScenarios: E2EScenario[] = [
         expect(newCaseC.Description).toBe(`And I like ${newCaseBId}`);
     }),
 
+    scenario('circular relationship through a required lookup', async (ctx: E2EContext) => {
+        // The contract waits on account1 through AccountId, which is required;
+        // both accounts wait on the contract through Description, and account1
+        // on account2 through ParentId. Left to how the records sit in the
+        // cycle, the contract - one field, on as many cycles as account1 - is
+        // the one to free, so only a required lookup being honoured as one
+        // makes the scan free account1 instead.
+        const account1 = await createAccount(ctx.sourceOrg);
+        const account2 = await createAccount(ctx.sourceOrg);
+        const contract = await createContract(ctx.sourceOrg, account1.id);
+        await ctx.sourceOrg.update('Account', { Id: account1.id, ParentId: account2.id, Description: `Contract: ${contract.id}` });
+        await ctx.sourceOrg.update('Account', { Id: account2.id, Description: `Contract: ${contract.id}` });
+
+        const config = createBasicConfig(ctx, [account1.id, account2.id, contract.id]);
+
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config);
+
+        const cleared = capturedOutput
+            .filter(event => event.type === 'found_circular_dependency')
+            .flatMap(event => event.data?.toClear ?? []);
+        expect(cleared).toEqual(expect.arrayContaining([
+            { recordId: account1.id, field: 'Description' },
+            { recordId: account1.id, field: 'ParentId' }
+        ]));
+        expect(cleared.filter((clear: any) => clear.recordId === contract.id)).toEqual([]);
+
+        const newAccount1Id = assertRecordMigrated(parsedOutput, account1.id);
+        const newAccount2Id = assertRecordMigrated(parsedOutput, account2.id);
+        const newContractId = assertRecordMigrated(parsedOutput, contract.id);
+
+        const newContract = await retrieveRecord(ctx.targetOrg, 'Contract', newContractId);
+        expect(newContract.AccountId).toBe(newAccount1Id);
+
+        // What was cleared on account1 is put back by the update pass.
+        const newAccount1 = await retrieveRecord(ctx.targetOrg, 'Account', newAccount1Id);
+        expect(newAccount1.ParentId).toBe(newAccount2Id);
+        expect(newAccount1.Description).toBe(`Contract: ${newContractId}`);
+
+        const newAccount2 = await retrieveRecord(ctx.targetOrg, 'Account', newAccount2Id);
+        expect(newAccount2.Description).toBe(`Contract: ${newContractId}`);
+    }),
+
     scenario('migrate a file', async (ctx: E2EContext) => {
         const file = await createFile(ctx.sourceOrg, 'Test Document', 'Hello World');
 
