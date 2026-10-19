@@ -64,7 +64,7 @@ Two cheap ways to rehearse: set `targetSqlite` (or `targetFile`) to export the r
 | `matchers` | How to identify records that already exist in the target org. `whenMissing` (`create` or `skip`) controls what happens when no match is found; omitting it behaves like `create` |
 | `solvers` | Automatic error handlers — see [Solvers](#solvers) |
 | `relationships` | Child relationships to fetch explicitly (e.g. `Account` → `Contacts`) |
-| `maxConcurrentRequests` | API request parallelism (default: 10) |
+| `maxConcurrentRequests` | How many records are fetched from the source, and matched against the target, at once (default: 10) |
 | `historyFilePath` | Where to keep the resume history. Names either the file itself or a directory to put it in (end it with a separator to mean a directory). Defaults to `{targetOrg}__history.json` in the working directory |
 | `fullAuto.enabled` | Run without any interactive prompt. Implies `fullAuto.skipConfirmation` |
 | `fullAuto.skipConfirmation` | Skip only the confirmation prompt — an error no solver handles still goes to the user. For a run whose record set you already trust but whose errors you still want to see |
