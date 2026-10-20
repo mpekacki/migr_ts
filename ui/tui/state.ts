@@ -1,5 +1,7 @@
 import IOEvent from '../../ioevent';
+import { describePathByType } from '../../record-paths';
 import { ansi } from './ansi';
+import { indexRecords, RecordIndex } from './records-view';
 
 export type Phase =
     | 'Starting'
@@ -62,6 +64,8 @@ export interface MigrationState {
      * rather than the phase, which a describe in mid-fetch switches away.
      */
     fetchLevels: { current: number; counts: Record<number, number> } | null;
+    /** Every record the run retrieved, set once fetching is over - what the records view browses. */
+    retrieved: RecordIndex | null;
     done: boolean;
 }
 
@@ -84,6 +88,7 @@ export function initialState(): MigrationState {
         alreadyMigrated: null,
         depthLimit: null,
         fetchLevels: null,
+        retrieved: null,
         done: false,
     };
 }
@@ -151,8 +156,8 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             break;
         case 'fetching_record': {
             state.phase = 'Fetching';
-            const via = d.reason ? ` (via ${d.reason})` : '';
-            push(state, 'run', `Fetching ${d.sObjectName} ${d.recordId}${via}`);
+            const path = Array.isArray(d.path) ? describePathByType(d.path) : '';
+            push(state, 'run', `Fetching ${d.sObjectName} ${d.recordId}${path ? ` via ${path}` : ''}`);
             break;
         }
         case 'record_not_found':
@@ -193,6 +198,13 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             state.fetchLevels = null;
             const levels = formatLevelCounts(d.countsByDepth);
             push(state, 'ok', `Fetched ${d.count} records${levels ? ` (${levels})` : ''}`);
+            break;
+        }
+        case 'retrieved_records': {
+            state.retrieved = indexRecords(Array.isArray(d.records) ? d.records : [], d.fromFile === true);
+            if (state.retrieved.byId.size > 0) {
+                push(state, 'info', 'Press Tab to browse the retrieved records and how each one was reached');
+            }
             break;
         }
         case 'nothing_to_migrate': {

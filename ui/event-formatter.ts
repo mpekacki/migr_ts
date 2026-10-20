@@ -1,4 +1,5 @@
 import IOEvent from '../ioevent';
+import { describePathWithIds } from '../record-paths';
 import { formatLevelCounts } from './tui/state';
 
 function formatEvent(event: IOEvent): string {
@@ -13,8 +14,8 @@ function formatEvent(event: IOEvent): string {
         case 'records_so_far':
             return `records so far: ${d?.count}`;
         case 'fetching_record': {
-            const reasonText = d?.reason ? ` (via ${d.reason})` : '';
-            return `fetching record ${d?.recordId} of type ${d?.sObjectName}${reasonText}`;
+            const via = Array.isArray(d?.path) ? describePathWithIds(d.path) : '';
+            return `fetching record ${d?.recordId} of type ${d?.sObjectName}${via ? ` via ${via}` : ''}`;
         }
         case 'record_not_found':
             return `record ${d?.recordId} of type ${d?.sObjectName} does not exist in the source org`;
@@ -29,6 +30,16 @@ function formatEvent(event: IOEvent): string {
         case 'fetched_records': {
             const levels = formatLevelCounts(d?.countsByDepth);
             return `fetched ${d?.count} records${levels ? ` (${levels})` : ''}`;
+        }
+        case 'retrieved_records': {
+            // How each record was reached is in its own fetching line; this one only
+            // closes the list off.
+            const counts: Record<string, number> = {};
+            for (const record of d?.records ?? []) {
+                counts[record.sObjectType] = (counts[record.sObjectType] || 0) + 1;
+            }
+            const total = (d?.records ?? []).length;
+            return `retrieved ${total} records${total > 0 ? `: ${formatTypeCounts(counts)}` : ''}`;
         }
         case 'nothing_to_migrate': {
             const alreadyMigrated: Record<string, number> = d?.alreadyMigrated || {};
@@ -222,7 +233,7 @@ function formatConfirmMigration(d: any): string {
 
     // Collect SObject type counts (top-level numeric properties)
     const typeCounts: Record<string, number> = {};
-    const reservedKeys = ['recordReasons', 'matchers', 'source', 'target', 'alreadyMigrated'];
+    const reservedKeys = ['matchers', 'source', 'target', 'alreadyMigrated'];
     for (const key of Object.keys(d || {})) {
         if (!reservedKeys.includes(key) && typeof d[key] === 'number') {
             typeCounts[key] = d[key];
@@ -259,16 +270,6 @@ function formatConfirmMigration(d: any): string {
         const maxCountLen = Math.max(...alreadyMigratedEntries.map(([, v]) => String(v).length));
         for (const [type, count] of alreadyMigratedEntries) {
             lines.push(`  ${type.padEnd(maxTypeLen)}  ${String(count).padStart(maxCountLen)}`);
-        }
-        lines.push('');
-    }
-
-    // Record reasons
-    if (d?.recordReasons && Object.keys(d.recordReasons).length > 0) {
-        lines.push('Reasons:');
-        for (const [reason, typeMap] of Object.entries(d.recordReasons) as [string, Record<string, number>][]) {
-            const parts = Object.entries(typeMap).map(([type, count]) => `${count} ${type}`).join(', ');
-            lines.push(`  ${reason}: ${parts}`);
         }
         lines.push('');
     }

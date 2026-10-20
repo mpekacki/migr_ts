@@ -1,6 +1,7 @@
 import IOEvent, { IOEventType } from '../ioevent';
 import { applyEvent, buildFinalSummary, initialState, MigrationState, pushConsole } from '../ui/tui/state';
-import { buildFrame, maxScrollOffset, maxFeedScrollOffset, bodyHeightFor, inputCursorCol, renderFeed, renderFeedTail } from '../ui/tui/render';
+import { buildFrame, maxScrollOffset, maxFeedScrollOffset, bodyHeightFor, inputCursorCol, nextView, renderFeed, renderFeedTail } from '../ui/tui/render';
+import { initialRecordsView } from '../ui/tui/records-view';
 import { padTo, stripAnsi, truncate, visibleLength, wrapAnsi, takeLastColumns, ansi } from '../ui/tui/ansi';
 import { VERSION } from '../version';
 
@@ -788,6 +789,89 @@ describe('scrollable overlay', () => {
     });
 });
 
+describe('retrieved records', () => {
+    const records = [
+        { id: '0015g00000QqWxYAAV', sObjectType: 'Account', label: 'Cloud Kicks' },
+        { id: '0035g00000LmNoPAAZ', sObjectType: 'Contact', label: 'Jane Doe', origin: { from: '0015g00000QqWxYAAV', kind: 'child', name: 'Contacts' } },
+    ];
+
+    it('shows the whole path a record was fetched through in the feed, by type', () => {
+        const s = initialState();
+        feed(s, 'fetching_record', {
+            sObjectName: 'Case',
+            recordId: '5005g00000AbCdEAAV',
+            path: [
+                { id: '001A', sObjectType: 'Account' },
+                { id: '003B', sObjectType: 'Contact', via: { kind: 'child', name: 'Contacts' } },
+                { id: '003C', sObjectType: 'Contact', via: { kind: 'lookup', name: 'ReportsToId' } },
+                { id: '5005g00000AbCdEAAV', sObjectType: 'Case', via: { kind: 'child', name: 'Cases' } },
+            ],
+        });
+        expect(s.feed[s.feed.length - 1].text)
+            .toBe('Fetching Case 5005g00000AbCdEAAV via Account.Contacts[] › Contact.ReportsToId › Contact.Cases[]');
+    });
+
+    it('keeps the records and says how to browse them', () => {
+        const s = initialState();
+        feed(s, 'retrieved_records', { records, fromFile: false });
+        expect(s.retrieved!.byId.size).toBe(2);
+        expect(s.feed[s.feed.length - 1].text).toContain('Press Tab to browse the retrieved records');
+    });
+
+    it('goes round the views with Tab, records first', () => {
+        expect(nextView('main', true, true)).toBe('records');
+        expect(nextView('records', true, true)).toBe('feed');
+        expect(nextView('feed', true, true)).toBe('main');
+        // while the migration runs there is no overlay over the feed
+        expect(nextView('main', false, true)).toBe('records');
+        expect(nextView('records', false, true)).toBe('main');
+        // before the records arrive it is the same toggle as ever
+        expect(nextView('main', true, false)).toBe('feed');
+        expect(nextView('main', false, false)).toBe('main');
+    });
+
+    it('shows the records view in place of the question, and advertises it', () => {
+        const s = initialState();
+        feed(s, 'retrieved_records', { records, fromFile: false });
+        s.overlay = ['Do you want to continue? (y/n)'];
+        const view = initialRecordsView();
+
+        const question = stripAnsi(buildFrame(s, 0, 80, 24, true, false, '', 0, 'main', view).join('\n'));
+        expect(question).toContain('Tab: records');
+
+        const browsing = buildFrame(s, 0, 80, 24, true, false, 'y', 0, 'records', view);
+        const text = stripAnsi(browsing.join('\n'));
+        expect(text).not.toContain('Do you want to continue?');
+        expect(text).toContain('2 retrieved records');
+        expect(text).toContain('Tab: activity log');
+        expect(text).toContain('Esc: question');
+        // the answer typed so far stays where it was
+        expect(stripAnsi(browsing[browsing.length - 2])).toContain('> y');
+        for (const line of browsing) expect(visibleLength(line)).toBe(80);
+    });
+
+    it('can be browsed while the migration runs', () => {
+        const s = initialState();
+        feed(s, 'retrieved_records', { records, fromFile: false });
+        const view = initialRecordsView();
+        expect(stripAnsi(buildFrame(s, 0, 80, 24, false, false, '', 0, 'main', view).join('\n'))).toContain('Tab: records');
+        const text = stripAnsi(buildFrame(s, 0, 80, 24, false, false, '', 0, 'records', view).join('\n'));
+        expect(text).toContain('▸ Account');
+        expect(text).toContain('Esc: activity log');
+    });
+
+    it('does not offer to exit from the records view, where every key is its own', () => {
+        const s = initialState();
+        feed(s, 'retrieved_records', { records, fromFile: false });
+        feed(s, 'finished', JSON.stringify({ requestedRecords: { '0015g00000QqWxYAAV': '0015g00000RrXyZAAV' } }));
+        const view = initialRecordsView();
+        const text = stripAnsi(buildFrame(s, 0, 80, 24, false, true, '', 0, 'records', view).join('\n'));
+        expect(text).not.toContain('Press any key to exit');
+        expect(text).toContain('Esc to go back, then any key to exit');
+        expect(text).toContain('Esc: summary');
+    });
+});
+
 describe('feed view during a prompt', () => {
     function promptedState(): MigrationState {
         const s = initialState();
@@ -802,7 +886,7 @@ describe('feed view during a prompt', () => {
         expect(question).toContain('Do you want to continue?');
         expect(question).not.toContain('Fetched 3 records');
 
-        const feedView = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0, true).join('\n'));
+        const feedView = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0, 'feed').join('\n'));
         expect(feedView).toContain('Fetched 3 records');
         expect(feedView).not.toContain('Do you want to continue?');
     });
@@ -812,7 +896,7 @@ describe('feed view during a prompt', () => {
         const question = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0).join('\n'));
         expect(question).toContain('Tab: activity log');
 
-        const feedView = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0, true).join('\n'));
+        const feedView = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0, 'feed').join('\n'));
         expect(feedView).toContain('Tab: question');
     });
 
@@ -825,11 +909,11 @@ describe('feed view during a prompt', () => {
         const max = maxFeedScrollOffset(s.feed, 60, 22);
         expect(max).toBe(40 - bodyHeightFor(22));
 
-        const bottom = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', max, true).join('\n'));
+        const bottom = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', max, 'feed').join('\n'));
         expect(bottom).toContain('id40');
         expect(bottom).not.toContain('id1 '); // earliest line scrolled off
 
-        const top = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0, true).join('\n'));
+        const top = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', 0, 'feed').join('\n'));
         expect(top).toContain('id1 ');
         expect(top).not.toContain('id40');
     });
@@ -848,9 +932,9 @@ describe('feed view during a prompt', () => {
 
         // Scrolled fully down, the last entry's tail is on screen and nothing
         // scrolls past the end.
-        const bottom = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', max, true).join('\n'));
+        const bottom = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', max, 'feed').join('\n'));
         expect(bottom).toContain('detail');
-        const past = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', max + 50, true).join('\n'));
+        const past = stripAnsi(buildFrame(s, 0, 60, 22, true, false, '', max + 50, 'feed').join('\n'));
         expect(past).toBe(bottom);
     });
 });

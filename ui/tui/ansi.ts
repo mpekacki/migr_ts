@@ -18,6 +18,7 @@ export const ansi = {
     gray: (s: string) => `${ESC}90m${s}${ESC}39m`,
     boldOn: (s: string) => `${ESC}1m${s}${ESC}22m`,
     dimOn: (s: string) => `${ESC}2m${s}${ESC}22m`,
+    inverse: (s: string) => `${ESC}7m${s}${ESC}27m`,
 };
 
 // Screen control

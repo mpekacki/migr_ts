@@ -13,6 +13,7 @@ import FileTransfer from './files';
 import MigrationHistory from './history';
 import { applySolver, handleJsforceError as solveJsforceError, SolverPhase } from './solvers';
 import ApexScripts, { validateApexOptions } from './apex';
+import { OriginKind, PathStep, RecordOrigin, RetrievedRecord, recordLabel, tracePath } from './record-paths';
 
 export interface ClientFactory {
     createSourceClient(orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined): Promise<SalesforceClient>;
@@ -91,6 +92,13 @@ const MAX_CHUNK_BYTES = 30 * 1024 * 1024;
  * time, which would otherwise keep the run going round forever.
  */
 const MAX_UPDATE_ATTEMPTS = 10;
+
+/** A record id a fetched record led to, and the field or relationship it led there through. */
+interface Discovery {
+    id: string;
+    kind: OriginKind;
+    name: string;
+}
 
 /**
  * The update pass's counterpart to setFieldWithLaterUpdate: there is no later
@@ -175,7 +183,11 @@ class MigrationRunner {
      * trying to set and not just that it failed.
      */
     private errors: Record<string, { message: string, fixed: boolean, solver?: SolverType, phase: 'insert' | 'update', fields?: Record<string, any> }[]> = {};
-    private recordAddedReasons: Record<string, string> = {};
+    /**
+     * How each fetched record was reached, keyed by its id - see record-paths.ts.
+     * A requested record has none, so following these back always ends at one.
+     */
+    private origins: Record<string, RecordOrigin> = {};
     private toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
     /** Fetched records dropped by removeAlreadyMigratedRecords, counted per SObject type. */
     private alreadyMigratedCountsBySObjectType: Record<string, number> = {};
@@ -241,6 +253,7 @@ class MigrationRunner {
         this.applyPreprocessing();
 
         this.io.fetchedRecords(Object.keys(this.recordsByIds).length, this.countRemainingRecordsByDepth());
+        this.io.retrievedRecords(this.listRetrievedRecords(), this.isMigrateFromFile);
 
         // With nothing left to migrate there is nothing to confirm - say why and
         // carry on to the reporting the run would have produced anyway. Two flags
@@ -285,10 +298,9 @@ class MigrationRunner {
             }
             await this.runAfterScripts();
         } else {
-            // Awaited like every other way out of run(): the export writes its file
-            // before the first await, but the report that says what it wrote comes
-            // after it, and a write that fails has to reach main()'s error handling
-            // rather than escape as an unhandled rejection.
+            // Awaited like every other way out of run(): a write that fails has to
+            // reach main()'s error handling rather than escape as an unhandled
+            // rejection.
             await this.migrateToFile();
         }
     }
@@ -398,6 +410,7 @@ class MigrationRunner {
     }
 
     private async fetchRecords(recordIdsToFetch: string[]): Promise<void> {
+        const requested = new Set(recordIdsToFetch);
         let depth = 0;
         while (recordIdsToFetch.length > 0) {
             depth++;
@@ -407,28 +420,66 @@ class MigrationRunner {
 
             const rawResults = await executeConcurrently(fetchFunctions, this.maxConcurrency);
 
-            const newIdsArrays: string[][] = [];
+            const newRecordIdsToFetch = new Set<string>();
             for (let i = 0; i < rawResults.length; i++) {
                 const result = rawResults[i];
                 if (result instanceof Error) {
                     this.io.error(`Error fetching record ${recordIdsToFetch[i]}: ${result.message}`);
-                    newIdsArrays.push([]);
-                } else {
-                    newIdsArrays.push(result);
+                    continue;
+                }
+                for (const discovery of result) {
+                    if (discovery.id in this.fetchedRecordsByIds) {
+                        continue;
+                    }
+                    // The first record to lead to one is the one its path goes
+                    // through. Waves go shallowest first, so that is a shortest path,
+                    // and reading the results in the order the wave asked for them -
+                    // rather than as the fetches happen to finish - keeps it the same
+                    // from one run to the next.
+                    if (!(discovery.id in this.origins) && !requested.has(discovery.id)) {
+                        this.origins[discovery.id] = { from: recordIdsToFetch[i], kind: discovery.kind, name: discovery.name };
+                    }
+                    newRecordIdsToFetch.add(discovery.id);
                 }
             }
-
-            let newRecordIdsToFetch = newIdsArrays.flat().filter((id): id is string => id !== undefined);
-            newRecordIdsToFetch = newRecordIdsToFetch.filter(id => !(id in this.fetchedRecordsByIds));
-            recordIdsToFetch = [...new Set(newRecordIdsToFetch)];
+            recordIdsToFetch = [...newRecordIdsToFetch];
         }
     }
 
-    private async fetchRecordAndDiscoverIds(recordId: string, depth: number): Promise<string[]> {
+    /** The path that led to a record about to be fetched - every record on it before this one already is. */
+    private pathTo(recordId: string, sObjectName: string): PathStep[] {
+        return tracePath(recordId, id => {
+            if (id === recordId) {
+                return { sObjectType: sObjectName, origin: this.origins[id] };
+            }
+            const fetched = this.fetchedRecordsByIds[id];
+            return fetched && { sObjectType: fetched.attributes!.type, label: recordLabel(fetched), origin: this.origins[id] };
+        });
+    }
+
+    /**
+     * Every record the run retrieved, with how it got there. Taken once fetching
+     * is over and before anything settles, while fetchedRecordsByIds still holds
+     * them all - including the ones an earlier run migrated, which are part of the
+     * path to the records under them.
+     */
+    private listRetrievedRecords(): RetrievedRecord[] {
+        return Object.entries(this.fetchedRecordsByIds).map(([id, record]) => {
+            const retrieved: RetrievedRecord = { id, sObjectType: record.attributes!.type, label: recordLabel(record) };
+            if (this.origins[id]) {
+                retrieved.origin = this.origins[id];
+            }
+            if (!(id in this.recordsByIds)) {
+                retrieved.alreadyMigrated = true;
+            }
+            return retrieved;
+        });
+    }
+
+    private async fetchRecordAndDiscoverIds(recordId: string, depth: number): Promise<Discovery[]> {
         const sObjectName = await this.describes.getSObjectType(recordId);
         const sobjectDescribe = await this.describes.getSObject(sObjectName);
-        const reason = this.recordAddedReasons[recordId];
-        this.io.fetchingRecord(recordId, sObjectName, reason);
+        this.io.fetchingRecord(recordId, sObjectName, this.pathTo(recordId, sObjectName));
         const recordFields = await this.retrieveRecord(recordId, sObjectName);
         if (!recordFields) {
             return [];
@@ -456,10 +507,11 @@ class MigrationRunner {
         if (lookupFields.length > 0) {
             this.lookupFieldsBySObjectType[sObjectName] = lookupFields;
         }
-        const newIds = await this.discoverReferencedIds(recordId, record, creatableFields);
-        this.collectFileVersionId(recordId, sObjectName, recordFields, newIds);
-        await this.collectRelatedRecordIds(recordId, sObjectName, depth, newIds);
-        return newIds;
+        const found = new Map<string, Discovery>();
+        await this.discoverReferencedIds(record, creatableFields, found);
+        this.collectFileVersionId(recordId, sObjectName, recordFields, found);
+        await this.collectRelatedRecordIds(recordId, sObjectName, depth, found);
+        return [...found.values()];
     }
 
     /**
@@ -468,15 +520,14 @@ class MigrationRunner {
      * that carries the file, and inserting it is what makes the target create a
      * document to hold it. Queue it, and hold the document until it lands.
      */
-    private collectFileVersionId(recordId: string, sObjectName: string, fetchedRecord: any, newIds: string[]): void {
+    private collectFileVersionId(recordId: string, sObjectName: string, fetchedRecord: any, found: Map<string, Discovery>): void {
         const versionId = this.files.latestVersionOf(sObjectName, fetchedRecord);
         if (!versionId) {
             return;
         }
         this.files.hold(recordId, versionId);
-        if (!(versionId in this.fetchedRecordsByIds) && !newIds.includes(versionId)) {
-            newIds.push(versionId);
-            this.recordAddedReasons[versionId] = this.recordAddedReasons[recordId] || `${sObjectName}.LatestPublishedVersion`;
+        if (!(versionId in this.fetchedRecordsByIds) && !found.has(versionId)) {
+            found.set(versionId, { id: versionId, kind: 'lookup', name: 'LatestPublishedVersionId' });
         }
     }
 
@@ -501,8 +552,7 @@ class MigrationRunner {
         }
     }
 
-    private async discoverReferencedIds(recordId: string, record: SObjectRecord<Schema, string>, creatableFields: Field[]): Promise<string[]> {
-        const newIds: string[] = [];
+    private async discoverReferencedIds(record: SObjectRecord<Schema, string>, creatableFields: Field[], found: Map<string, Discovery>): Promise<void> {
         for (const field of creatableFields) {
             if (field.type === 'base64') {
                 // A file's contents are megabytes of base64: scanning them for record
@@ -513,13 +563,10 @@ class MigrationRunner {
                 const matches = String(record[field.name])?.match(ID_REGEX);
                 if (matches) {
                     for (const match of matches) {
-                        if (!(match in this.recordsByIds) && !newIds.includes(match)) {
+                        if (!(match in this.recordsByIds) && !found.has(match)) {
                             try {
                                 await this.describes.getSObjectType(match);
-                                newIds.push(match);
-                                if (recordId in this.recordAddedReasons) {
-                                    this.recordAddedReasons[match] = this.recordAddedReasons[recordId];
-                                }
+                                found.set(match, { id: match, kind: 'lookup', name: field.name });
                             } catch {
                                 // do nothing, it was some random string
                             }
@@ -528,10 +575,9 @@ class MigrationRunner {
                 }
             }
         }
-        return newIds;
     }
 
-    private async collectRelatedRecordIds(recordId: string, sObjectName: string, depth: number, newIds: string[]): Promise<void> {
+    private async collectRelatedRecordIds(recordId: string, sObjectName: string, depth: number, found: Map<string, Discovery>): Promise<void> {
         const relationships = this.options.relationships?.[sObjectName];
         if (!relationships || (this.options.relatedRecordDepthLimit && depth >= this.options.relatedRecordDepthLimit)) {
             return;
@@ -573,9 +619,8 @@ class MigrationRunner {
             this.io.relatedRecords(relationship.name, relatedRecords?.length);
             if (relatedRecords) {
                 for (const relatedRecord of relatedRecords) {
-                    if (!(relatedRecord.Id in this.recordsByIds) && !newIds.includes(relatedRecord.Id!)) {
-                        newIds.push(relatedRecord.Id!);
-                        this.recordAddedReasons[relatedRecord.Id!] = this.recordAddedReasons[recordId] || `${sObjectName}.${relationship.name}`;
+                    if (!(relatedRecord.Id in this.recordsByIds) && !found.has(relatedRecord.Id!)) {
+                        found.set(relatedRecord.Id!, { id: relatedRecord.Id!, kind: 'child', name: relationship.name });
                     }
                 }
             }
@@ -662,7 +707,7 @@ class MigrationRunner {
         const source = this.options.sourceSqlite ?? this.options.sourceFile ?? this.options.sourceOrgUrl ?? this.options.sourceOrg;
         const target = this.options.targetSqlite ?? this.options.targetFile ?? this.options.targetOrgUrl ?? this.options.targetOrg;
         const alreadyMigrated = { ...this.alreadyMigratedCountsBySObjectType };
-        const confirmationData = { source, target, recordReasons: await this.countRecordReasons(), matchers: matchersBySObjectType, alreadyMigrated, ...recordCountsBySObjectType };
+        const confirmationData = { source, target, matchers: matchersBySObjectType, alreadyMigrated, ...recordCountsBySObjectType };
         const confirmation = await this.io.askForConfirmation(confirmationData);
         return confirmation === 'y';
     }
@@ -1489,8 +1534,7 @@ class MigrationRunner {
         const outputData = {
             allMigratedRecords: recordsObj,
             errors: {},
-            requestedRecords: requestedRecordsMappings,
-            recordReasons: await this.countRecordReasons()
+            requestedRecords: requestedRecordsMappings
         };
         this.io.finished(JSON.stringify(outputData));
     }
@@ -1537,7 +1581,6 @@ class MigrationRunner {
         const outputData = {
             allMigratedRecords: this.history.all(),
             errors: this.errors,
-            recordReasons: await this.countRecordReasons(),
             requestedRecords: requestedRecordsMappings
         };
         this.io.finished(JSON.stringify(outputData));
@@ -1564,20 +1607,6 @@ class MigrationRunner {
             this.toUpdateLater[recordId][field] = record[field];
             record[field] = value;
         }
-    }
-
-    private async countRecordReasons(): Promise<Record<string, Record<string, number>>> {
-        const recordReasons: Record<string, Record<string, number>> = {};
-        for (const recordId in this.recordAddedReasons) {
-            const reason = this.recordAddedReasons[recordId];
-            const sObjectType = await this.describes.getSObjectType(recordId);
-
-            if (!recordReasons[reason]) {
-                recordReasons[reason] = {};
-            }
-            recordReasons[reason][sObjectType] = (recordReasons[reason][sObjectType] || 0) + 1;
-        }
-        return recordReasons;
     }
 }
 
