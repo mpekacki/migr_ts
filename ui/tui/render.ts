@@ -1,6 +1,33 @@
 import { ansi, padTo, takeLastColumns, truncate, visibleLength, wrapAnsi } from './ansi';
 import { FeedEntry, Glyph, MigrationState, Phase } from './state';
+import { RecordsViewState, renderRecords } from './records-view';
 import { VERSION } from '../../version';
+
+/**
+ * What the body shows. `main` is the overlay - the question being asked, or the
+ * final summary - or, with neither up, the live activity feed. `feed` is the
+ * activity feed scrolled by hand under an overlay, and `records` the browser of
+ * the records the run retrieved.
+ */
+export type BodyView = 'main' | 'feed' | 'records';
+
+/**
+ * The view Tab goes to next. Records come straight after the main view, so one
+ * press always reaches them; the activity log only has a place in the round
+ * when an overlay is covering it.
+ */
+export function nextView(view: BodyView, hasOverlay: boolean, hasRecords: boolean): BodyView {
+    const order: BodyView[] = ['main'];
+    if (hasRecords) order.push('records');
+    if (hasOverlay) order.push('feed');
+    return order[(order.indexOf(view) + 1) % order.length];
+}
+
+function viewName(view: BodyView, hasOverlay: boolean, promptActive: boolean): string {
+    if (view === 'records') return 'records';
+    if (view === 'main' && hasOverlay) return promptActive ? 'question' : 'summary';
+    return 'activity log';
+}
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -77,7 +104,8 @@ export function buildFrame(
     awaitingExit = false,
     inputBuffer = '',
     scrollOffset = 0,
-    feedView = false,
+    view: BodyView = 'main',
+    recordsView: RecordsViewState | null = null,
 ): string[] {
     const w = Math.max(24, width);
     const h = Math.max(10, height);
@@ -124,15 +152,20 @@ export function buildFrame(
 
     // ── Body: overlay (prompt/summary) or activity feed ─────────────────────
     const bodyHeight = bodyHeightFor(h);
+    const hasRecords = state.retrieved !== null && recordsView !== null;
+    const showRecords = view === 'records' && hasRecords;
     let visible: string[];
     let overflow = false;
     let winStart = 0;
     let total = 0;
-    if (state.overlay) {
+    if (showRecords) {
+        // The records view scrolls itself, keeping its selection in sight.
+        visible = renderRecords(state.retrieved!, recordsView!, inner, bodyHeight);
+    } else if (state.overlay) {
         // While prompting, the body is a scrollable window: the question overlay,
         // or — when toggled with Tab — the activity feed, so earlier output
         // stays reachable while answering.
-        const bodyLines = feedView
+        const bodyLines = view === 'feed'
             ? renderFeed(state.feed, spinnerFrame, state.done, inner)
             : wrapToWidth(state.overlay, inner);
         total = bodyLines.length;
@@ -148,15 +181,20 @@ export function buildFrame(
         lines.push(row(visible[i] ?? ''));
     }
 
-    // ── Separator (scroll indicator and, while prompting, the view toggle) ──
+    // ── Separator (scroll indicator and the view Tab goes to) ───────────────
     const hints: string[] = [];
     if (overflow) {
         const first = winStart + 1;
         const last = Math.min(winStart + bodyHeight, total);
         hints.push(`↑↓ scroll · ${first}–${last} of ${total}`);
     }
-    if (state.overlay) {
-        hints.push(feedView ? 'Tab: question' : 'Tab: activity log');
+    const shownView: BodyView = showRecords ? 'records' : view === 'feed' && state.overlay ? 'feed' : 'main';
+    const next = nextView(shownView, state.overlay !== null, hasRecords);
+    if (next !== shownView) {
+        hints.push(`Tab: ${viewName(next, state.overlay !== null, promptActive)}`);
+    }
+    if (shownView !== 'main') {
+        hints.push(`Esc: ${viewName('main', state.overlay !== null, promptActive)}`);
     }
     if (hints.length > 0) {
         const indicator = ` ${ansi.gray(hints.join(' · '))} `;
@@ -170,7 +208,10 @@ export function buildFrame(
     if (promptActive) {
         lines.push(row(`${ansi.green('>')} ${inputView(inputBuffer, inner)}`));
     } else {
-        const hint = awaitingExit
+        const hint = awaitingExit && shownView === 'records'
+            // Every key the records view gets is its own, so none of them exits.
+            ? ansi.gray('Esc to go back, then any key to exit')
+            : awaitingExit
             // Arrows and Tab move around the summary, so they cannot also exit.
             ? ansi.boldOn(ansi.green(`Press any key to exit…${overflow ? ' (↑↓ to scroll)' : ''}`))
             : state.done

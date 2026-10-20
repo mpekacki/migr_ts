@@ -35,14 +35,37 @@ describe('event-formatter', () => {
             expect(format(new IOEvent('output', 'fetched_records', { count: 4 }))).toBe('fetched 4 records');
         });
 
-        it('should format fetching_record with reason', () => {
-            const event = new IOEvent('output', 'fetching_record', { recordId: '001', sObjectName: 'Account', reason: 'lookup' });
-            expect(format(event)).toBe('fetching record 001 of type Account (via lookup)');
+        it('should format fetching_record with the whole path that led to it', () => {
+            const event = new IOEvent('output', 'fetching_record', {
+                recordId: '500C',
+                sObjectName: 'Case',
+                path: [
+                    { id: '001A', sObjectType: 'Account' },
+                    { id: '003B', sObjectType: 'Contact', via: { kind: 'child', name: 'Contacts' } },
+                    { id: '003C', sObjectType: 'Contact', via: { kind: 'lookup', name: 'ReportsToId' } },
+                    { id: '500C', sObjectType: 'Case', via: { kind: 'child', name: 'Cases' } },
+                ],
+            });
+            expect(format(event)).toBe('fetching record 500C of type Case via Account 001A > Contacts[] > Contact 003B > ReportsToId > Contact 003C > Cases[]');
         });
 
-        it('should format fetching_record without reason', () => {
-            const event = new IOEvent('output', 'fetching_record', { recordId: '001', sObjectName: 'Account' });
+        it('should format fetching_record of a requested record', () => {
+            const event = new IOEvent('output', 'fetching_record', { recordId: '001', sObjectName: 'Account', path: [{ id: '001', sObjectType: 'Account' }] });
             expect(format(event)).toBe('fetching record 001 of type Account');
+            expect(format(new IOEvent('output', 'fetching_record', { recordId: '001', sObjectName: 'Account' }))).toBe('fetching record 001 of type Account');
+        });
+
+        it('should format retrieved_records as counts per type', () => {
+            const event = new IOEvent('output', 'retrieved_records', {
+                records: [
+                    { id: '001A', sObjectType: 'Account' },
+                    { id: '003B', sObjectType: 'Contact', origin: { from: '001A', kind: 'child', name: 'Contacts' } },
+                    { id: '003C', sObjectType: 'Contact', origin: { from: '003B', kind: 'lookup', name: 'ReportsToId' } },
+                ],
+                fromFile: false,
+            });
+            expect(format(event)).toBe('retrieved 3 records: 1 Account, 2 Contact');
+            expect(format(new IOEvent('output', 'retrieved_records', { records: [], fromFile: false }))).toBe('retrieved 0 records');
         });
 
         it('should format record_not_found', () => {
@@ -211,7 +234,6 @@ describe('event-formatter', () => {
             const event = new IOEvent('input', 'confirm_migration', {
                 source: 'sourceOrg',
                 target: 'targetOrg',
-                recordReasons: {},
                 matchers: {},
                 alreadyMigrated: { Account: 2, Contact: 3 },
                 Account: 1
@@ -229,7 +251,6 @@ describe('event-formatter', () => {
             const event = new IOEvent('input', 'confirm_migration', {
                 source: 'sourceOrg',
                 target: 'targetOrg',
-                recordReasons: {},
                 matchers: {},
                 alreadyMigrated: {},
                 Account: 1

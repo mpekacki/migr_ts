@@ -14,6 +14,7 @@ A CLI tool for migrating Salesforce records between orgs (or to/from files). It 
 - **Anonymization** — obfuscate or sanitize email fields during migration
 - **Anonymous Apex hooks** — run scripts in the target org before and after a confirmed migration, to disable automation and put it back
 - **Interactive terminal UI** — full-screen TUI with progress, error resolution prompts, and the ability to add solvers on the fly (or run fully automated with `fullAuto`)
+- **Record paths** — every retrieved record remembers the chain of lookups and child relationships that led to it from a requested record; press Tab in the TUI to browse the records by type and see each one's path
 
 ## Requirements
 
@@ -45,7 +46,7 @@ node bundle.js -c config.json
 
 ### Before you point it at something you care about
 
-The tool **inserts records into the target org**. It asks for confirmation first, showing what it is about to migrate and why each record was pulled in — but `fullAuto.enabled` and `fullAuto.skipConfirmation` both skip that prompt, so read a run's plan at least once before automating it.
+The tool **inserts records into the target org**. It asks for confirmation first, showing what it is about to migrate — and in the TUI, Tab opens every retrieved record grouped by type, with the path of lookups and child relationships that pulled each one in (Enter steps up a path, typing filters by id, name or type, Esc goes back). The view stays available until the run ends. `fullAuto.enabled` and `fullAuto.skipConfirmation` both skip the prompt, so read a run's plan at least once before automating it; the plain UI and the log carry each record's path on its `fetching record` line.
 
 It also **writes a history file** — `{targetOrg}__history.json` in the working directory, unless `historyFilePath` says otherwise. That file is what makes a run resumable: a re-run skips records already mapped in it. Delete it to force a fresh migration, and keep in mind it holds source-to-target ID pairs for the org you migrated into.
 

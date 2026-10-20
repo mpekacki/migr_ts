@@ -12,6 +12,7 @@
 import { expect } from '@jest/globals';
 import fs from 'fs';
 import { DatabaseSync } from 'node:sqlite';
+import { edgeLabel, PathStep, RetrievedRecord, tracePath } from '../record-paths';
 import {
     CONTRACT_STATUS_ERROR,
     E2EContext,
@@ -1866,7 +1867,7 @@ export const e2eScenarios: E2EScenario[] = [
         expect(exportedContact.Email).toContain('@');
     }),
 
-    scenario('report record reason counts', async (ctx: E2EContext) => {
+    scenario('report the path each record was retrieved through', async (ctx: E2EContext) => {
         const account = await createAccount(ctx.sourceOrg, 'Cloud Kicks');
 
         const contact = await createRecord(ctx.sourceOrg, 'Contact', {
@@ -1901,19 +1902,30 @@ export const e2eScenarios: E2EScenario[] = [
             }
         });
 
-        const { parsedOutput } = await ctx.runMigration(config, confirmMigration((recordCounts) => {
-            expect(recordCounts).toHaveProperty('Account');
-            expect(recordCounts).toHaveProperty('Contact');
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config, confirmMigration((recordCounts) => {
             expect(recordCounts.Account).toBe(1);
             expect(recordCounts.Contact).toBe(2);
-
-            expect(recordCounts).toHaveProperty('recordReasons');
-            expect(recordCounts.recordReasons).toHaveProperty(['Account.Contacts']);
-            expect(recordCounts.recordReasons['Account.Contacts']).toHaveProperty('Contact');
-            expect(recordCounts.recordReasons['Account.Contacts'].Contact).toBe(2);
-            expect(recordCounts.recordReasons['Account.Contacts']).toHaveProperty('Case');
-            expect(recordCounts.recordReasons['Account.Contacts'].Case).toBe(1);
+            expect(recordCounts.Case).toBe(1);
         }));
+
+        // the case is three hops from the requested account - a child relationship,
+        // a lookup, another child relationship - and its path names every one
+        const retrieved = capturedOutput.find(event => event.type === 'retrieved_records');
+        expect(retrieved).toBeDefined();
+        const byId = new Map<string, RetrievedRecord>(retrieved!.data.records.map((record: RetrievedRecord) => [record.id, record]));
+        const path = (id: string) => tracePath(id, step => byId.get(step))
+            .map(step => step.via ? `${edgeLabel(step.via)} -> ${step.id}` : step.id);
+        expect(path(caseRecord.id)).toEqual([
+            account.id,
+            `Contacts[] -> ${contact2.id}`,
+            `ReportsToId -> ${contact.id}`,
+            `Cases[] -> ${caseRecord.id}`,
+        ]);
+        expect(byId.get(account.id)!.origin).toBeUndefined();
+
+        // and the log line of the case's fetch names it too
+        const caseFetch = capturedOutput.find(event => event.type === 'fetching_record' && event.data.recordId === caseRecord.id);
+        expect(caseFetch!.data.path.map((step: PathStep) => step.id)).toEqual([account.id, contact2.id, contact.id, caseRecord.id]);
 
         assertRecordMigrated(parsedOutput, account.id);
         assertRecordMigrated(parsedOutput, contact.id);

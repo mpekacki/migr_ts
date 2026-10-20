@@ -1,6 +1,7 @@
 import { SObjectRecord, Schema } from "jsforce";
 import { Options } from "./config";
 import IOEvent, { IOEventType } from "./ioevent";
+import { PathStep, RetrievedRecord } from "./record-paths";
 
 /**
  * The fields worth keeping off an error object. Deliberately a fixed list rather
@@ -120,8 +121,9 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'records_so_far', { count, depth, countsByDepth }));
     }
 
-    public fetchingRecord(recordId: string, sObjectName: string, reason?: string) {
-        this.onOutput(this.buildIOEvent('output', 'fetching_record', { recordId, sObjectName, reason }));
+    /** `path` runs from the record the fetch started at down to this one - see record-paths.ts. */
+    public fetchingRecord(recordId: string, sObjectName: string, path: PathStep[]) {
+        this.onOutput(this.buildIOEvent('output', 'fetching_record', { recordId, sObjectName, path }));
     }
 
     public recordNotFound(recordId: string, sObjectName: string) {
@@ -146,6 +148,17 @@ class IO {
 
     public fetchedRecords(count: number, countsByDepth?: Record<number, number>) {
         this.onOutput(this.buildIOEvent('output', 'fetched_records', { count, countsByDepth }));
+    }
+
+    /**
+     * Every record the fetch brought in and how each one was reached, sent once
+     * fetching is over. Origins rather than whole paths: a path repeats every
+     * record above it, and the UI rebuilds any of them from the origins alone.
+     * `fromFile` says the records were loaded rather than fetched, so none of them
+     * has an origin to show.
+     */
+    public retrievedRecords(records: RetrievedRecord[], fromFile: boolean) {
+        this.onOutput(this.buildIOEvent('output', 'retrieved_records', { records, fromFile }));
     }
 
     public nothingToMigrate(alreadyMigrated: Record<string, number>) {
