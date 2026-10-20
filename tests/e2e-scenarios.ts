@@ -1923,6 +1923,18 @@ export const e2eScenarios: E2EScenario[] = [
         ]);
         expect(byId.get(account.id)!.origin).toBeUndefined();
 
+        // fetching hands over the same records as they arrive, each one after the
+        // record its path goes through - so a path can be drawn the moment it lands
+        const arrived = capturedOutput
+            .filter(event => event.type === 'records_so_far' && event.data.record)
+            .map(event => event.data.record as RetrievedRecord);
+        expect(new Set(arrived.map(record => record.id))).toEqual(new Set(byId.keys()));
+        arrived.forEach((record, i) => {
+            if (record.origin) {
+                expect(arrived.slice(0, i).map(earlier => earlier.id)).toContain(record.origin.from);
+            }
+        });
+
         // and the log line of the case's fetch names it too
         const caseFetch = capturedOutput.find(event => event.type === 'fetching_record' && event.data.recordId === caseRecord.id);
         expect(caseFetch!.data.path.map((step: PathStep) => step.id)).toEqual([account.id, contact2.id, contact.id, caseRecord.id]);

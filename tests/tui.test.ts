@@ -818,6 +818,26 @@ describe('retrieved records', () => {
         expect(s.feed[s.feed.length - 1].text).toContain('Press Tab to browse the retrieved records');
     });
 
+    it('builds up the records as fetching brings them in, then takes the complete list', () => {
+        const s = initialState();
+        feed(s, 'records_so_far', { count: 0, depth: 1, countsByDepth: {} });
+        expect(s.retrieved).toBeNull();
+
+        feed(s, 'records_so_far', { count: 1, depth: 1, countsByDepth: { 1: 1 }, record: records[0] });
+        feed(s, 'records_so_far', { count: 2, depth: 2, countsByDepth: { 1: 1, 2: 1 }, record: records[1] });
+        expect(s.retrieved!.byId.size).toBe(2);
+        expect(s.retrieved!.complete).toBe(false);
+        // browsable from now on, while the header still counts the fetch levels
+        const frame = stripAnsi(buildFrame(s, 0, 80, 24, false, false, '', 0, 'main', initialRecordsView()).join('\n'));
+        expect(frame).toContain('Tab: records');
+        expect(frame).toContain('Fetched 2');
+
+        feed(s, 'retrieved_records', { records, fromFile: false });
+        expect(s.retrieved!.complete).toBe(true);
+        // said once, when the first record arrived
+        expect(s.feed.filter(entry => entry.text.startsWith('Press Tab to browse'))).toHaveLength(1);
+    });
+
     it('goes round the views with Tab, records first', () => {
         expect(nextView('main', true, true)).toBe('records');
         expect(nextView('records', true, true)).toBe('feed');

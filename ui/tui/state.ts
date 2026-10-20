@@ -1,7 +1,7 @@
 import IOEvent from '../../ioevent';
 import { describePathByType } from '../../record-paths';
 import { ansi } from './ansi';
-import { indexRecords, RecordIndex } from './records-view';
+import { addRecord, emptyIndex, indexRecords, RecordIndex } from './records-view';
 
 export type Phase =
     | 'Starting'
@@ -64,7 +64,10 @@ export interface MigrationState {
      * rather than the phase, which a describe in mid-fetch switches away.
      */
     fetchLevels: { current: number; counts: Record<number, number> } | null;
-    /** Every record the run retrieved, set once fetching is over - what the records view browses. */
+    /**
+     * The records the run retrieved - what the records view browses. Grows as
+     * they arrive, and is replaced by the complete list once fetching is over.
+     */
     retrieved: RecordIndex | null;
     done: boolean;
 }
@@ -118,6 +121,10 @@ function updateRun(state: MigrationState, text: string) {
     push(state, 'run', text);
 }
 
+function pushBrowseHint(state: MigrationState) {
+    push(state, 'info', 'Press Tab to browse the retrieved records and how each one was reached');
+}
+
 /** A raw console.* line captured while the TUI owns the screen. */
 export function pushConsole(state: MigrationState, text: string) {
     state.feed.push({ glyph: 'sub', indent: 0, text });
@@ -152,6 +159,13 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             state.total = d.count ?? state.total;
             if (typeof d.depth === 'number') {
                 state.fetchLevels = { current: d.depth, counts: d.countsByDepth ?? {} };
+            }
+            if (d.record && typeof d.record.id === 'string') {
+                if (!state.retrieved) {
+                    state.retrieved = emptyIndex(false, false);
+                    pushBrowseHint(state);
+                }
+                addRecord(state.retrieved, d.record);
             }
             break;
         case 'fetching_record': {
@@ -201,9 +215,12 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             break;
         }
         case 'retrieved_records': {
+            // The complete list, in place of the one fetching built up: it also has
+            // the records loaded from a file, which were never fetched.
+            const hinted = state.retrieved !== null;
             state.retrieved = indexRecords(Array.isArray(d.records) ? d.records : [], d.fromFile === true);
-            if (state.retrieved.byId.size > 0) {
-                push(state, 'info', 'Press Tab to browse the retrieved records and how each one was reached');
+            if (!hinted && state.retrieved.byId.size > 0) {
+                pushBrowseHint(state);
             }
             break;
         }

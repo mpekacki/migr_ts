@@ -3,7 +3,7 @@ import { UI } from '../ui';
 import { getFormatter } from '../event-formatter';
 import { ansi, screen } from './ansi';
 import { BodyView, bodyHeightFor, buildFrame, inputCursorCol, maxFeedScrollOffset, maxScrollOffset, nextView } from './render';
-import { focusRecord, handleRecordsKey, initialRecordsView, RecordsViewState } from './records-view';
+import { focusRecord, handleRecordsKey, initialRecordsView, reanchor, RecordIndex, RecordsViewState } from './records-view';
 import { applyEvent, initialState, MigrationState, pushConsole } from './state';
 
 const SPINNER_MS = 90;
@@ -41,8 +41,11 @@ export class TuiUI implements UI {
     private scrollOffset = 0;
     /** What the body shows; Tab goes round the views, Esc back to `main`. */
     private view: BodyView = 'main';
-    /** Where the records view is, kept across visits to it. Set once the records arrive. */
+    /** Where the records view is, kept across visits to it. Set once the first record arrives. */
     private records: RecordsViewState | null = null;
+    /** The index, and its version, that `records` was last anchored to - see syncRecordsView. */
+    private anchoredIndex: RecordIndex | null = null;
+    private anchoredVersion = -1;
     /** The record the current prompt is about: the records view opens on it, the first time. */
     private pendingFocus: string | null = null;
     private resolvePrompt: ((answer: string) => void) | null = null;
@@ -204,6 +207,7 @@ export class TuiUI implements UI {
             return true;
         }
         if (this.view === 'records' && this.state.retrieved && this.records) {
+            this.syncRecordsView();
             if (handleRecordsKey(this.state.retrieved, this.records, s, this.bodyHeight()) === 'leave') {
                 this.switchView('main');
             }
@@ -227,10 +231,28 @@ export class TuiUI implements UI {
         this.view = view;
         // The overlay opens at the top; the feed opens at its latest lines.
         this.scrollOffset = view === 'feed' ? this.maxScroll() : 0;
+        if (view === 'records') {
+            this.syncRecordsView();
+        }
         if (view === 'records' && this.pendingFocus && this.state.retrieved && this.records) {
             focusRecord(this.state.retrieved, this.records, this.pendingFocus, this.bodyHeight());
             this.pendingFocus = null;
         }
+    }
+
+    /**
+     * Records arriving while fetching runs move the rows under the selection.
+     * Rather than chase every one of them, the selection is put back on its row
+     * when it is next drawn or moved - at most once a frame - and when the
+     * complete list replaces the one fetching built.
+     */
+    private syncRecordsView(): void {
+        const index = this.state.retrieved;
+        if (!index || !this.records) return;
+        if (index === this.anchoredIndex && index.version === this.anchoredVersion) return;
+        reanchor(index, this.records, this.bodyHeight());
+        this.anchoredIndex = index;
+        this.anchoredVersion = index.version;
     }
 
     private maxScroll(): number {
@@ -321,6 +343,7 @@ export class TuiUI implements UI {
         }
         if (this.closed) return;
         this.lastFrame = Date.now();
+        if (this.view === 'records') this.syncRecordsView();
         const { width, height } = this.dims();
         const frame = buildFrame(
             this.state, this.spinnerFrame, width, height,

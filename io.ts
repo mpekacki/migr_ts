@@ -117,8 +117,13 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'checking_matchers'));
     }
 
-    public recordsSoFar(count: number, depth?: number, countsByDepth?: Record<number, number>) {
-        this.onOutput(this.buildIOEvent('output', 'records_so_far', { count, depth, countsByDepth }));
+    /**
+     * Fetching progress. Sent as each wave starts, and as each record arrives -
+     * that one with the record itself, how it was reached included, so the
+     * records view can be browsed while fetching is still going.
+     */
+    public recordsSoFar(count: number, depth?: number, countsByDepth?: Record<number, number>, record?: RetrievedRecord) {
+        this.onOutput(this.buildIOEvent('output', 'records_so_far', { count, depth, countsByDepth, record }));
     }
 
     /** `path` runs from the record the fetch started at down to this one - see record-paths.ts. */
