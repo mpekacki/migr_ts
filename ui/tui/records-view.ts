@@ -14,12 +14,23 @@ export interface RecordGroup {
     ids: string[];
 }
 
+/**
+ * The records indexed for the browser. It grows a record at a time while
+ * fetching runs (addRecord) and is replaced by the complete list once fetching
+ * is over (indexRecords) - built the same way, so the two order alike.
+ */
 export interface RecordIndex {
     byId: Map<string, RetrievedRecord>;
-    /** Largest group first, the way the confirmation lists them; nearest records first within a group. */
-    groups: RecordGroup[];
+    /** How many steps each record's path has - what orders a group, nearest records first. */
+    depths: Map<string, number>;
+    /** By type, each group's ids kept in order. The groups themselves are ordered by sortedGroups. */
+    groups: Map<string, RecordGroup>;
     /** Loaded from a file: no record has an origin, and none of them was asked for either. */
     fromFile: boolean;
+    /** False while fetching is still adding records. */
+    complete: boolean;
+    /** Bumped by every change, so a view knows when to find its selection again. */
+    version: number;
 }
 
 export interface RecordsViewState {
@@ -30,28 +41,77 @@ export interface RecordsViewState {
     cursor: number;
     /** The first row on screen. */
     scroll: number;
+    /**
+     * What the selected row shows (see rowKey). Rows move as records arrive, and
+     * this is what puts the selection back on the same one - see reanchor.
+     */
+    selected?: string;
 }
 
 export type RecordRow =
     | { kind: 'group'; group: RecordGroup; shown: number; expanded: boolean }
     | { kind: 'record'; id: string };
 
+export function emptyIndex(fromFile: boolean, complete: boolean): RecordIndex {
+    return { byId: new Map(), depths: new Map(), groups: new Map(), fromFile, complete, version: 0 };
+}
+
+/** The complete list at once. Every record is known before any depth is taken, so the order they come in does not matter. */
 export function indexRecords(records: RetrievedRecord[], fromFile: boolean): RecordIndex {
-    const byId = new Map(records.map(record => [record.id, record]));
-    const depths = new Map(records.map(record => [record.id, tracePath(record.id, id => byId.get(id)).length]));
-    const idsByType = new Map<string, string[]>();
+    const index = emptyIndex(fromFile, true);
     for (const record of records) {
-        const ids = idsByType.get(record.sObjectType) ?? [];
-        ids.push(record.id);
-        idsByType.set(record.sObjectType, ids);
+        index.byId.set(record.id, record);
     }
-    const groups = [...idsByType.entries()]
-        .map(([sObjectType, ids]) => ({
-            sObjectType,
-            ids: ids.sort((a, b) => depths.get(a)! - depths.get(b)! || a.localeCompare(b)),
-        }))
+    for (const record of index.byId.values()) {
+        insertIntoGroup(index, record);
+    }
+    index.version = index.byId.size;
+    return index;
+}
+
+/**
+ * One record that has just arrived. The record its path goes through arrived
+ * before it - in an earlier fetch wave - so its depth can be taken right away.
+ */
+export function addRecord(index: RecordIndex, record: RetrievedRecord): void {
+    index.version++;
+    const known = index.byId.has(record.id);
+    index.byId.set(record.id, record);
+    // A record id listed twice in the config is fetched twice; it is still one record.
+    if (!known) {
+        insertIntoGroup(index, record);
+    }
+}
+
+function insertIntoGroup(index: RecordIndex, record: RetrievedRecord): void {
+    const depth = tracePath(record.id, id => index.byId.get(id)).length;
+    index.depths.set(record.id, depth);
+    let group = index.groups.get(record.sObjectType);
+    if (!group) {
+        group = { sObjectType: record.sObjectType, ids: [] };
+        index.groups.set(record.sObjectType, group);
+    }
+    // Binary search for its place, nearest first and then by id: the order does
+    // not depend on which fetch of a wave happened to finish first.
+    const comesBefore = (other: string) => {
+        const otherDepth = index.depths.get(other)!;
+        return otherDepth < depth || (otherDepth === depth && other.localeCompare(record.id) < 0);
+    };
+    const ids = group.ids;
+    let lo = 0;
+    let hi = ids.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (comesBefore(ids[mid])) lo = mid + 1;
+        else hi = mid;
+    }
+    ids.splice(lo, 0, record.id);
+}
+
+/** Largest group first, the way the confirmation lists them. Sorted per call: there are few groups, and they keep growing. */
+export function sortedGroups(index: RecordIndex): RecordGroup[] {
+    return [...index.groups.values()]
         .sort((a, b) => b.ids.length - a.ids.length || a.sObjectType.localeCompare(b.sObjectType));
-    return { byId, groups, fromFile };
 }
 
 export function initialRecordsView(): RecordsViewState {
@@ -68,7 +128,7 @@ function matchesFilter(record: RetrievedRecord, filter: string): boolean {
 export function recordRows(index: RecordIndex, view: RecordsViewState): RecordRow[] {
     const filter = view.filter.toLowerCase();
     const rows: RecordRow[] = [];
-    for (const group of index.groups) {
+    for (const group of sortedGroups(index)) {
         const ids = filter ? group.ids.filter(id => matchesFilter(index.byId.get(id)!, filter)) : group.ids;
         if (ids.length === 0) {
             continue;
@@ -105,7 +165,24 @@ function settle(cursor: number, scroll: number, rowCount: number, listHeight: nu
 }
 
 function settleView(index: RecordIndex, view: RecordsViewState, listHeight: number): void {
-    Object.assign(view, settle(view.cursor, view.scroll, recordRows(index, view).length, listHeight));
+    const rows = recordRows(index, view);
+    Object.assign(view, settle(view.cursor, view.scroll, rows.length, listHeight));
+    view.selected = rowKey(rows[view.cursor]);
+}
+
+/**
+ * Put the selection back on the row it was on, after records arriving above it
+ * moved it down - and the window with it, so the row stays where it was on
+ * screen rather than the list sliding under the user. A row that is gone leaves
+ * the cursor where it was.
+ */
+export function reanchor(index: RecordIndex, view: RecordsViewState, bodyHeight: number): void {
+    const at = view.selected === undefined ? -1 : recordRows(index, view).findIndex(row => rowKey(row) === view.selected);
+    if (at >= 0) {
+        view.scroll += at - view.cursor;
+        view.cursor = at;
+    }
+    settleView(index, view, recordsLayout(bodyHeight).listHeight);
 }
 
 function rowKey(row: RecordRow | undefined): string | undefined {
@@ -258,9 +335,11 @@ export function renderRecords(index: RecordIndex, view: RecordsViewState, inner:
 
 function headerLine(index: RecordIndex, view: RecordsViewState, inner: number): string {
     const total = index.byId.size;
+    const types = index.groups.size;
+    const fetching = index.complete ? '' : ansi.gray(' · fetching…');
     const left = view.filter
-        ? `${ansi.boldOn('Filter')} ${ansi.yellow(view.filter)}▏`
-        : `${ansi.boldOn(`${total} retrieved record${total === 1 ? '' : 's'}`)} ${ansi.gray(`in ${index.groups.length} type${index.groups.length === 1 ? '' : 's'}`)}`;
+        ? `${ansi.boldOn('Filter')} ${ansi.yellow(view.filter)}▏${fetching}`
+        : `${ansi.boldOn(`${total} retrieved record${total === 1 ? '' : 's'}`)} ${ansi.gray(`in ${types} type${types === 1 ? '' : 's'}`)}${fetching}`;
     const room = inner - visibleLength(left) - 3;
     if (room >= visibleLength(HELP)) {
         return left + ' '.repeat(inner - visibleLength(left) - visibleLength(HELP)) + ansi.gray(HELP);

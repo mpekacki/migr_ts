@@ -1,7 +1,8 @@
 import { RetrievedRecord } from '../record-paths';
 import { stripAnsi, visibleLength } from '../ui/tui/ansi';
 import {
-    focusRecord, handleRecordsKey, indexRecords, initialRecordsView, RECORDS_KEYS, recordRows, recordsLayout, RecordsViewState, renderRecords,
+    addRecord, emptyIndex, focusRecord, handleRecordsKey, indexRecords, initialRecordsView, reanchor, RECORDS_KEYS, recordRows, recordsLayout,
+    RecordsViewState, renderRecords, sortedGroups,
 } from '../ui/tui/records-view';
 
 const UP = RECORDS_KEYS.up[0];
@@ -37,9 +38,69 @@ function press(view: RecordsViewState, ...keys: string[]) {
 describe('records view', () => {
     it('groups the records by type, largest group first and nearest record first', () => {
         const index = indexRecords(records, false);
-        expect(index.groups.map(group => group.sObjectType)).toEqual(['Contact', 'Account', 'Case', 'User']);
+        expect(sortedGroups(index).map(group => group.sObjectType)).toEqual(['Contact', 'Account', 'Case', 'User']);
         // Jane is one hop from the requested account, John two
-        expect(index.groups[0].ids).toEqual(['003B', '003C']);
+        expect(index.groups.get('Contact')!.ids).toEqual(['003B', '003C']);
+    });
+
+    describe('while fetching', () => {
+        // the order a fetch can deliver them in: every record after the one its path goes through
+        const arrivals: RetrievedRecord[][] = [
+            [records[0], records[2], records[4], records[1], records[3]],
+            [records[0], records[4], records[2], records[1], records[3]],
+        ];
+
+        it('orders the records as they arrive exactly as it orders the complete list', () => {
+            const complete = indexRecords(records, false);
+            for (const order of arrivals) {
+                const live = emptyIndex(false, false);
+                order.forEach(record => addRecord(live, record));
+                expect(sortedGroups(live)).toEqual(sortedGroups(complete));
+                expect(live.depths).toEqual(complete.depths);
+            }
+        });
+
+        it('keeps the order within a wave whichever fetch finishes first', () => {
+            const wave = ['a3', 'a1', 'a2'].map(id => ({ id, sObjectType: 'Contact', origin: { from: 'root', kind: 'child' as const, name: 'Contacts' } }));
+            const live = emptyIndex(false, false);
+            addRecord(live, { id: 'root', sObjectType: 'Account' });
+            wave.forEach(record => addRecord(live, record));
+            expect(live.groups.get('Contact')!.ids).toEqual(['a1', 'a2', 'a3']);
+        });
+
+        it('counts a record fetched twice once', () => {
+            const live = emptyIndex(false, false);
+            addRecord(live, records[0]);
+            addRecord(live, records[0]);
+            expect(live.groups.get('Account')!.ids).toEqual(['001A']);
+            expect(live.byId.size).toBe(1);
+        });
+
+        it('keeps the selected record where it is on screen as records arrive above it', () => {
+            const live = emptyIndex(false, false);
+            const contacts = Array.from({ length: 20 }, (_, i) => ({
+                id: `003${String(i + 10).padStart(3, '0')}`, sObjectType: 'Contact', origin: { from: '001A', kind: 'child' as const, name: 'Contacts' },
+            }));
+            addRecord(live, records[0]);
+            contacts.slice(10).forEach(record => addRecord(live, record));
+            const view = initialRecordsView();
+            focusRecord(live, view, '003025', BODY);
+            const onScreen = view.cursor - view.scroll;
+
+            // the earlier ids sort above it
+            contacts.slice(0, 10).forEach(record => addRecord(live, record));
+            reanchor(live, view, BODY);
+            expect(selected(view, live)).toBe('003025');
+            expect(view.cursor - view.scroll).toBe(onScreen);
+        });
+
+        it('says it is still fetching until the complete list replaces it', () => {
+            const live = emptyIndex(false, false);
+            addRecord(live, records[0]);
+            const view = initialRecordsView();
+            expect(stripAnsi(renderRecords(live, view, 100, BODY)[0])).toContain('1 retrieved record in 1 type · fetching…');
+            expect(stripAnsi(renderRecords(indexRecords(records, false), view, 100, BODY)[0])).not.toContain('fetching');
+        });
     });
 
     it('starts with every group folded, and opens and closes them', () => {

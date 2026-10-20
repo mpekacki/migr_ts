@@ -464,16 +464,19 @@ class MigrationRunner {
      * path to the records under them.
      */
     private listRetrievedRecords(): RetrievedRecord[] {
-        return Object.entries(this.fetchedRecordsByIds).map(([id, record]) => {
-            const retrieved: RetrievedRecord = { id, sObjectType: record.attributes!.type, label: recordLabel(record) };
-            if (this.origins[id]) {
-                retrieved.origin = this.origins[id];
-            }
-            if (!(id in this.recordsByIds)) {
-                retrieved.alreadyMigrated = true;
-            }
-            return retrieved;
-        });
+        return Object.entries(this.fetchedRecordsByIds)
+            .map(([id, record]) => this.retrievedRecord(id, record, !(id in this.recordsByIds)));
+    }
+
+    private retrievedRecord(id: string, fetchedRecord: SObjectRecord<Schema, string>, alreadyMigrated: boolean): RetrievedRecord {
+        const retrieved: RetrievedRecord = { id, sObjectType: fetchedRecord.attributes!.type, label: recordLabel(fetchedRecord) };
+        if (this.origins[id]) {
+            retrieved.origin = this.origins[id];
+        }
+        if (alreadyMigrated) {
+            retrieved.alreadyMigrated = true;
+        }
+        return retrieved;
     }
 
     private async fetchRecordAndDiscoverIds(recordId: string, depth: number): Promise<Discovery[]> {
@@ -502,7 +505,12 @@ class MigrationRunner {
             this.fetchDepthsByIds[recordId] = depth;
             this.recordCountsByDepth[depth] = (this.recordCountsByDepth[depth] || 0) + 1;
         }
-        this.io.recordsSoFar(Object.keys(this.recordsByIds).length, depth, { ...this.recordCountsByDepth });
+        // The record itself goes out with the count, so the records view can grow
+        // while fetching is still going. Its origin is already settled - the wave
+        // before this one assigned it - and the history file was read before the
+        // fetch began, so it already says whether an earlier run migrated it.
+        this.io.recordsSoFar(Object.keys(this.recordsByIds).length, depth, { ...this.recordCountsByDepth },
+            this.retrievedRecord(recordId, recordFields, this.history.has(recordId)));
         const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
         if (lookupFields.length > 0) {
             this.lookupFieldsBySObjectType[sObjectName] = lookupFields;
