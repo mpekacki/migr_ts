@@ -57,6 +57,11 @@ export default class MigrationHistory {
         }
     }
 
+    /** Where the history file lives, which is where the run's other files go by default. */
+    get directory(): string {
+        return path.dirname(this.filePath);
+    }
+
     has(recordId: string): boolean {
         return recordId in this.old2new;
     }

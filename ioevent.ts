@@ -49,7 +49,9 @@ export type IOEventType =
     | 'file_document_unavailable'
     | 'running_apex_script'
     | 'apex_script_done'
-    | 'apex_script_failed';
+    | 'apex_script_failed'
+    | 'record_store_opened'
+    | 'record_store_closed';
 
 class IOEvent {
     constructor(

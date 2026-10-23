@@ -1,4 +1,4 @@
-import Chunks from '../chunks';
+import Chunks, { recordSize } from '../chunks';
 
 describe('Chunks', () => {
     it('should return empty array if no records', () => {
@@ -197,5 +197,21 @@ describe('Chunks', () => {
                 '18': { "Name": "18", "attributes": { "type": "Quote" } as any },
             }
         ]);
+    });
+
+    it('plans the same chunks from what is known about each record as from the records', () => {
+        const chunks = new Chunks(['User'], 3, 2, 40);
+        const records: Record<string, any> = {
+            '1': { Name: 'a'.repeat(30), attributes: { type: 'Case' } },
+            '2': { Name: 'b', attributes: { type: 'Account' } },
+            '3': { Name: 'c', attributes: { type: 'User' } },
+            '4': { Name: 'd'.repeat(25), attributes: { type: 'Case' } },
+            '5': { Name: 'e', attributes: { type: 'Account' } },
+            '6': { Name: 'f', attributes: { type: 'Lead' } },
+            '7': { Name: 'g', attributes: { type: 'Account' } },
+        };
+        const entries = Object.keys(records).map(id => ({ id, sObjectType: records[id].attributes.type, bytes: recordSize(records[id]) }));
+
+        expect(chunks.getChunkIds(entries)).toEqual(chunks.getChunks(records).map(chunk => Object.keys(chunk)));
     });
 });

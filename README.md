@@ -12,13 +12,14 @@ A CLI tool for migrating Salesforce records between orgs (or to/from files). It 
 - **Resumable migrations** — a per-target history file maps source IDs to target IDs, so re-runs skip already-migrated records
 - **File mode** — serialize records to JSON or a SQLite database instead of inserting, or load from either instead of a source org
 - **Anonymization** — obfuscate or sanitize email fields during migration
+- **Records on disk** — for record sets too large for memory, keep the fetched records in a scratch SQLite database instead, optionally encrypted, deleted when the run ends
 - **Anonymous Apex hooks** — run scripts in the target org before and after a confirmed migration, to disable automation and put it back
 - **Interactive terminal UI** — full-screen TUI with progress, error resolution prompts, and the ability to add solvers on the fly (or run fully automated with `fullAuto`)
 - **Record paths** — every retrieved record remembers the chain of lookups and child relationships that led to it from a requested record; press Tab in the TUI to browse the records by type and see each one's path, even while they are still being fetched
 
 ## Requirements
 
-- Node.js 22.5+ (the SQLite export uses the built-in `node:sqlite` module, added in 22.5)
+- Node.js 22.5+ (the SQLite export and the on-disk record store use the built-in `node:sqlite` module, added in 22.5)
 - [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli) with authenticated orgs — the tool connects via org aliases using `@salesforce/core` — or direct instance URL + access token auth (`sourceOrgUrl` / `sourceOrgToken` and `targetOrgUrl` / `targetOrgToken`)
 
 ## Usage
@@ -39,10 +40,11 @@ node bundle.js -c config.json
 
 | Flag | Description |
 |------|-------------|
-| `-c, --config-json <path>` | Path to the config file (required) |
+| `-c, --config-json <path>` | Path to the config file (required, except with `--dump-store`) |
 | `-o, --output-file <path>` | Save output logs to a file |
 | `-d, --debug` | Enable debug mode |
 | `-p, --plain` | Use the plain streaming UI instead of the full-screen TUI |
+| `--dump-store <path>` | Print what a kept record store holds as JSON, and exit — see [Keeping records on disk](#keeping-records-on-disk) |
 
 ### Before you point it at something you care about
 
@@ -76,6 +78,10 @@ Two cheap ways to rehearse: set `targetSqlite` (or `targetFile`) to export the r
 | `apex.beforeMigration` / `apex.afterMigration` | Anonymous Apex scripts to run in the target org around the migration |
 | `sourceFile` / `targetFile` | Migrate from/to a JSON file instead of an org |
 | `sourceSqlite` / `targetSqlite` | Migrate from/to a SQLite database instead of an org |
+| `recordStore.type` | Where the run keeps the records it fetched: `memory` (default) or `sqlite`, a scratch database on disk — see [Keeping records on disk](#keeping-records-on-disk) |
+| `recordStore.path` | The scratch database. Defaults to `{targetOrg}__records.{timestamp}.db` next to the history file; must not exist yet |
+| `recordStore.keep` | Leave the scratch database behind when the run ends, for inspection (default: `false`) |
+| `recordStore.encrypt` | Encrypt every record in the scratch database (default: `false`) |
 
 ### Solvers
 
@@ -182,6 +188,26 @@ Worth knowing:
 - A script that fails — one that does not compile, or one that throws — stops the run with a non-zero exit code. A `beforeMigration` failure stops it before anything is inserted; an `afterMigration` failure is reported only after the migration summary has been written, so a broken cleanup script never costs you the record of what was migrated.
 - Missing script files and combining `apex` with `targetFile` / `targetSqlite` (an export has no target org to run them in) are rejected before the run starts fetching.
 
+### Keeping records on disk
+
+A run holds every record it fetched until that record is migrated — every field as fetched, file contents included — and by default it holds them in memory. For a record set too large for that, `recordStore.type: "sqlite"` keeps them in a scratch SQLite database instead, from the fetch through to the last insert (or the export). Only an index of record ids and types stays in memory, along with the much smaller bookkeeping the run always keeps: how each record was reached, the history map, the fields set aside for the update pass, errors, and the records view in the TUI. Records are read back a chunk at a time to be inserted. Expect a run to be somewhat slower than in memory.
+
+```json
+"recordStore": { "type": "sqlite", "encrypt": true }
+```
+
+The database is scratch space, not a source: every run starts a new one, and it is deleted when the run ends — normally, with an error, or with Ctrl+C. `keep: true` leaves it behind for inspection; it then holds every record the run fetched, plus whatever was still waiting to be migrated when the run ended. A process that is killed outright (`kill -9`, a power cut) cannot clean up after itself, so the file stays — which is what encryption is for.
+
+**`encrypt: true`** seals each record with AES-256-GCM before it reaches the disk; only record ids are stored in the clear. By default the key is random and exists only in the memory of the running process, so nothing needs configuring and a file a crash leaves behind can never be read. To be able to read a kept, encrypted store, set the `MIGR_TS_STORE_KEY` environment variable: the key is then derived from that passphrase (scrypt, with a random salt stored in the file), and
+
+```bash
+MIGR_TS_STORE_KEY='…' node bundle.js --dump-store records.db > records.json
+```
+
+prints what it holds. `keep` together with `encrypt` is refused without `MIGR_TS_STORE_KEY`, since the file could never be opened. An unencrypted store stores each record as JSON text, readable with any SQLite client (`SELECT data FROM fetched`).
+
+A `sourceSqlite` import is read a record at a time as well, but a `sourceFile` JSON import is still read whole: JSON cannot be parsed in pieces. Use SQLite exports for record sets that do not fit in memory.
+
 ### SQLite export format
 
 `targetSqlite` writes the fetched records to a SQLite database instead of inserting them, and `sourceSqlite` reads that database back as the source of a later migration. The database is a plain SQLite file with no extensions, so it can be opened with any SQLite client:
@@ -200,6 +226,8 @@ Each SObject type gets its own table, named after the type (`Account`, `Custom_O
 An export merges into a database already at that path: records only the database holds are left alone, and records the new run exports again replace their stored version, so several migrations can accumulate in one file. Delete the file to start a fresh export. A file that is not a migr_ts export is never overwritten — the run fails instead.
 
 Records edited in place with SQL are picked up on the next `sourceSqlite` run, which makes the database a convenient place to tweak data between orgs.
+
+An export's report (`allMigratedRecords` in the output) lists the id of every exported record; the records themselves are in the export.
 
 ### Example
 

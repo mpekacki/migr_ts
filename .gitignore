@@ -10,7 +10,9 @@ config/
 history/
 logs/
 *__history.json
+*__records.*.db
 test-output.*
+test-record-store.db
 *.log
 output.log
 coverage/

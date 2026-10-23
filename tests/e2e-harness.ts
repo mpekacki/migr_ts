@@ -412,7 +412,8 @@ export function cleanupMigrationArtifacts(targetOrgAlias: string) {
         './custom_history_test.json',
         './test-output.json',
         './test-output.db',
-        './test-output.log'
+        './test-output.log',
+        './test-record-store.db'
     ];
     for (const file of files) {
         if (fs.existsSync(file)) {

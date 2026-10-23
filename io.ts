@@ -109,6 +109,16 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'starting_migration', { options }));
     }
 
+    /** Sent only for a store on disk: the run keeps its records in `path` until it ends. */
+    public recordStoreOpened(path: string, encrypted: boolean, keep: boolean) {
+        this.onOutput(this.buildIOEvent('output', 'record_store_opened', { path, encrypted, keep }));
+    }
+
+    /** `deleted` is false for a store the config asked to keep. */
+    public recordStoreClosed(path: string, deleted: boolean) {
+        this.onOutput(this.buildIOEvent('output', 'record_store_closed', { path, deleted }));
+    }
+
     public describeSObject(sObjectName: string) {
         this.onOutput(this.buildIOEvent('output', 'describing_sobject', { sObjectName }));
     }

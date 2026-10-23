@@ -70,6 +70,28 @@ interface Options {
         /** Run once every record has been inserted and the deferred updates are done. */
         afterMigration?: string[];
     };
+    /**
+     * Where the run keeps the records it fetched until they are migrated. In
+     * memory by default; `sqlite` keeps them in a scratch database on disk
+     * instead, for record sets too large to hold in memory.
+     */
+    recordStore?: {
+        /** Defaults to 'memory'. */
+        type?: 'memory' | 'sqlite';
+        /**
+         * The database file. Defaults to `{targetOrg}__records.{timestamp}.db` next
+         * to the history file. Must not exist yet - a run never reuses a store.
+         */
+        path?: string;
+        /** Leave the database behind when the run ends, for inspection. Defaults to false. */
+        keep?: boolean;
+        /**
+         * Encrypt every record with AES-256-GCM. The key is random and lives only
+         * as long as the run, unless MIGR_TS_STORE_KEY supplies a passphrase to
+         * derive it from. Defaults to false.
+         */
+        encrypt?: boolean;
+    };
 }
 
 interface Solver {

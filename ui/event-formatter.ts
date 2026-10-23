@@ -7,6 +7,10 @@ function formatEvent(event: IOEvent): string {
     switch (event.type) {
         case 'starting_migration':
             return `starting migration: ${JSON.stringify(d?.options)}`;
+        case 'record_store_opened':
+            return `keeping records in ${d?.encrypted ? 'encrypted ' : ''}store ${d?.path}${d?.keep ? ' (kept after the run)' : ''}`;
+        case 'record_store_closed':
+            return d?.deleted ? `deleted record store ${d?.path}` : `record store kept at ${d?.path}`;
         case 'describing_sobject':
             return `describing SObject ${d?.sObjectName}`;
         case 'checking_matchers':
