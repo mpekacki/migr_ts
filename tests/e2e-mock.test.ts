@@ -36,6 +36,7 @@ import {
     writeApexScript
 } from './e2e-harness';
 import { e2eScenarios } from './e2e-scenarios';
+import { STORE_KEY_ENV, dumpRecordStore } from '../record-store';
 import { FakeSalesforceOrg, createFakeClientFactory } from './fake-salesforce-org';
 import { TARGET_ORG_ALIAS, createSourceOrg, createTargetOrg } from './fake-test-org-schema';
 
@@ -123,6 +124,20 @@ class MockTestOrg implements TestOrg {
 /** Raised in place of killing the CLI process when a scenario asks the app to exit. */
 class SimulatedExit extends Error {}
 
+/**
+ * The record store every run gets unless its config names one - see the second
+ * pass over the scenarios below.
+ */
+let defaultRecordStore: Options['recordStore'];
+
+const DISK_RECORD_STORE: Options['recordStore'] = { type: 'sqlite', encrypt: true };
+
+/** Record stores a run left in the working directory, which none should. */
+function leftoverRecordStores(): string[] {
+    const dirs = ['.', './custom_history_test_dir'].filter(dir => fs.existsSync(dir));
+    return dirs.flatMap(dir => fs.readdirSync(dir).filter(file => file.includes('__records.')).map(file => `${dir}/${file}`));
+}
+
 async function runMigration(config: any, inputHandler: InputHandler = ['y'], outputFile?: string): Promise<MigrationRunResult> {
     const capturedOutput: IOEvent[] = [];
     const queuedInputs = Array.isArray(inputHandler) ? [...inputHandler] : null;
@@ -168,7 +183,8 @@ async function runMigration(config: any, inputHandler: InputHandler = ['y'], out
     };
 
     try {
-        await main(config as Options, onOutput, onInput, createFakeClientFactory([sourceOrg, targetOrg]));
+        const options = (defaultRecordStore && config.recordStore === undefined ? { ...config, recordStore: defaultRecordStore } : config) as Options;
+        await main(options, onOutput, onInput, createFakeClientFactory([sourceOrg, targetOrg]));
     } catch (error) {
         if (!(error instanceof SimulatedExit)) {
             throw error;
@@ -195,6 +211,29 @@ for (const e2eScenario of e2eScenarios) {
         await e2eScenario.run(createContext());
     });
 }
+
+// Every scenario again, with the records in an encrypted database on disk. What
+// the store hands back from there is a copy, so a change the engine makes to a
+// record and forgets to write back is lost - which in memory, where the store
+// hands back the record itself, nothing would notice.
+describe('with the records stored on disk, encrypted', () => {
+    beforeEach(() => {
+        defaultRecordStore = DISK_RECORD_STORE;
+    });
+
+    afterEach(() => {
+        defaultRecordStore = undefined;
+        const leftovers = leftoverRecordStores();
+        leftovers.forEach(file => fs.unlinkSync(file));
+        expect(leftovers).toEqual([]);
+    });
+
+    for (const e2eScenario of e2eScenarios) {
+        test(e2eScenario.name, async () => {
+            await e2eScenario.run(createContext());
+        });
+    }
+});
 
 // The four tests below live here rather than in the shared scenarios because the
 // failures they assert on are thrown errors: in this context that surfaces as a
@@ -381,4 +420,69 @@ test('a source missing a matcher field fails instead of matching an arbitrary re
         recordIds: [custObjA.id],
         matchers: defaultMatchers
     })).rejects.toThrow(/\(User\) has no value for matcher field Name/);
+});
+
+// The record store's own life cycle, which the scenarios above only see the
+// inside of: where it goes, that it goes away, and what a kept one holds.
+describe('the record store on disk', () => {
+    afterEach(() => {
+        delete process.env[STORE_KEY_ENV];
+    });
+
+    test('is announced, and deleted once the run is over', async () => {
+        const ctx = createContext();
+        const account = await createAccount(ctx.sourceOrg);
+
+        const { capturedOutput } = await ctx.runMigration(createBasicConfig(ctx, [account.id], {
+            recordStore: { type: 'sqlite', encrypt: true }
+        }));
+
+        const opened = capturedOutput.find(event => event.type === 'record_store_opened');
+        const closed = capturedOutput.find(event => event.type === 'record_store_closed');
+        expect(opened?.data).toEqual({ path: expect.stringContaining(`${TARGET_ORG_ALIAS}__records.`), encrypted: true, keep: false });
+        expect(closed?.data).toEqual({ path: opened?.data.path, deleted: true });
+        expect(fs.existsSync(opened?.data.path)).toBe(false);
+        expect(targetOrg.records('Account')).toHaveLength(1);
+    });
+
+    test('is deleted when the run fails', async () => {
+        const ctx = createContext();
+        const account = await createAccount(ctx.sourceOrg);
+
+        await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+            recordStore: { type: 'sqlite', path: './test-record-store.db' },
+            apex: { afterMigration: [writeApexScript('after', [UNCOMPILABLE_APEX])] }
+        }))).rejects.toThrow(/apex\.afterMigration\) failed/);
+
+        expect(fs.existsSync('./test-record-store.db')).toBe(false);
+    });
+
+    test('kept, still holds every record the run fetched, readable with its passphrase', async () => {
+        const ctx = createContext();
+        const account = await createAccount(ctx.sourceOrg, 'Kept Account');
+        const contact = await ctx.sourceOrg.create('Contact', { LastName: 'Kept', AccountId: account.id });
+        process.env[STORE_KEY_ENV] = 'correct horse battery staple';
+
+        await ctx.runMigration(createBasicConfig(ctx, [contact.id], {
+            recordStore: { type: 'sqlite', path: './test-record-store.db', keep: true, encrypt: true }
+        }));
+
+        const dump = dumpRecordStore('./test-record-store.db');
+        expect(dump.queued).toEqual({});
+        expect(dump.fetched[contact.id].LastName).toBe('Kept');
+        expect(dump.fetched[account.id].Name).toBe('Kept Account');
+        expect(targetOrg.records('Contact')).toHaveLength(1);
+    });
+
+    test('refuses to start over a store a run kept', async () => {
+        const ctx = createContext();
+        const account = await createAccount(ctx.sourceOrg);
+        fs.writeFileSync('./test-record-store.db', '');
+
+        await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+            recordStore: { type: 'sqlite', path: './test-record-store.db' }
+        }))).rejects.toThrow(/already exists/);
+
+        expect(targetOrg.records('Account')).toHaveLength(0);
+    });
 });

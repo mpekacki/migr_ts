@@ -6,12 +6,24 @@ import { SObjectRecord, Schema } from 'jsforce';
  * record keeps this cheap for the ordinary case and, more to the point, avoids
  * building a second copy of a record whose file field is megabytes of base64.
  */
-function recordSize(record: SObjectRecord<Schema, string>): number {
+export function recordSize(record: SObjectRecord<Schema, string>): number {
     let size = 0;
     for (const value of Object.values(record)) {
         size += typeof value === 'string' ? value.length : 16;
     }
     return size;
+}
+
+/**
+ * What chunking needs to know about a record, without the record itself: a
+ * caller that keeps its records on disk can plan the chunks first and read each
+ * one's records only when it is about to send them.
+ */
+export interface ChunkEntry {
+    id: string;
+    sObjectType: string;
+    /** {@link recordSize}; only read when the chunks are bounded in bytes. */
+    bytes: number;
 }
 
 export default class Chunks {
@@ -33,55 +45,72 @@ export default class Chunks {
         this.maxChunkBytes = maxChunkBytes;
     }
 
+    /** Whether the chunks are bounded in bytes, which is when a {@link ChunkEntry} needs its `bytes`. */
+    get countsBytes(): boolean {
+        return this.maxChunkBytes !== Infinity;
+    }
+
     public getChunks(records: Record<string, SObjectRecord<Schema, string>>): Record<string, SObjectRecord<Schema, string>>[] {
-        const systemRecords: Record<string, SObjectRecord<Schema, string>> = {};
-        const nonSystemRecords: Record<string, SObjectRecord<Schema, string>> = {};
-        for (const recordId of Object.keys(records)) {
-            const record = records[recordId];
-            if (this.systemSObjects.includes(record!.attributes!.type)) {
-                systemRecords[recordId] = record;
+        const entries = Object.keys(records).map(id => ({
+            id,
+            sObjectType: records[id]!.attributes!.type,
+            bytes: this.countsBytes ? recordSize(records[id]) : 0
+        }));
+        return this.getChunkIds(entries).map(ids => {
+            const chunk: Record<string, SObjectRecord<Schema, string>> = {};
+            for (const id of ids) {
+                chunk[id] = records[id];
+            }
+            return chunk;
+        });
+    }
+
+    /** {@link getChunks}, planned from what is known about each record rather than from the records. */
+    public getChunkIds(entries: ChunkEntry[]): string[][] {
+        const systemEntries: ChunkEntry[] = [];
+        const nonSystemEntries: ChunkEntry[] = [];
+        for (const entry of entries) {
+            if (this.systemSObjects.includes(entry.sObjectType)) {
+                systemEntries.push(entry);
             } else {
-                nonSystemRecords[recordId] = record;
+                nonSystemEntries.push(entry);
             }
         }
-        const chunks: Record<string, SObjectRecord<Schema, string>>[] = [];
-        for (const recs of [systemRecords, nonSystemRecords]) {
-            const idsSortedBySObjectType: string[] = Object.keys(recs).sort((a, b) => {
-                const aSObjectType = recs[a]!.attributes!.type;
-                const bSObjectType = recs[b]!.attributes!.type;
-                if (aSObjectType === bSObjectType) {
+        const chunks: string[][] = [];
+        for (const group of [systemEntries, nonSystemEntries]) {
+            const sortedBySObjectType = [...group].sort((a, b) => {
+                if (a.sObjectType === b.sObjectType) {
                     return 0;
                 }
-                return aSObjectType.localeCompare(bSObjectType);
+                return a.sObjectType.localeCompare(b.sObjectType);
             });
 
-            let currentChunk: Record<string, SObjectRecord<Schema, string>> = {};
+            let currentChunk: string[] = [];
             let lastSObjectType: string | null = null;
             let numSObjectTypeChunks = 0;
             let currentChunkSize = 0;
             let currentChunkBytes = 0;
-            for (const recordId of idsSortedBySObjectType) {
-                const record = recs[recordId];
-                if (record!.attributes!.type !== lastSObjectType) {
-                    lastSObjectType = record!.attributes!.type;
+            for (const entry of sortedBySObjectType) {
+                if (entry.sObjectType !== lastSObjectType) {
+                    lastSObjectType = entry.sObjectType;
                     numSObjectTypeChunks++;
                 }
                 currentChunkSize++;
-                const bytes = this.maxChunkBytes === Infinity ? 0 : recordSize(record);
+                const bytes = this.countsBytes ? entry.bytes : 0;
                 currentChunkBytes += bytes;
                 // A record over the limit by itself starts a chunk of its own rather
                 // than looping forever trying to make room for it.
                 const overBytes = currentChunkBytes > this.maxChunkBytes && currentChunkSize > 1;
                 if (currentChunkSize > this.maxChunkSize || numSObjectTypeChunks > this.maxSObjectTypeChunks || overBytes) {
                     chunks.push(currentChunk);
-                    currentChunk = {};
+                    currentChunk = [];
                     currentChunkSize = 1;
                     numSObjectTypeChunks = 1;
                     currentChunkBytes = bytes;
                 }
-                currentChunk[recordId] = record;
+                currentChunk.push(entry.id);
             }
-            if (Object.keys(currentChunk).length > 0) {
+            if (currentChunk.length > 0) {
                 chunks.push(currentChunk);
             }
         }

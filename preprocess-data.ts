@@ -37,32 +37,47 @@ const defaultEmailSanitizer = (email: string, template: string = '{0}@example.co
     return applyTemplate(sanitized, normalizedTemplate);
 };
 
-export const preprocessData = (recordsByIds: Record<string, SObjectRecord<Schema, string>>, strategy: PreprocessStrategy) => {
-    if (strategy.emailAnonymization) {
-        let transformer: (email: string) => string;
+/**
+ * The strategy as a function applied to one record at a time, in place - for a
+ * caller whose records are not all in memory at once. Null when the strategy
+ * has nothing to do.
+ */
+export const createPreprocessor = (strategy: PreprocessStrategy): ((record: SObjectRecord<Schema, string>) => void) | null => {
+    if (!strategy.emailAnonymization) {
+        return null;
+    }
+    let transformer: (email: string) => string;
 
-        if (strategy.emailAnonymization.customTransformer) {
-            transformer = strategy.emailAnonymization.customTransformer;
-        } else if (strategy.emailAnonymization.mode === 'obfuscate') {
-            const template = strategy.emailAnonymization.template || '{0}@example.com';
-            transformer = (email: string) => defaultEmailObfuscator(email, template);
-        } else if (strategy.emailAnonymization.mode === 'sanitize') {
-            const template = strategy.emailAnonymization.template || '{0}@example.com';
-            transformer = (email: string) => defaultEmailSanitizer(email, template);
-        } else {
-            return; // Unknown mode, do nothing
-        }
+    if (strategy.emailAnonymization.customTransformer) {
+        transformer = strategy.emailAnonymization.customTransformer;
+    } else if (strategy.emailAnonymization.mode === 'obfuscate') {
+        const template = strategy.emailAnonymization.template || '{0}@example.com';
+        transformer = (email: string) => defaultEmailObfuscator(email, template);
+    } else if (strategy.emailAnonymization.mode === 'sanitize') {
+        const template = strategy.emailAnonymization.template || '{0}@example.com';
+        transformer = (email: string) => defaultEmailSanitizer(email, template);
+    } else {
+        return null; // Unknown mode, do nothing
+    }
 
-        const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
-        for (const recordId in recordsByIds) {
-            const record = recordsByIds[recordId];
-            for (const field in record) {
-                // if value contains an email address, replace only the email parts
-                if (record[field] && typeof record[field] === 'string' && record[field].includes('@')) {
-                    record[field] = (record[field] as string).replace(emailRegex, (match) => transformer(match));
-                }
+    return (record: SObjectRecord<Schema, string>) => {
+        for (const field in record) {
+            // if value contains an email address, replace only the email parts
+            if (record[field] && typeof record[field] === 'string' && record[field].includes('@')) {
+                record[field] = (record[field] as string).replace(emailRegex, (match) => transformer(match));
             }
         }
+    };
+}
+
+export const preprocessData = (recordsByIds: Record<string, SObjectRecord<Schema, string>>, strategy: PreprocessStrategy) => {
+    const preprocess = createPreprocessor(strategy);
+    if (!preprocess) {
+        return;
+    }
+    for (const recordId in recordsByIds) {
+        preprocess(recordsByIds[recordId]);
     }
 }

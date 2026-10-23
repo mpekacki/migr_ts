@@ -1,4 +1,4 @@
-import type { DatabaseSync, SupportedValueType } from 'node:sqlite';
+import type { DatabaseSync, StatementSync, SupportedValueType } from 'node:sqlite';
 import * as fs from 'fs';
 
 /**
@@ -30,7 +30,7 @@ let sqliteModule: SqliteModule | undefined;
  * synchronously while the module loads, so restoring it right after the
  * require is enough.
  */
-function loadSqlite(): SqliteModule {
+export function loadSqlite(): SqliteModule {
     if (sqliteModule === undefined) {
         const originalEmitWarning = process.emitWarning;
         process.emitWarning = ((warning: string | Error, ...args: any[]) => {
@@ -53,6 +53,8 @@ function loadSqlite(): SqliteModule {
 const META_TABLE = '_migr_meta';
 const FIELDS_TABLE = '_migr_fields';
 const ID_COLUMN = 'Id';
+/** The rowid as a page query selects it, under a name no SObject field can have. */
+const ROWID_ALIAS = '_migr_rowid';
 
 type ValueType = 'string' | 'number' | 'boolean' | 'json' | 'mixed';
 
@@ -134,18 +136,49 @@ function isReservedField(field: string): boolean {
 }
 
 /**
+ * Something {@link writeRecordsToSqlite} can read records from more than once:
+ * each call starts the records over, as `[id, record]` pairs.
+ */
+export type RecordSource = () => Iterable<[string, any]>;
+
+/**
  * Writes every record to `filePath`, merging with any database already there:
  * records only the database has are kept, records this run produced again are
  * replaced by their new version, so a second migration adds to the export
  * instead of wiping it. `records` is keyed by record id; each record carries
  * its SObject type in `attributes.type`, exactly like the JSON file format.
  *
+ * `records` may also be a {@link RecordSource}, for a record set too large to
+ * hold in memory: neither it nor the existing database is then read whole, at
+ * the cost of reading each of them more than once - for the ids, for the
+ * columns, and for the rows.
+ *
  * The merged set is written to a temporary database that replaces `filePath`
  * only once it is complete, so a failed run cannot take the previous export
  * down with it.
  */
-export function writeRecordsToSqlite(filePath: string, records: Record<string, any>): void {
-    const merged = { ...readExistingRecords(filePath), ...records };
+export function writeRecordsToSqlite(filePath: string, records: Record<string, any> | RecordSource): void {
+    const source: RecordSource = typeof records === 'function' ? records as RecordSource : () => Object.entries(records);
+    const hasExisting = fs.existsSync(filePath) && fs.statSync(filePath).size > 0;
+    if (hasExisting) {
+        // A file that is not a migr_ts export has to make this throw rather than
+        // be overwritten - and before any of the work, not after it.
+        assertIsExport(filePath);
+    }
+    const exportedIds = new Set<string>();
+    for (const [id] of source()) {
+        exportedIds.add(id);
+    }
+    const merged: RecordSource = function* () {
+        if (hasExisting) {
+            for (const entry of iterateRecordsInSqlite(filePath)) {
+                if (!exportedIds.has(entry[0])) {
+                    yield entry;
+                }
+            }
+        }
+        yield* source();
+    };
     const tempPath = `${filePath}.migr_ts_tmp`;
     if (fs.existsSync(tempPath)) {
         fs.unlinkSync(tempPath);
@@ -161,32 +194,39 @@ export function writeRecordsToSqlite(filePath: string, records: Record<string, a
     }
 }
 
-/**
- * The records an earlier run left in `filePath`, or none when there is nothing
- * to merge with. A file that is not a migr_ts export makes this throw rather
- * than be overwritten.
- */
-function readExistingRecords(filePath: string): Record<string, any> {
-    if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
-        return {};
+function assertIsExport(filePath: string): void {
+    const db = new (loadSqlite().DatabaseSync)(filePath);
+    try {
+        assertHasFieldsTable(db, filePath);
+    } finally {
+        db.close();
     }
-    return readRecordsFromSqlite(filePath);
 }
 
-function writeDatabase(filePath: string, records: Record<string, any>): void {
-    const recordIdsByType: Record<string, string[]> = {};
+function assertHasFieldsTable(db: DatabaseSync, filePath: string): void {
+    const hasFieldsTable = db
+        .prepare('SELECT name FROM sqlite_master WHERE type = \'table\' AND name = ?')
+        .all(FIELDS_TABLE).length > 0;
+    if (!hasFieldsTable) {
+        throw new Error(`${filePath} is not a migr_ts SQLite export (missing ${FIELDS_TABLE} table)`);
+    }
+}
+
+/**
+ * Two passes over `records`: the first works out every table's columns, the
+ * second writes the rows - so no more than one record is held at a time.
+ */
+function writeDatabase(filePath: string, records: RecordSource): void {
     const fieldTypesByType: Record<string, Record<string, ValueType>> = {};
 
-    for (const [recordId, record] of Object.entries(records)) {
+    for (const [recordId, record] of records()) {
         const sObjectType = record?.attributes?.type;
         if (!sObjectType) {
             throw new Error(`Cannot export record ${recordId} to SQLite: missing attributes.type`);
         }
-        if (!(sObjectType in recordIdsByType)) {
-            recordIdsByType[sObjectType] = [];
+        if (!(sObjectType in fieldTypesByType)) {
             fieldTypesByType[sObjectType] = {};
         }
-        recordIdsByType[sObjectType].push(recordId);
 
         const fieldTypes = fieldTypesByType[sObjectType];
         for (const [field, value] of Object.entries(record)) {
@@ -215,7 +255,8 @@ function writeDatabase(filePath: string, records: Record<string, any>): void {
 
         db.exec('BEGIN');
         try {
-            for (const sObjectType of Object.keys(recordIdsByType)) {
+            const insertsByType: Record<string, { fields: string[], statement: StatementSync }> = {};
+            for (const sObjectType of Object.keys(fieldTypesByType)) {
                 const fieldTypes = fieldTypesByType[sObjectType];
                 const fields = Object.keys(fieldTypes);
 
@@ -231,17 +272,21 @@ function writeDatabase(filePath: string, records: Record<string, any>): void {
                 }
 
                 const allColumns = [ID_COLUMN, ...fields];
-                const insertRecord = db.prepare(
-                    `INSERT INTO ${quoteIdentifier(sObjectType)} (${allColumns.map(quoteIdentifier).join(', ')}) VALUES (${allColumns.map(() => '?').join(', ')})`
-                );
-                for (const recordId of recordIdsByType[sObjectType]) {
-                    const record = records[recordId];
-                    const values: SupportedValueType[] = [recordId];
-                    for (const field of fields) {
-                        values.push(encodeValue(record[field]));
-                    }
-                    insertRecord.run(...values);
+                insertsByType[sObjectType] = {
+                    fields,
+                    statement: db.prepare(
+                        `INSERT INTO ${quoteIdentifier(sObjectType)} (${allColumns.map(quoteIdentifier).join(', ')}) VALUES (${allColumns.map(() => '?').join(', ')})`
+                    )
+                };
+            }
+
+            for (const [recordId, record] of records()) {
+                const { fields, statement } = insertsByType[record.attributes.type];
+                const values: SupportedValueType[] = [recordId];
+                for (const field of fields) {
+                    values.push(encodeValue(record[field]));
                 }
+                statement.run(...values);
             }
             db.exec('COMMIT');
         } catch (error) {
@@ -258,18 +303,33 @@ function writeDatabase(filePath: string, records: Record<string, any>): void {
  * records keyed by id in the same shape as the JSON file format.
  */
 export function readRecordsFromSqlite(filePath: string): Record<string, any> {
+    const records: Record<string, any> = {};
+    for (const [recordId, record] of iterateRecordsInSqlite(filePath)) {
+        records[recordId] = record;
+    }
+    return records;
+}
+
+/** How many rows {@link iterateRecordsInSqlite} reads per query. */
+const PAGE_SIZE = 500;
+
+/**
+ * The records of a database written by {@link writeRecordsToSqlite}, one at a
+ * time and in the shape the JSON file format has them, so a large export can be
+ * read without holding it whole. Tables go in name order, rows in the order
+ * they were written.
+ *
+ * Each table is read a page at a time by rowid rather than through a statement
+ * iterator, which needs a newer Node than the 22.5 this otherwise runs on.
+ */
+export function* iterateRecordsInSqlite(filePath: string): Generator<[string, any]> {
     if (!fs.existsSync(filePath)) {
         throw new Error(`SQLite database not found: ${filePath}`);
     }
 
     const db = new (loadSqlite().DatabaseSync)(filePath);
     try {
-        const hasFieldsTable = db
-            .prepare('SELECT name FROM sqlite_master WHERE type = \'table\' AND name = ?')
-            .all(FIELDS_TABLE).length > 0;
-        if (!hasFieldsTable) {
-            throw new Error(`${filePath} is not a migr_ts SQLite export (missing ${FIELDS_TABLE} table)`);
-        }
+        assertHasFieldsTable(db, filePath);
 
         const fieldTypesByType: Record<string, Record<string, ValueType>> = {};
         for (const row of db.prepare(`SELECT sobject_type, field_name, value_type FROM ${FIELDS_TABLE}`).all() as any[]) {
@@ -284,27 +344,33 @@ export function readRecordsFromSqlite(filePath: string): Record<string, any> {
             .prepare('SELECT name FROM sqlite_master WHERE type = \'table\' AND name NOT LIKE \'\\_%\' ESCAPE \'\\\' AND name NOT LIKE \'sqlite\\_%\' ESCAPE \'\\\' ORDER BY name')
             .all() as any[];
 
-        const records: Record<string, any> = {};
         for (const table of tables) {
             const sObjectType = String(table.name);
             const fieldTypes = fieldTypesByType[sObjectType] ?? {};
-            const rows = db.prepare(`SELECT * FROM ${quoteIdentifier(sObjectType)} ORDER BY rowid`).all() as any[];
-            for (const row of rows) {
-                const recordId = String(row[ID_COLUMN]);
-                const record: Record<string, any> = {
-                    attributes: { type: sObjectType, url: '' },
-                    [ID_COLUMN]: recordId
-                };
-                for (const [column, value] of Object.entries(row)) {
-                    if (column === ID_COLUMN) {
-                        continue;
+            const page = db.prepare(`SELECT rowid AS ${ROWID_ALIAS}, * FROM ${quoteIdentifier(sObjectType)} WHERE rowid > ? ORDER BY rowid LIMIT ${PAGE_SIZE}`);
+            let lastRowid: SupportedValueType = 0;
+            for (;;) {
+                const rows = page.all(lastRowid) as any[];
+                for (const row of rows) {
+                    lastRowid = row[ROWID_ALIAS];
+                    const recordId = String(row[ID_COLUMN]);
+                    const record: Record<string, any> = {
+                        attributes: { type: sObjectType, url: '' },
+                        [ID_COLUMN]: recordId
+                    };
+                    for (const [column, value] of Object.entries(row)) {
+                        if (column === ID_COLUMN || column === ROWID_ALIAS) {
+                            continue;
+                        }
+                        record[column] = decodeValue(value as SupportedValueType, fieldTypes[column] ?? 'mixed');
                     }
-                    record[column] = decodeValue(value as SupportedValueType, fieldTypes[column] ?? 'mixed');
+                    yield [recordId, record];
                 }
-                records[recordId] = record;
+                if (rows.length < PAGE_SIZE) {
+                    break;
+                }
             }
         }
-        return records;
     } finally {
         db.close();
     }

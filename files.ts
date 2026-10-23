@@ -190,6 +190,11 @@ export default class FileTransfer {
         this.heldDocuments.delete(documentId);
     }
 
+    /** Whether a record of this type can name a document - {@link documentOf} - before reading the record. */
+    carriesDocument(sObjectName: string | undefined): boolean {
+        return sObjectName === CONTENT_VERSION;
+    }
+
     /**
      * The source ContentDocument an inserted ContentVersion belonged to. Read off
      * the fetched record: the migrated copy no longer has the field, because the
@@ -197,7 +202,7 @@ export default class FileTransfer {
      * the target create one.
      */
     documentOf(sObjectName: string | undefined, fetchedRecord: any): string | undefined {
-        if (sObjectName !== CONTENT_VERSION) {
+        if (!this.carriesDocument(sObjectName)) {
             return undefined;
         }
         return fetchedRecord?.[DOCUMENT_FIELD] || undefined;

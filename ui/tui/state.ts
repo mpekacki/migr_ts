@@ -146,6 +146,12 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             push(state, 'run', 'Starting migration');
             break;
         }
+        case 'record_store_opened':
+            push(state, 'run', `Keeping records in ${d.encrypted ? 'encrypted ' : ''}store ${d.path}`);
+            break;
+        case 'record_store_closed':
+            push(state, 'ok', d.deleted ? `Deleted record store ${d.path}` : `Record store kept at ${d.path}`);
+            break;
         case 'describing_sobject':
             state.phase = 'Describing';
             push(state, 'run', `Describing ${d.sObjectName}`);

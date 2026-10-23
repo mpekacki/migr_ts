@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { readRecordsFromSqlite, writeRecordsToSqlite, SQLITE_FORMAT_VERSION } from '../sqlite-store';
+import { iterateRecordsInSqlite, readRecordsFromSqlite, writeRecordsToSqlite, SQLITE_FORMAT_VERSION } from '../sqlite-store';
 
 const tempFiles: string[] = [];
 
@@ -312,5 +312,41 @@ describe('sqlite-store', () => {
         db.close();
 
         expect(() => readRecordsFromSqlite(filePath)).toThrow(/not a migr_ts SQLite export/);
+    });
+
+    test('reads a table larger than a page one record at a time, in the order it was written', () => {
+        const filePath = tempDbPath();
+        const records: Record<string, any> = {};
+        for (let i = 1200; i > 0; i--) {
+            records[`001${String(i).padStart(12, '0')}AAA`] = record('Account', { Name: `Account ${i}` });
+        }
+        records['003000000000001AAA'] = record('Contact', { LastName: 'Doe' });
+        writeRecordsToSqlite(filePath, records);
+
+        const ids = [...iterateRecordsInSqlite(filePath)].map(([id]) => id);
+
+        expect(ids).toEqual(Object.keys(records));
+        expect(readRecordsFromSqlite(filePath)).toEqual(Object.fromEntries([...iterateRecordsInSqlite(filePath)]));
+    });
+
+    test('writes records it reads from a source, merging them like any others', () => {
+        const filePath = tempDbPath();
+        writeRecordsToSqlite(filePath, {
+            '001000000000001AAA': record('Account', { Name: 'Cloud Kicks' }),
+            '001000000000002AAA': record('Account', { Name: 'Universal Containers' })
+        });
+        let reads = 0;
+        writeRecordsToSqlite(filePath, function* () {
+            reads++;
+            yield ['001000000000002AAA', record('Account', { Name: 'Renamed' })];
+            yield ['003000000000001AAA', record('Contact', { LastName: 'Doe' })];
+        });
+
+        const readBack = readRecordsFromSqlite(filePath);
+
+        expect(reads).toBeGreaterThan(1);
+        expect(readBack['001000000000001AAA'].Name).toBe('Cloud Kicks');
+        expect(readBack['001000000000002AAA'].Name).toBe('Renamed');
+        expect(readBack['003000000000001AAA'].LastName).toBe('Doe');
     });
 });
