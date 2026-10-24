@@ -5,6 +5,7 @@ A CLI tool for migrating Salesforce records between orgs (or to/from files). It 
 ## Features
 
 - **Relationship discovery** — starting from a set of record IDs, recursively fetches referenced records (lookups, master-detail, even IDs embedded in text/formula fields) up to a configurable depth
+- **Value lookups** — follow text fields that name other records by a shared value (a UUID, a business key) instead of by ID, in either direction
 - **Circular dependency resolution** — detects dependency cycles, temporarily clears required lookups, and restores them after all records are created
 - **Matchers** — identify records that already exist in the target org (by name, developer name, or any field mapping) so they are reused instead of duplicated
 - **Solvers** — pattern-based error handlers that automatically fix field values, skip records, retry with backoff, extract IDs from error messages, and more
@@ -67,6 +68,7 @@ Two cheap ways to rehearse: set `targetSqlite` (or `targetFile`) to export the r
 | `matchers` | How to identify records that already exist in the target org. `whenMissing` (`create` or `skip`) controls what happens when no match is found; omitting it behaves like `create` |
 | `solvers` | Automatic error handlers — see [Solvers](#solvers) |
 | `relationships` | Child relationships to fetch explicitly (e.g. `Account` → `Contacts`) |
+| `valueLookups` | Text fields that name another record by a value both carry (a UUID, a business key) rather than by id — see [Value lookups](#value-lookups) |
 | `maxConcurrentRequests` | How many records are fetched from the source, and matched against the target, at once (default: 10) |
 | `historyFilePath` | Where to keep the resume history. Names either the file itself or a directory to put it in (end it with a separator to mean a directory). Defaults to `{targetOrg}__history.json` in the working directory |
 | `fullAuto.enabled` | Run without any interactive prompt. Implies `fullAuto.skipConfirmation` |
@@ -168,6 +170,30 @@ Worth knowing:
 - `maxFileSizeMb` defaults to 25 because a non-multipart request body may carry at most 37.5 MB of base64, and a 25 MB file encodes to roughly 33 MB. A file over the limit is reported and its record is migrated without contents — which for a `ContentVersion` means the insert then fails, since the field is required.
 - Salesforce shares every new file with its owner by itself. Migrating the source's owner `ContentDocumentLink` therefore runs into `DUPLICATE_VALUE`; a `skip` solver on `is already linked with the entity` disposes of it.
 - `files.enabled: false` migrates file records without their contents, which is useful for rehearsing a large migration.
+
+### Value lookups
+
+Some fields name another record without holding its ID — an `External_Key__c` text field holding the UUID or business key of the record it belongs with. The ID scan cannot see those, so `valueLookups` says where to look. It is keyed by the SObject that carries the field, and each entry names the field, the SObject the value points at, and the field there that holds the same value:
+
+```json
+{
+  "valueLookups": {
+    "Order__c": [
+      { "field": "Customer_Key__c", "sObjectType": "Account", "matchField": "External_Key__c" }
+    ]
+  }
+}
+```
+
+Every fetched `Order__c` then has `Customer_Key__c` read, and every source `Account` whose `External_Key__c` holds that value is fetched along with it.
+
+- **Every match is fetched**, not just the first. A record whose field is null or empty looks nothing up.
+- `field` is read off the fetched record, so it may be a field that cannot be inserted, such as a formula.
+- Like an ordinary lookup, a value lookup is **not** stopped by `relatedRecordDepthLimit`.
+- **`includeChildren: true`** follows the value back the other way too: every fetched `Account` has `External_Key__c` read, and every `Order__c` whose `Customer_Key__c` holds the same value is fetched as its child. Like `relationships`, this direction **does** stop at `relatedRecordDepthLimit`. There is no children-only form.
+- Nothing is remapped on insert. The value goes across unchanged on both records, and that is what keeps them linked in the target.
+- Both fields are checked to exist before the fetch starts, so a misspelled field fails the run up front. A `sourceFile` / `sourceSqlite` run fetches nothing and skips the check.
+- In record paths, a record reached this way shows up as a lookup named after `field`, or, through `includeChildren`, as a child named `Order__c.Customer_Key__c`.
 
 ### Anonymous Apex around the migration
 
