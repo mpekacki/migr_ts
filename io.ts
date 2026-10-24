@@ -1,7 +1,7 @@
 import { SObjectRecord, Schema } from "jsforce";
-import { Options, ValueLookup } from "./config";
+import { Options } from "./config";
 import IOEvent, { IOEventType } from "./ioevent";
-import { PathStep, RetrievedRecord } from "./record-paths";
+import { OriginKind, PathStep, RetrievedRecord } from "./record-paths";
 
 /**
  * The fields worth keeping off an error object. Deliberately a fixed list rather
@@ -161,14 +161,20 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'related_records', { relationshipName, count }));
     }
 
-    public queryingForValueLookup(soql: string, sObjectName: string, recordId: string, lookup: ValueLookup, value: string) {
+    /**
+     * A value lookup of either direction: `kind` is `lookup` for the records the
+     * fetched one names, `child` for the records naming it (`includeChildren`).
+     */
+    public queryingForValueLookup(
+        soql: string, sObjectName: string, recordId: string, queriedSObjectType: string, queriedField: string, value: string, kind: OriginKind
+    ) {
         this.onOutput(this.buildIOEvent('output', 'querying_value_lookup', {
-            soql, sObjectName, recordId, field: lookup.field, lookupSObjectType: lookup.sObjectType, matchField: lookup.matchField, value
+            soql, sObjectName, recordId, queriedSObjectType, queriedField, value, kind
         }));
     }
 
-    public valueLookupRecords(field: string, lookupSObjectType: string, count: number) {
-        this.onOutput(this.buildIOEvent('output', 'value_lookup_records', { field, lookupSObjectType, count }));
+    public valueLookupRecords(queriedSObjectType: string, queriedField: string, kind: OriginKind, count: number) {
+        this.onOutput(this.buildIOEvent('output', 'value_lookup_records', { queriedSObjectType, queriedField, kind, count }));
     }
 
     public fetchedRecords(count: number, countsByDepth?: Record<number, number>) {

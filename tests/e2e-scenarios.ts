@@ -72,6 +72,26 @@ async function createFullAutoTestRecords(sourceOrg: TestOrg) {
     return { account, contract, contract2 };
 }
 
+// A Custom_Object_C__c holding `ref` in External_Id__c, and Accounts naming it by
+// that value in Related_Ref__c - plus one naming something else. C leads to A and
+// B (C -> A -> B -> C) because those have required lookups in the live orgs.
+async function createValueLookupChildren(sourceOrg: TestOrg) {
+    // External_Id__c holds at most 32 characters.
+    const ref = `vl-${Math.random().toString(36).slice(2, 14)}`;
+    const custObjC = await createRecord(sourceOrg, 'Custom_Object_C__c', { External_Id__c: ref });
+    const custObjB = await createRecord(sourceOrg, 'Custom_Object_B__c', { Lookup_to_C__c: custObjC.id });
+    const custObjA = await createRecord(sourceOrg, 'Custom_Object_A__c', { Lookup_to_B__c: custObjB.id });
+    await sourceOrg.update('Custom_Object_C__c', { Id: custObjC.id, Lookup_to_A__c: custObjA.id });
+    const naming1 = await createRecord(sourceOrg, 'Account', { Name: 'Naming 1', Related_Ref__c: ref });
+    const naming2 = await createRecord(sourceOrg, 'Account', { Name: 'Naming 2', Related_Ref__c: ref });
+    const unrelated = await createRecord(sourceOrg, 'Account', { Name: 'Unrelated', Related_Ref__c: `${ref}-other` });
+    return { ref, custObjC, naming1, naming2, unrelated };
+}
+
+const VALUE_LOOKUP_WITH_CHILDREN = {
+    Account: [{ field: 'Related_Ref__c', sObjectType: 'Custom_Object_C__c', matchField: 'External_Id__c', includeChildren: true }]
+};
+
 export const e2eScenarios: E2EScenario[] = [
 
     scenario('migrate record - single', async (ctx: E2EContext) => {
@@ -1130,6 +1150,30 @@ export const e2eScenarios: E2EScenario[] = [
         const newCustObjC = await retrieveRecord(ctx.targetOrg, 'Custom_Object_C__c', newCustObjCId);
         expect(newCustObjC.External_Id__c).toEqual(ref);
         expect(newCustObjC.Lookup_to_A__c).toEqual(newCustObjAId);
+    }),
+
+    scenario('value lookup with includeChildren fetches the records that name it', async (ctx: E2EContext) => {
+        const { ref, custObjC, naming1, naming2, unrelated } = await createValueLookupChildren(ctx.sourceOrg);
+
+        const config = createBasicConfig(ctx, [custObjC.id], { valueLookups: VALUE_LOOKUP_WITH_CHILDREN });
+        const { parsedOutput } = await ctx.runMigration(config);
+
+        assertRecordMigrated(parsedOutput, custObjC.id);
+        for (const naming of [naming1, naming2]) {
+            const newId = assertRecordMigrated(parsedOutput, naming.id);
+            expect((await retrieveRecord(ctx.targetOrg, 'Account', newId)).Related_Ref__c).toEqual(ref);
+        }
+        assertRecordNotMigrated(parsedOutput, unrelated.id);
+    }),
+
+    scenario('value lookup children stop at the depth limit', async (ctx: E2EContext) => {
+        const { custObjC, naming1 } = await createValueLookupChildren(ctx.sourceOrg);
+
+        const config = createBasicConfig(ctx, [custObjC.id], { valueLookups: VALUE_LOOKUP_WITH_CHILDREN, relatedRecordDepthLimit: 1 });
+        const { parsedOutput } = await ctx.runMigration(config);
+
+        assertRecordMigrated(parsedOutput, custObjC.id);
+        assertRecordNotMigrated(parsedOutput, naming1.id);
     }),
 
     scenario('find ids inside text', async (ctx: E2EContext) => {

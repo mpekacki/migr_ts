@@ -101,6 +101,11 @@ interface Discovery {
     name: string;
 }
 
+/** Whether a value lookup has anything to look for - an empty value names no record. */
+function hasValue(value: any): boolean {
+    return value !== null && value !== undefined && value !== '';
+}
+
 /**
  * The update pass's counterpart to setFieldWithLaterUpdate: there is no later
  * pass to stash the old value for - this is that pass - so a solver's change is
@@ -593,7 +598,7 @@ class MigrationRunner {
         await this.discoverReferencedIds(record, creatableFields, found);
         this.collectFileVersionId(recordId, sObjectName, recordFields, found);
         await this.collectRelatedRecordIds(recordId, sObjectName, depth, found);
-        await this.collectValueLookupIds(recordId, sObjectName, recordFields, found);
+        await this.collectValueLookupIds(recordId, sObjectName, depth, recordFields, found);
         return [...found.values()];
     }
 
@@ -662,7 +667,7 @@ class MigrationRunner {
 
     private async collectRelatedRecordIds(recordId: string, sObjectName: string, depth: number, found: Map<string, Discovery>): Promise<void> {
         const relationships = this.options.relationships?.[sObjectName];
-        if (!relationships || (this.options.relatedRecordDepthLimit && depth >= this.options.relatedRecordDepthLimit)) {
+        if (!relationships || !this.childrenAllowedAt(depth)) {
             return;
         }
         const selector = this.sourceClient!.select(sObjectName);
@@ -714,45 +719,70 @@ class MigrationRunner {
      * The records a field names by a value they share rather than by id - see
      * `valueLookups`. The value is read off the fetched record, so a field that
      * cannot be inserted (a formula, say) can name records too. Like a lookup, and
-     * unlike a child relationship, the depth limit does not stop it: it names the
-     * records this one goes with, not a fan of children under it.
+     * unlike a child relationship, the depth limit does not stop the lookup: it
+     * names the records this one goes with. `includeChildren` follows the value
+     * back to the records naming this one, which is a fan of children like
+     * `relationships`, so that direction does stop at the limit.
      */
-    private async collectValueLookupIds(recordId: string, sObjectName: string, fetchedRecord: any, found: Map<string, Discovery>): Promise<void> {
-        for (const lookup of this.options.valueLookups?.[sObjectName] ?? []) {
-            const value = fetchedRecord[lookup.field];
-            if (value === null || value === undefined || value === '') {
-                continue;
-            }
-            const selector = this.sourceClient!.find(lookup.sObjectType, { [lookup.matchField]: value }).select('Id');
-            this.io.queryingForValueLookup(await selector.toSOQL(), sObjectName, recordId, lookup, String(value));
-            let matches: any[] = [];
-            try {
-                matches = await selector.execute();
-            } catch (jsforceError) {
-                try {
-                    const errorResult = await this.handleJsforceError(
-                        jsforceError,
-                        `look up ${lookup.sObjectType} by ${lookup.matchField} for ${recordId}`,
-                        () => selector.execute()
-                    );
-                    if (errorResult.success && errorResult.result) {
-                        matches = errorResult.result;
-                    } else if (errorResult.shouldSkip) {
-                        this.io.error(`Skipping lookup of ${lookup.sObjectType} by ${lookup.matchField} for ${recordId} due to jsforce error: ${jsforceError.message}`);
-                    } else {
-                        throw jsforceError;
-                    }
-                } catch {
-                    this.io.error(`Unhandled jsforce error looking up ${lookup.sObjectType} by ${lookup.matchField}: ${jsforceError.message}`);
+    private async collectValueLookupIds(recordId: string, sObjectName: string, depth: number, fetchedRecord: any, found: Map<string, Discovery>): Promise<void> {
+        const add = (ids: string[], kind: OriginKind, name: string) => {
+            for (const id of ids) {
+                if (id !== recordId && !this.queued.has(id) && !found.has(id)) {
+                    found.set(id, { id, kind, name });
                 }
             }
-            this.io.valueLookupRecords(lookup.field, lookup.sObjectType, matches.length);
-            for (const match of matches) {
-                if (match.Id !== recordId && !this.queued.has(match.Id) && !found.has(match.Id)) {
-                    found.set(match.Id, { id: match.Id, kind: 'lookup', name: lookup.field });
+        };
+        for (const lookup of this.options.valueLookups?.[sObjectName] ?? []) {
+            const value = fetchedRecord[lookup.field];
+            if (hasValue(value)) {
+                add(await this.findIdsByValue(lookup.sObjectType, lookup.matchField, value, sObjectName, recordId, 'lookup'), 'lookup', lookup.field);
+            }
+        }
+        if (!this.childrenAllowedAt(depth)) {
+            return;
+        }
+        for (const [childSObjectType, lookups] of Object.entries(this.options.valueLookups ?? {})) {
+            for (const lookup of lookups) {
+                const value = fetchedRecord[lookup.matchField];
+                if (lookup.includeChildren && lookup.sObjectType === sObjectName && hasValue(value)) {
+                    add(await this.findIdsByValue(childSObjectType, lookup.field, value, sObjectName, recordId, 'child'), 'child', `${childSObjectType}.${lookup.field}`);
                 }
             }
         }
+    }
+
+    /** The ids of the source records of `sObjectType` whose `field` holds `value`. */
+    private async findIdsByValue(sObjectType: string, field: string, value: any, sObjectName: string, recordId: string, kind: OriginKind): Promise<string[]> {
+        const selector = this.sourceClient!.find(sObjectType, { [field]: value }).select('Id');
+        this.io.queryingForValueLookup(await selector.toSOQL(), sObjectName, recordId, sObjectType, field, String(value), kind);
+        let matches: any[] = [];
+        try {
+            matches = await selector.execute();
+        } catch (jsforceError) {
+            try {
+                const errorResult = await this.handleJsforceError(
+                    jsforceError,
+                    `look up ${sObjectType} by ${field} for ${recordId}`,
+                    () => selector.execute()
+                );
+                if (errorResult.success && errorResult.result) {
+                    matches = errorResult.result;
+                } else if (errorResult.shouldSkip) {
+                    this.io.error(`Skipping lookup of ${sObjectType} by ${field} for ${recordId} due to jsforce error: ${jsforceError.message}`);
+                } else {
+                    throw jsforceError;
+                }
+            } catch {
+                this.io.error(`Unhandled jsforce error looking up ${sObjectType} by ${field}: ${jsforceError.message}`);
+            }
+        }
+        this.io.valueLookupRecords(sObjectType, field, kind, matches.length);
+        return matches.map(match => match.Id);
+    }
+
+    /** Whether a record fetched at `depth` may still lead to its children. */
+    private childrenAllowedAt(depth: number): boolean {
+        return !(this.options.relatedRecordDepthLimit && depth >= this.options.relatedRecordDepthLimit);
     }
 
     private removeAlreadyMigratedRecords(): void {
