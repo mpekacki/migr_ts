@@ -38,7 +38,8 @@ interface Options {
      * Fields that name another record by a value of their own rather than by its
      * id - a UUID or other business key both records carry. A fetched record of
      * the keyed type has `field` read, and every `sObjectType` record whose
-     * `matchField` holds the same value is fetched too. The value itself goes
+     * `matchField` holds the same value is fetched too - and, with
+     * `includeChildren`, the other way round as well. The value itself goes
      * across unchanged, so nothing has to be remapped once both have arrived.
      */
     valueLookups?: {
@@ -111,6 +112,14 @@ interface ValueLookup {
     sObjectType: string;
     /** The field of `sObjectType` the value is looked for in. */
     matchField: string;
+    /**
+     * Follow the value back as well, like a child relationship: a fetched
+     * `sObjectType` record has `matchField` read, and every record of the keyed
+     * type whose `field` holds the same value is fetched too. Like
+     * `relationships`, and unlike the lookup itself, this stops at
+     * `relatedRecordDepthLimit`. Defaults to false.
+     */
+    includeChildren?: boolean;
 }
 
 interface Solver {

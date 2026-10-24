@@ -215,10 +215,10 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             break;
         case 'querying_value_lookup':
             state.phase = 'Fetching';
-            push(state, 'run', `Looking up ${d.lookupSObjectType} by ${d.matchField} = ${d.field} of ${d.sObjectName} ${d.recordId}`);
+            push(state, 'run', `Looking up ${d.queriedSObjectType} where ${d.queriedField} = ${d.value} for ${d.sObjectName} ${d.recordId}`);
             break;
         case 'value_lookup_records':
-            if (d.count > 0) push(state, 'sub', `${d.lookupSObjectType}: ${d.count}`, 1);
+            if (d.count > 0) push(state, 'sub', `${d.queriedSObjectType}.${d.queriedField}: ${d.count}`, 1);
             break;
         case 'fetched_records': {
             state.total = d.count ?? state.total;
