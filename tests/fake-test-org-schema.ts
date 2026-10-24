@@ -54,6 +54,7 @@ function buildSchema(isSourceOrg: boolean): FakeSObjectDef[] {
                 { name: 'Description', type: 'textarea' },
                 { name: 'NumberOfEmployees', type: 'int' },
                 { name: 'Industry', type: 'picklist' },
+                { name: 'Related_Ref__c', type: 'string' },
                 OWNER_FIELD,
                 CREATED_DATE_FIELD
             ],

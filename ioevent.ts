@@ -17,6 +17,8 @@ export type IOEventType =
     | 'malformed_id'
     | 'querying_related_records'
     | 'related_records'
+    | 'querying_value_lookup'
+    | 'value_lookup_records'
     | 'fetched_records'
     | 'retrieved_records'
     | 'nothing_to_migrate'

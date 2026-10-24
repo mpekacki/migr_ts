@@ -1,5 +1,5 @@
 import { SObjectRecord, Schema } from "jsforce";
-import { Options } from "./config";
+import { Options, ValueLookup } from "./config";
 import IOEvent, { IOEventType } from "./ioevent";
 import { PathStep, RetrievedRecord } from "./record-paths";
 
@@ -159,6 +159,16 @@ class IO {
 
     public relatedRecords(relationshipName: string, count: number) {
         this.onOutput(this.buildIOEvent('output', 'related_records', { relationshipName, count }));
+    }
+
+    public queryingForValueLookup(soql: string, sObjectName: string, recordId: string, lookup: ValueLookup, value: string) {
+        this.onOutput(this.buildIOEvent('output', 'querying_value_lookup', {
+            soql, sObjectName, recordId, field: lookup.field, lookupSObjectType: lookup.sObjectType, matchField: lookup.matchField, value
+        }));
+    }
+
+    public valueLookupRecords(field: string, lookupSObjectType: string, count: number) {
+        this.onOutput(this.buildIOEvent('output', 'value_lookup_records', { field, lookupSObjectType, count }));
     }
 
     public fetchedRecords(count: number, countsByDepth?: Record<number, number>) {
