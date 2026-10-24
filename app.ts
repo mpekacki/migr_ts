@@ -279,6 +279,9 @@ class MigrationRunner {
         this.history = new MigrationHistory(this.options, this.isMigrateToFile);
         this.openRecordStore();
         await this.validateMatchers();
+        if (!this.isMigrateFromFile) {
+            await this.validateValueLookups();
+        }
 
         let recordIdsToFetch = this.options.recordIds;
         if (this.isMigrateFromFile) {
@@ -393,6 +396,24 @@ class MigrationRunner {
             for (const fieldMapping of matcher.fieldMappings) {
                 if (!sobjectDescribe.fields.some(field => field.name === fieldMapping.sourceField)) {
                     throw new Error(`Field ${fieldMapping.sourceField} not found in SObject ${matcher.sObjectType}`);
+                }
+            }
+        }
+    }
+
+    /**
+     * A misspelled field would otherwise never come up: the record has no value
+     * for it, so no query is made and the records it names are quietly left out.
+     */
+    private async validateValueLookups(): Promise<void> {
+        for (const [sObjectType, lookups] of Object.entries(this.options.valueLookups ?? {})) {
+            for (const lookup of lookups) {
+                const checks = [[sObjectType, lookup.field], [lookup.sObjectType, lookup.matchField]];
+                for (const [checkedSObjectType, fieldName] of checks) {
+                    const sobjectDescribe = await this.describes.getSObject(checkedSObjectType);
+                    if (!sobjectDescribe.fields.some(field => field.name === fieldName)) {
+                        throw new Error(`Value lookup field ${fieldName} not found in SObject ${checkedSObjectType}`);
+                    }
                 }
             }
         }
@@ -572,6 +593,7 @@ class MigrationRunner {
         await this.discoverReferencedIds(record, creatableFields, found);
         this.collectFileVersionId(recordId, sObjectName, recordFields, found);
         await this.collectRelatedRecordIds(recordId, sObjectName, depth, found);
+        await this.collectValueLookupIds(recordId, sObjectName, recordFields, found);
         return [...found.values()];
     }
 
@@ -683,6 +705,51 @@ class MigrationRunner {
                     if (!this.queued.has(relatedRecord.Id!) && !found.has(relatedRecord.Id!)) {
                         found.set(relatedRecord.Id!, { id: relatedRecord.Id!, kind: 'child', name: relationship.name });
                     }
+                }
+            }
+        }
+    }
+
+    /**
+     * The records a field names by a value they share rather than by id - see
+     * `valueLookups`. The value is read off the fetched record, so a field that
+     * cannot be inserted (a formula, say) can name records too. Like a lookup, and
+     * unlike a child relationship, the depth limit does not stop it: it names the
+     * records this one goes with, not a fan of children under it.
+     */
+    private async collectValueLookupIds(recordId: string, sObjectName: string, fetchedRecord: any, found: Map<string, Discovery>): Promise<void> {
+        for (const lookup of this.options.valueLookups?.[sObjectName] ?? []) {
+            const value = fetchedRecord[lookup.field];
+            if (value === null || value === undefined || value === '') {
+                continue;
+            }
+            const selector = this.sourceClient!.find(lookup.sObjectType, { [lookup.matchField]: value }).select('Id');
+            this.io.queryingForValueLookup(await selector.toSOQL(), sObjectName, recordId, lookup, String(value));
+            let matches: any[] = [];
+            try {
+                matches = await selector.execute();
+            } catch (jsforceError) {
+                try {
+                    const errorResult = await this.handleJsforceError(
+                        jsforceError,
+                        `look up ${lookup.sObjectType} by ${lookup.matchField} for ${recordId}`,
+                        () => selector.execute()
+                    );
+                    if (errorResult.success && errorResult.result) {
+                        matches = errorResult.result;
+                    } else if (errorResult.shouldSkip) {
+                        this.io.error(`Skipping lookup of ${lookup.sObjectType} by ${lookup.matchField} for ${recordId} due to jsforce error: ${jsforceError.message}`);
+                    } else {
+                        throw jsforceError;
+                    }
+                } catch {
+                    this.io.error(`Unhandled jsforce error looking up ${lookup.sObjectType} by ${lookup.matchField}: ${jsforceError.message}`);
+                }
+            }
+            this.io.valueLookupRecords(lookup.field, lookup.sObjectType, matches.length);
+            for (const match of matches) {
+                if (match.Id !== recordId && !this.queued.has(match.Id) && !found.has(match.Id)) {
+                    found.set(match.Id, { id: match.Id, kind: 'lookup', name: lookup.field });
                 }
             }
         }

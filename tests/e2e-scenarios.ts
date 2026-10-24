@@ -1099,6 +1099,39 @@ export const e2eScenarios: E2EScenario[] = [
         await expect(ctx.runMigration(config)).rejects.toThrow();
     }),
 
+    scenario('value lookup fetches the records a text field names by value', async (ctx: E2EContext) => {
+        // External_Id__c holds at most 32 characters.
+        const ref = `vl-${Math.random().toString(36).slice(2, 14)}`;
+        const account = await createRecord(ctx.sourceOrg, 'Account', { Name: 'Cloud Kicks', Related_Ref__c: ref });
+        const accountWithoutRef = await createAccount(ctx.sourceOrg);
+        // A and B have required lookups in the live orgs, so C leads to them the
+        // way it does in 'migrate record - complex': C -> A -> B -> C.
+        const custObjC = await createRecord(ctx.sourceOrg, 'Custom_Object_C__c', { External_Id__c: ref });
+        const custObjB = await createRecord(ctx.sourceOrg, 'Custom_Object_B__c', { Lookup_to_C__c: custObjC.id });
+        const custObjA = await createRecord(ctx.sourceOrg, 'Custom_Object_A__c', { Lookup_to_B__c: custObjB.id });
+        await ctx.sourceOrg.update('Custom_Object_C__c', { Id: custObjC.id, Lookup_to_A__c: custObjA.id });
+
+        const config = createBasicConfig(ctx, [account.id, accountWithoutRef.id], {
+            valueLookups: {
+                Account: [{ field: 'Related_Ref__c', sObjectType: 'Custom_Object_C__c', matchField: 'External_Id__c' }]
+            }
+        });
+        const { parsedOutput } = await ctx.runMigration(config);
+
+        const newAccountId = assertRecordMigrated(parsedOutput, account.id);
+        assertRecordMigrated(parsedOutput, accountWithoutRef.id);
+        const newCustObjCId = assertRecordMigrated(parsedOutput, custObjC.id);
+        // ...and what the looked-up record leads to, as with any other fetched record.
+        const newCustObjAId = assertRecordMigrated(parsedOutput, custObjA.id);
+        assertRecordMigrated(parsedOutput, custObjB.id);
+
+        // The value goes across as it is, so it still ties the two together.
+        expect((await retrieveRecord(ctx.targetOrg, 'Account', newAccountId)).Related_Ref__c).toEqual(ref);
+        const newCustObjC = await retrieveRecord(ctx.targetOrg, 'Custom_Object_C__c', newCustObjCId);
+        expect(newCustObjC.External_Id__c).toEqual(ref);
+        expect(newCustObjC.Lookup_to_A__c).toEqual(newCustObjAId);
+    }),
+
     scenario('find ids inside text', async (ctx: E2EContext) => {
         const account = await createAccount(ctx.sourceOrg, 'Cloud Kicks');
         const custObjD = await createRecord(ctx.sourceOrg, 'Custom_Object_D__c', {});

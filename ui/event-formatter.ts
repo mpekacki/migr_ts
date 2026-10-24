@@ -31,6 +31,10 @@ function formatEvent(event: IOEvent): string {
             return `querying for related records: ${d?.soql}`;
         case 'related_records':
             return `related records of ${d?.relationshipName}: ${d?.count}`;
+        case 'querying_value_lookup':
+            return `querying for records named by value: ${d?.soql}`;
+        case 'value_lookup_records':
+            return `${d?.lookupSObjectType} records named by ${d?.field}: ${d?.count}`;
         case 'fetched_records': {
             const levels = formatLevelCounts(d?.countsByDepth);
             return `fetched ${d?.count} records${levels ? ` (${levels})` : ''}`;

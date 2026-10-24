@@ -34,6 +34,16 @@ interface Options {
             name: string;
         }[];
     };
+    /**
+     * Fields that name another record by a value of their own rather than by its
+     * id - a UUID or other business key both records carry. A fetched record of
+     * the keyed type has `field` read, and every `sObjectType` record whose
+     * `matchField` holds the same value is fetched too. The value itself goes
+     * across unchanged, so nothing has to be remapped once both have arrived.
+     */
+    valueLookups?: {
+        [sObjectType: string]: ValueLookup[];
+    };
     solvers: SolverType[];
     /** Which of the run's prompts to answer without the user. */
     fullAuto?: {
@@ -92,6 +102,15 @@ interface Options {
          */
         encrypt?: boolean;
     };
+}
+
+interface ValueLookup {
+    /** The field of the record being fetched that holds the value. */
+    field: string;
+    /** The SObject to look the value up in. */
+    sObjectType: string;
+    /** The field of `sObjectType` the value is looked for in. */
+    matchField: string;
 }
 
 interface Solver {
@@ -204,6 +223,7 @@ export {
     validateFullAutoOptions,
     validateSolverOptions,
     Options,
+    ValueLookup,
     Solver,
     FixSolver,
     SkipSolver,

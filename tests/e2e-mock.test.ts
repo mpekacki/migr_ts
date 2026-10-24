@@ -287,6 +287,15 @@ test('a missing apex script fails the run before it fetches anything', async () 
     }))).rejects.toThrow(/Apex script not found: \.\/apex_test_does_not_exist\.apex/);
 });
 
+test('a value lookup naming a field that does not exist fails the run before it fetches anything', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        valueLookups: { Account: [{ field: 'Related_Ref__c', sObjectType: 'Custom_Object_C__c', matchField: 'No_Such_Field__c' }] }
+    }))).rejects.toThrow(/Value lookup field No_Such_Field__c not found in SObject Custom_Object_C__c/);
+});
+
 test('full auto without an unhandled error behavior fails the run rather than dropping records', async () => {
     const ctx = createContext();
     const account = await createAccount(ctx.sourceOrg);
