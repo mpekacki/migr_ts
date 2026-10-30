@@ -22,6 +22,8 @@ export interface FeedEntry {
     glyph: Glyph;
     indent: number;
     text: string;
+    /** How many times in a row this line occurred; absent means once. */
+    count?: number;
 }
 
 /**
@@ -97,6 +99,13 @@ export function initialState(): MigrationState {
 }
 
 function push(state: MigrationState, glyph: Glyph, text: string, indent = 0) {
+    // A line repeating the one before it (a solver firing for every record of a
+    // chunk) is counted on that line rather than printed again.
+    const last = state.feed[state.feed.length - 1];
+    if (last && last.glyph === glyph && last.indent === indent && last.text === text) {
+        last.count = (last.count ?? 1) + 1;
+        return;
+    }
     // Demote any previous in-progress entry now that something new happened.
     for (const e of state.feed) {
         if (e.glyph === 'run') e.glyph = 'info';
@@ -115,6 +124,10 @@ function push(state: MigrationState, glyph: Glyph, text: string, indent = 0) {
 function updateRun(state: MigrationState, text: string) {
     const last = state.feed[state.feed.length - 1];
     if (last && last.glyph === 'run') {
+        if (last.text !== text) {
+            // The count was of the old text, not of the progress replacing it.
+            delete last.count;
+        }
         last.text = text;
         return;
     }
