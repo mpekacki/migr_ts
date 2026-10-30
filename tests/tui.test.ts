@@ -224,6 +224,40 @@ describe('migration state reducer', () => {
         expect(s.created).toBe(1);
     });
 
+    it('counts a line repeated back to back instead of printing it again', () => {
+        const s = initialState();
+        feed(s, 'saved_records', [{ success: false, errors: [] }]);
+        for (let i = 0; i < 8; i++) {
+            feed(s, 'using_solver', { error: 'e', solverMessage: 'only one of unit price or total price may be specified', solverAction: 'fix' });
+        }
+        expect(s.feed).toHaveLength(2);
+        expect(s.feed[1].count).toBe(8);
+        const lines = renderFeed(s.feed, 0, false, 120).map(stripAnsi);
+        expect(lines[1]).toBe('  ● Applied solver: only one of unit price or total price may be specified ×8');
+        expect(lines[0]).not.toContain('×');
+    });
+
+    it('keeps a repeated line separate once something else came in between', () => {
+        const s = initialState();
+        const solver = { error: 'e', solverMessage: 'fix it', solverAction: 'fix' };
+        feed(s, 'using_solver', solver);
+        feed(s, 'created_record', { recordId: '001' }); // no feed line: still back to back
+        feed(s, 'using_solver', solver);
+        feed(s, 'record_no_id', { recordId: '001' });
+        feed(s, 'using_solver', solver);
+        expect(s.feed.map(e => e.count)).toEqual([2, undefined, undefined]);
+    });
+
+    it('does not merge the same text at a different glyph or indent', () => {
+        const s = initialState();
+        feed(s, 'error', { message: 'boom' });
+        feed(s, 'error', { message: 'boom' });
+        pushConsole(s, 'boom');
+        expect(s.feed).toHaveLength(2);
+        expect(s.feed[0].count).toBe(2);
+        expect(s.feed[1].count).toBeUndefined();
+    });
+
     it('shows why an update failed and keeps the feed line on one line', () => {
         const s = initialState();
         feed(s, 'error_updating_record', {

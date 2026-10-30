@@ -317,7 +317,8 @@ export function renderFeedTail(feed: FeedEntry[], spinnerFrame: number, done: bo
 function renderEntry(e: FeedEntry, spinnerFrame: number, done: boolean, inner: number): string[] {
     const indent = '  '.repeat(e.indent);
     const g = glyphStr(e.glyph, spinnerFrame, done);
-    const text = e.glyph === 'sub' || e.glyph === 'info' ? ansi.gray(e.text) : e.text;
+    const repeats = e.count && e.count > 1 ? ansi.gray(` ×${e.count}`) : '';
+    const text = (e.glyph === 'sub' || e.glyph === 'info' ? ansi.gray(e.text) : e.text) + repeats;
     const head = `${indent}${g} `;            // glyph is always one column
     const hang = ' '.repeat(indent.length + 2);
     const textWidth = Math.max(1, inner - visibleLength(head));
