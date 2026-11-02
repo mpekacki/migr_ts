@@ -153,6 +153,16 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'malformed_id', { recordId, sObjectName }));
     }
 
+    /** One of `recordQueries`, about to run against the source org. */
+    public queryingRecords(soql: string) {
+        this.onOutput(this.buildIOEvent('output', 'querying_records', { soql }));
+    }
+
+    /** How many starting records a `recordQueries` entry returned. */
+    public queriedRecords(soql: string, count: number) {
+        this.onOutput(this.buildIOEvent('output', 'queried_records', { soql, count }));
+    }
+
     public queryingForRelatedRecords(soql: string, sObjectName: string, recordId: string, relationships: string[]) {
         this.onOutput(this.buildIOEvent('output', 'querying_related_records', { soql, sObjectName, recordId, relationships }));
     }

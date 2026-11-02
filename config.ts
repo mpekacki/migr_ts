@@ -18,7 +18,15 @@ interface Options {
     targetFile?: string;
     targetSqlite?: string;
     historyFilePath?: string;
-    recordIds: string[];
+    /** The records the migration starts from. */
+    recordIds?: string[];
+    /**
+     * SOQL queries run against the source org at the start of the run; every id
+     * they return is a starting record, exactly as if it were in `recordIds` (the
+     * two combine). Each query has to select Id. Needs a source org, so it is
+     * refused next to `sourceFile`/`sourceSqlite`.
+     */
+    recordQueries?: string[];
     relatedRecordDepthLimit: number;
     maxConcurrentRequests?: number;
     matchers: {
@@ -228,9 +236,28 @@ function validateSolverOptions(options: Options): void {
     }
 }
 
+/**
+ * Rejects record queries the run could not run. A file source has no org to
+ * query, and the records it loads are all migrated anyway - a query there would
+ * be quietly ignored, which is worse than refused.
+ */
+function validateRecordQueryOptions(options: Options, isMigrateFromFile: boolean): void {
+    const queries = options.recordQueries;
+    if (queries === undefined) {
+        return;
+    }
+    if (!Array.isArray(queries) || queries.some(query => typeof query !== 'string' || query.trim() === '')) {
+        throw new Error('recordQueries must be a list of SOQL queries');
+    }
+    if (isMigrateFromFile && queries.length > 0) {
+        throw new Error('recordQueries need a source org to query, so they cannot be used with sourceFile or sourceSqlite');
+    }
+}
+
 export {
     validateFullAutoOptions,
     validateSolverOptions,
+    validateRecordQueryOptions,
     Options,
     ValueLookup,
     Solver,

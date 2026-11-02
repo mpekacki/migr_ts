@@ -126,8 +126,13 @@ export class DefaultSalesforceClient implements SalesforceClient {
         return this.connection.sobject(sObjectName).select('Id');
     }
 
+    /**
+     * Every row the query returns. A plain query stops at the first batch (2000
+     * rows at most) and leaves the rest behind a nextRecordsUrl; autoFetch follows
+     * it to the end, and maxFetch lifts jsforce's own 10,000 row cap.
+     */
     async query(soql: string): Promise<any> {
-        return await this.connection.query(soql);
+        return await this.connection.query(soql, { autoFetch: true, maxFetch: Number.MAX_SAFE_INTEGER });
     }
 
     async bulkCreate(records: any[]): Promise<SaveResult[]> {

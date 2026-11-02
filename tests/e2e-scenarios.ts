@@ -103,6 +103,33 @@ export const e2eScenarios: E2EScenario[] = [
         assertRecordMigrated(parsedOutput, account.id);
     }),
 
+    scenario('migrate records - from a SOQL query', async (ctx: E2EContext) => {
+        // Related_Ref__c rather than Name, so the two records the query finds do
+        // not have to share a name.
+        const ref = `rq-${Math.random().toString(36).slice(2, 14)}`;
+        const account1 = await createRecord(ctx.sourceOrg, 'Account', { Name: 'Queried 1', Related_Ref__c: ref });
+        const account2 = await createRecord(ctx.sourceOrg, 'Account', { Name: 'Queried 2', Related_Ref__c: ref });
+        const unrelated = await createRecord(ctx.sourceOrg, 'Account', { Name: 'Not queried', Related_Ref__c: `${ref}-other` });
+
+        // account1 is in recordIds as well: the run starts from it once.
+        const config = createBasicConfig(ctx, [account1.id], {
+            recordQueries: [`SELECT Id FROM Account WHERE Related_Ref__c = '${ref}'`]
+        });
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config);
+
+        assertRecordMigrated(parsedOutput, account1.id);
+        assertRecordMigrated(parsedOutput, account2.id);
+        assertRecordNotMigrated(parsedOutput, unrelated.id);
+        expect(Object.keys(parsedOutput.requestedRecords).sort()).toEqual([account1.id, account2.id].sort());
+        const queried = capturedOutput.filter(event => event.type === 'queried_records');
+        expect(queried.map(event => event.data.count)).toEqual([2]);
+        // Starting records, so neither came through another record.
+        const retrieved: RetrievedRecord[] = capturedOutput.find(event => event.type === 'retrieved_records')!.data.records;
+        for (const id of [account1.id, account2.id]) {
+            expect(retrieved.find(record => record.id === id)?.origin).toBeUndefined();
+        }
+    }),
+
     scenario('url and token auth', async (ctx: E2EContext) => {
         const account = await createAccount(ctx.sourceOrg, 'Cloud Kicks');
 

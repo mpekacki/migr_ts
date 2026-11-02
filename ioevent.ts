@@ -10,6 +10,8 @@ export type IOEventType =
     | 'starting_migration'
     | 'describing_sobject'
     | 'checking_matchers'
+    | 'querying_records'
+    | 'queried_records'
     | 'records_so_far'
     | 'fetching_record'
     | 'record_not_found'

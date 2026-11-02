@@ -64,6 +64,7 @@ Two cheap ways to rehearse: set `targetSqlite` (or `targetFile`) to export the r
 | `sourceOrg` / `targetOrg` | Org aliases (as known to the Salesforce CLI) |
 | `sourceOrgUrl` / `sourceOrgToken`<br>`targetOrgUrl` / `targetOrgToken` | Connect by instance URL and access token instead of an alias |
 | `recordIds` | Record IDs to start the migration from |
+| `recordQueries` | SOQL queries run against the source org; every record they return is a starting record, as if its id were in `recordIds` (the two combine, duplicates counted once). Each query must select `Id`, e.g. `["SELECT Id FROM Account WHERE Industry = 'Banking'"]`. A query that fails stops the run before anything is fetched. Not available with `sourceFile` / `sourceSqlite` |
 | `relatedRecordDepthLimit` | How many levels of related records to fetch. **There is no default — omit it and the fetch is not depth-limited**, which from a well-connected record can pull in a large part of the org |
 | `matchers` | How to identify records that already exist in the target org. `whenMissing` (`create` or `skip`) controls what happens when no match is found; omitting it behaves like `create` |
 | `solvers` | Automatic error handlers — see [Solvers](#solvers) |

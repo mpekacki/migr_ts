@@ -20,6 +20,12 @@ describe('event-formatter', () => {
             expect(format(event)).toBe('checking matchers');
         });
 
+        it('should format querying_records and queried_records', () => {
+            const soql = "SELECT Id FROM Account WHERE Industry = 'Banking'";
+            expect(format(new IOEvent('output', 'querying_records', { soql }))).toBe(`querying records: ${soql}`);
+            expect(format(new IOEvent('output', 'queried_records', { soql, count: 42 }))).toBe('records returned by query: 42');
+        });
+
         it('should format records_so_far', () => {
             const event = new IOEvent('output', 'records_so_far', { count: 5 });
             expect(format(event)).toBe('records so far: 5');

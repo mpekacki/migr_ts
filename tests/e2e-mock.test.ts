@@ -296,6 +296,28 @@ test('a value lookup naming a field that does not exist fails the run before it 
     }))).rejects.toThrow(/Value lookup field No_Such_Field__c not found in SObject Custom_Object_C__c/);
 });
 
+test('a record query that fails stops the run before it fetches anything', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        recordQueries: ['SELECT Id FROM Account WHERE Name LIKE \'%x%\'']
+    }))).rejects.toThrow(/Record query failed \(SELECT Id FROM Account WHERE Name LIKE '%x%'\)/);
+
+    expect(targetOrg.records('Account')).toHaveLength(0);
+});
+
+test('record queries are refused for a file source, which has no org to query', async () => {
+    const ctx = createContext();
+
+    await expect(ctx.runMigration({
+        sourceFile: './test-output.json',
+        targetOrg: ctx.targetOrg.alias,
+        recordQueries: ['SELECT Id FROM Account'],
+        matchers: defaultMatchers
+    })).rejects.toThrow(/recordQueries need a source org to query/);
+});
+
 test('full auto without an unhandled error behavior fails the run rather than dropping records', async () => {
     const ctx = createContext();
     const account = await createAccount(ctx.sourceOrg);
