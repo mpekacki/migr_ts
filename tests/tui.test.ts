@@ -99,6 +99,16 @@ describe('wrapAnsi', () => {
 });
 
 describe('migration state reducer', () => {
+    it('shows a record query and how many starting records it returned', () => {
+        const s = initialState();
+        const soql = "SELECT Id FROM Account WHERE Industry = 'Banking'";
+        feed(s, 'querying_records', { soql });
+        expect(s.phase).toBe('Fetching');
+        expect(s.feed[s.feed.length - 1].text).toBe(`Querying ${soql}`);
+        feed(s, 'queried_records', { soql, count: 42 });
+        expect(s.feed[s.feed.length - 1].text).toBe('42 records');
+    });
+
     it('names the object, record and relationships of a related-records query', () => {
         const s = initialState();
         feed(s, 'querying_related_records', {

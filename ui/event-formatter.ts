@@ -15,6 +15,10 @@ function formatEvent(event: IOEvent): string {
             return `describing SObject ${d?.sObjectName}`;
         case 'checking_matchers':
             return 'checking matchers';
+        case 'querying_records':
+            return `querying records: ${d?.soql}`;
+        case 'queried_records':
+            return `records returned by query: ${d?.count}`;
         case 'records_so_far':
             return `records so far: ${d?.count}`;
         case 'fetching_record': {

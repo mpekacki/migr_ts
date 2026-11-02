@@ -217,6 +217,13 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
         case 'file_document_unavailable':
             push(state, 'warn', `ContentDocument ${d.documentId} not migrated: version ${d.versionId} never landed`);
             break;
+        case 'querying_records':
+            state.phase = 'Fetching';
+            push(state, 'run', `Querying ${d.soql}`);
+            break;
+        case 'queried_records':
+            push(state, 'sub', `${d.count} records`, 1);
+            break;
         case 'querying_related_records': {
             state.phase = 'Fetching';
             const rels = Array.isArray(d.relationships) && d.relationships.length ? ` (${d.relationships.join(', ')})` : '';

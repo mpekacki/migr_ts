@@ -7,7 +7,7 @@ import IOEvent from './ioevent';
 import IO, { serializeError, updatedFields } from './io';
 import { createPreprocessor } from './preprocess-data';
 import { iterateRecordsInSqlite, writeRecordsToSqlite } from './sqlite-store';
-import { FixSolver, Options, SolverType, validateFullAutoOptions, validateSolverOptions } from './config';
+import { FixSolver, Options, SolverType, validateFullAutoOptions, validateRecordQueryOptions, validateSolverOptions } from './config';
 import DescribeCache from './describe-cache';
 import FileTransfer from './files';
 import MigrationHistory from './history';
@@ -214,6 +214,12 @@ class MigrationRunner {
     private fetchDepthsByIds: Record<string, number> = {};
     /** fetchDepthsByIds counted per depth, kept as it fills so progress is cheap to report. */
     private recordCountsByDepth: Record<number, number> = {};
+    /**
+     * The records the run starts from: `recordIds`, then whatever `recordQueries`
+     * return that is not among them yet. These are what the report's
+     * requestedRecords maps.
+     */
+    private requestedRecordIds: string[];
 
     constructor(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>, clientFactory?: ClientFactory) {
         this.options = options;
@@ -238,7 +244,9 @@ class MigrationRunner {
         validateApexOptions(options, this.isMigrateToFile);
         validateFullAutoOptions(options);
         validateSolverOptions(options);
+        validateRecordQueryOptions(options, this.isMigrateFromFile);
         validateRecordStoreOptions(options);
+        this.requestedRecordIds = [...new Set(options.recordIds ?? [])];
     }
 
     async run(): Promise<void> {
@@ -286,9 +294,10 @@ class MigrationRunner {
         await this.validateMatchers();
         if (!this.isMigrateFromFile) {
             await this.validateValueLookups();
+            await this.resolveRecordQueries();
         }
 
-        let recordIdsToFetch = this.options.recordIds;
+        let recordIdsToFetch = this.requestedRecordIds;
         if (this.isMigrateFromFile) {
             await this.loadRecordsFromFile();
             recordIdsToFetch = [];
@@ -422,6 +431,33 @@ class MigrationRunner {
                 }
             }
         }
+    }
+
+    /**
+     * Runs `recordQueries` against the source org and adds every id they return
+     * to the records the run starts from. A query that fails ends the run here,
+     * before anything is fetched: going on without its records would migrate
+     * less than was asked for, with nothing to say so but a line in the log.
+     */
+    private async resolveRecordQueries(): Promise<void> {
+        const requested = new Set(this.requestedRecordIds);
+        for (const soql of this.options.recordQueries ?? []) {
+            this.io.queryingRecords(soql);
+            let rows: any[];
+            try {
+                rows = (await this.sourceClient!.query(soql)).records ?? [];
+            } catch (error) {
+                throw new Error(`Record query failed (${soql}): ${error.message}`);
+            }
+            for (const row of rows) {
+                if (typeof row?.Id !== 'string' || row.Id === '') {
+                    throw new Error(`Record query must select Id: ${soql}`);
+                }
+                requested.add(row.Id);
+            }
+            this.io.queriedRecords(soql, rows.length);
+        }
+        this.requestedRecordIds = [...requested];
     }
 
     /**
@@ -1727,7 +1763,7 @@ class MigrationRunner {
             exportedRecordIds[id] = id;
         }
         const requestedRecordsMappings: Record<string, string> = {};
-        for (const originalRecordId of this.options.recordIds) {
+        for (const originalRecordId of this.requestedRecordIds) {
             requestedRecordsMappings[originalRecordId] = originalRecordId;
         }
 
@@ -1774,7 +1810,7 @@ class MigrationRunner {
         this.history.save();
 
         const requestedRecordsMappings: Record<string, string> = {};
-        for (const originalRecordId of this.options.recordIds) {
+        for (const originalRecordId of this.requestedRecordIds) {
             requestedRecordsMappings[originalRecordId] = this.history.get(originalRecordId) || '';
         }
 
