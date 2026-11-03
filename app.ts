@@ -7,7 +7,7 @@ import IOEvent from './ioevent';
 import IO, { serializeError, updatedFields } from './io';
 import { createPreprocessor } from './preprocess-data';
 import { iterateRecordsInSqlite, writeRecordsToSqlite } from './sqlite-store';
-import { FixSolver, Options, SolverType, validateFullAutoOptions, validateRecordQueryOptions, validateSolverOptions } from './config';
+import { FixSolver, Options, SolverType, validateBatchOptions, validateFullAutoOptions, validateRecordQueryOptions, validateSolverOptions } from './config';
 import DescribeCache from './describe-cache';
 import FileTransfer from './files';
 import MigrationHistory from './history';
@@ -245,6 +245,7 @@ class MigrationRunner {
         validateFullAutoOptions(options);
         validateSolverOptions(options);
         validateRecordQueryOptions(options, this.isMigrateFromFile);
+        validateBatchOptions(options);
         validateRecordStoreOptions(options);
         this.requestedRecordIds = [...new Set(options.recordIds ?? [])];
     }
@@ -547,6 +548,11 @@ class MigrationRunner {
     /** How many requests fetching and matching each keep in flight at once. */
     private get maxConcurrency(): number {
         return this.options.maxConcurrentRequests || 10;
+    }
+
+    /** How many batches the insert and update passes each send to the target at once. */
+    private get maxConcurrentBatches(): number {
+        return this.options.maxConcurrentBatches ?? 1;
     }
 
     private async fetchRecords(recordIdsToFetch: string[]): Promise<void> {
@@ -1156,37 +1162,74 @@ class MigrationRunner {
         return { migratedRecordId: '', skipRecord: false };
     }
 
+    /**
+     * The chunks go out in waves of `maxConcurrentBatches`, all of a wave's
+     * requests in flight at once - nothing in `toInsert` waits on anything else in
+     * it, so their order does not matter to the target. What comes back is dealt
+     * with one record at a time once the whole wave is in, so solvers and prompts
+     * never run concurrently.
+     *
+     * Every record the target created is settled before any failure is looked at:
+     * a failure can end the run (save-and-exit writes the report there and then),
+     * and a record created but never settled would be created again by the run
+     * that resumes this one. For the same reason a success is settled whatever
+     * `retryAll` says - that answer is about records that failed.
+     */
     private async insertRecords(toInsert: ChunkEntry[]): Promise<{ exit: boolean, solverAdded: boolean }> {
         let retryAll = false;
         let solverAdded = false;
-        for (const chunkRecordIds of this.chunking.getChunkIds(toInsert)) {
-            // Read only now, so no more than a chunk of records is in memory at a
-            // time. What is sent is a copy; the queued record is the one the
-            // solvers change.
-            const chunk: Record<string, SObjectRecord<Schema, string>> = {};
-            for (const recordId of chunkRecordIds) {
-                const record = this.queued.get(recordId)!;
-                chunk[recordId] = { attributes: record.attributes, ...record } as SObjectRecord<Schema, string>;
+        const chunks = this.chunking.getChunkIds(toInsert);
+        for (let start = 0; start < chunks.length; start += this.maxConcurrentBatches) {
+            const wave = chunks.slice(start, start + this.maxConcurrentBatches);
+            // insertChunk turns every failure into per-record results, so one
+            // request going wrong cannot cut the others short.
+            const saved = await Promise.all(wave.map(chunkRecordIds => this.insertChunk(this.readChunk(chunkRecordIds))));
+            const results = wave.flatMap((chunkRecordIds, c) => saved[c].map((savedRecord, i) => ({ recordId: chunkRecordIds[i], savedRecord })));
+
+            for (const { recordId, savedRecord } of results) {
+                if (savedRecord.success) {
+                    await this.settleSaveResult(recordId, savedRecord, false);
+                }
             }
-            this.io.savingRecords(chunk);
-            const savedRecords = await this.insertChunk(chunk);
-            for (let i = 0; i < savedRecords.length; i++) {
-                const recordId = chunkRecordIds[i];
-                const record = this.queued.get(recordId)!;
-                const result = await this.processSaveResult(recordId, record, savedRecords[i], retryAll);
+            for (const { recordId, savedRecord } of results) {
+                if (savedRecord.success) {
+                    continue;
+                }
+                const result = await this.settleSaveResult(recordId, savedRecord, retryAll);
                 if (result.exit) {
                     return { exit: true, solverAdded };
-                }
-                if (this.queued.has(recordId)) {
-                    // Still queued, so going round again - with whatever the
-                    // solvers or the user changed on it.
-                    this.queued.set(recordId, record);
                 }
                 retryAll = result.retryAll;
                 solverAdded = solverAdded || result.solverAdded;
             }
         }
         return { exit: false, solverAdded };
+    }
+
+    /**
+     * Read only when about to be sent, so no more than a wave of records is in
+     * memory at a time. What is sent is a copy; the queued record is the one the
+     * solvers change.
+     */
+    private readChunk(chunkRecordIds: string[]): Record<string, SObjectRecord<Schema, string>> {
+        const chunk: Record<string, SObjectRecord<Schema, string>> = {};
+        for (const recordId of chunkRecordIds) {
+            const record = this.queued.get(recordId)!;
+            chunk[recordId] = { attributes: record.attributes, ...record } as SObjectRecord<Schema, string>;
+        }
+        this.io.savingRecords(chunk);
+        return chunk;
+    }
+
+    private async settleSaveResult(recordId: string, savedRecord: SaveResult, retryAll: boolean): Promise<{ exit: boolean, retryAll: boolean, solverAdded: boolean }> {
+        const record = this.queued.get(recordId)!;
+        const result = await this.processSaveResult(recordId, record, savedRecord, retryAll);
+        if (!result.exit && this.queued.has(recordId)) {
+            // Still queued, so going round again - with whatever the solvers or
+            // the user changed on it.
+            this.queued.set(recordId, record);
+        }
+        return result;
     }
 
     private async insertChunk(chunk: Record<string, SObjectRecord<Schema, string>>): Promise<SaveResult[]> {
@@ -1592,30 +1635,40 @@ class MigrationRunner {
      * `retryAll` is the user's answer to send the rest of this pass's failures
      * again without being asked about each one, and so lasts exactly as long as the
      * pass does - the next one asks again.
+     *
+     * Like the insert pass, the chunks go out in waves of `maxConcurrentBatches`
+     * and what comes back is dealt with in order once the wave is in.
      */
     private async updateRecords(records: Record<string, any>): Promise<{ pending: Record<string, any>, exit: boolean }> {
         const toRetry: Record<string, any> = {};
         let retryAll = false;
         const chunks: Record<string, any>[] = this.chunking.getChunks(records);
-        for (const chunk of chunks) {
-            this.io.updatingRecord(chunk);
-            const updateResults = await this.updateChunk(chunk);
-            for (let j = 0; j < updateResults.length; j++) {
-                const recordId = Object.keys(chunk)[j];
-                const result = updateResults[j];
-                if (result.success) {
-                    // An error an earlier attempt reported has been gotten past -
-                    // the record holds the values the update was sent to write.
-                    this.errors[recordId]?.filter(error => error.phase === 'update').forEach(error => error.fixed = true);
-                    continue;
-                }
-                const outcome = await this.handleUpdateErrors(recordId, records[recordId], result.errors, retryAll);
-                if (outcome.exit) {
-                    return { pending: toRetry, exit: true };
-                }
-                retryAll = outcome.retryAll;
-                if (outcome.retry) {
-                    toRetry[recordId] = records[recordId];
+        for (let start = 0; start < chunks.length; start += this.maxConcurrentBatches) {
+            const wave = chunks.slice(start, start + this.maxConcurrentBatches);
+            const waveResults = await Promise.all(wave.map(chunk => {
+                this.io.updatingRecord(chunk);
+                return this.updateChunk(chunk);
+            }));
+            for (let c = 0; c < wave.length; c++) {
+                const recordIds = Object.keys(wave[c]);
+                const updateResults = waveResults[c];
+                for (let j = 0; j < updateResults.length; j++) {
+                    const recordId = recordIds[j];
+                    const result = updateResults[j];
+                    if (result.success) {
+                        // An error an earlier attempt reported has been gotten past -
+                        // the record holds the values the update was sent to write.
+                        this.errors[recordId]?.filter(error => error.phase === 'update').forEach(error => error.fixed = true);
+                        continue;
+                    }
+                    const outcome = await this.handleUpdateErrors(recordId, records[recordId], result.errors, retryAll);
+                    if (outcome.exit) {
+                        return { pending: toRetry, exit: true };
+                    }
+                    retryAll = outcome.retryAll;
+                    if (outcome.retry) {
+                        toRetry[recordId] = records[recordId];
+                    }
                 }
             }
         }
