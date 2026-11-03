@@ -423,6 +423,20 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'apex_script_failed', { phase, filePath, failure, result }));
     }
 
+    /**
+     * A before script failed: retry it (r), skip it (s), abort the migration (a) or
+     * abort it and run the after scripts (ar - offered only with `hasAfterScripts`).
+     * `ranScripts` are the before scripts that already ran, which is what tells the
+     * user whether there is anything for the after scripts to undo.
+     */
+    public async askApexScriptAction(phase: string, filePath: string, failure: string, ranScripts: string[], hasAfterScripts: boolean): Promise<string> {
+        return await this.onInput(this.buildIOEvent('input', 'apex_script_error', { phase, filePath, failure, ranScripts, hasAfterScripts }));
+    }
+
+    public apexScriptSkipped(phase: string, filePath: string) {
+        this.onOutput(this.buildIOEvent('output', 'apex_script_skipped', { phase, filePath }));
+    }
+
 }
 
 export default IO;

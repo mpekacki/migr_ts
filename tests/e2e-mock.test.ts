@@ -235,20 +235,45 @@ describe('with the records stored on disk, encrypted', () => {
     }
 });
 
-// The four tests below live here rather than in the shared scenarios because the
+// The tests below live here rather than in the shared scenarios because the
 // failures they assert on are thrown errors: in this context that surfaces as a
 // rejected main(), while the live CLI turns it into a FATAL line and a non-zero
 // exit code - which the live harness reads as the run itself having failed.
 
-test('a failing apex script before the migration stops it before anything is inserted', async () => {
+// Without fullAuto a failing before script is put to the user (see the shared
+// scenarios); with it there is no one to ask, and the failure is fatal.
+test('a failing apex script before a fullAuto migration stops it before anything is inserted', async () => {
     const ctx = createContext();
     const account = await createAccount(ctx.sourceOrg);
 
     await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
-        apex: { beforeMigration: [writeApexScript('before', [UNCOMPILABLE_APEX])] }
-    }))).rejects.toThrow(/Apex script .* \(apex\.beforeMigration\) failed/);
+        fullAuto: { enabled: true, unhandledErrorBehavior: 'skip' },
+        apex: {
+            beforeMigration: [writeApexScript('before', [UNCOMPILABLE_APEX])],
+            afterMigration: [writeApexScript('after', [insertAccount('after')])]
+        }
+    }), [])).rejects.toThrow(/Apex script .* \(apex\.beforeMigration\) failed/);
 
+    // the failed script was rolled back, so the after scripts have nothing to undo
     expect(targetOrg.records('Account')).toHaveLength(0);
+});
+
+test('a fatal apex script failure before a fullAuto migration still runs the after scripts once a before script ran', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg, 'source account');
+
+    await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        fullAuto: { enabled: true, unhandledErrorBehavior: 'skip' },
+        apex: {
+            beforeMigration: [
+                writeApexScript('before1', [insertAccount('before')]),
+                writeApexScript('before2', [UNCOMPILABLE_APEX])
+            ],
+            afterMigration: [writeApexScript('after', [insertAccount('after')])]
+        }
+    }), [])).rejects.toThrow(/Apex script .*before2.* \(apex\.beforeMigration\) failed/);
+
+    expect(targetOrg.records('Account').map(record => record.Name).sort()).toEqual(['after', 'before']);
 });
 
 test('a failing apex script after the migration is let out only once the run has finished', async () => {

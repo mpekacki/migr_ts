@@ -45,6 +45,7 @@ import {
     readLogEvents,
     retrieveRecord,
     scenario,
+    UNCOMPILABLE_APEX,
     writeApexScript
 } from './e2e-harness';
 
@@ -2326,5 +2327,135 @@ export const e2eScenarios: E2EScenario[] = [
         expect(await ctx.targetOrg.findIds('Account', { Name: afterName })).toHaveLength(1);
         // the report is written once, before the scripts that close the run out
         expect(capturedOutput.filter(event => event.type === 'finished')).toHaveLength(1);
+    }),
+
+    scenario('a failing apex script before the migration can be fixed and retried', async (ctx: E2EContext) => {
+        const account = await createAccount(ctx.sourceOrg);
+        const beforeName = `apex-before-${Math.random()}`;
+        const beforeScript = writeApexScript('before', [UNCOMPILABLE_APEX]);
+
+        const config = createBasicConfig(ctx, [account.id], { apex: { beforeMigration: [beforeScript] } });
+
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config, (ioEvent, sendInput) => {
+            if (ioEvent.type === 'confirm_migration') {
+                sendInput('y');
+            } else if (ioEvent.type === 'apex_script_error') {
+                // fix the script, then retry it: the file is read again
+                writeApexScript('before', [insertAccount(beforeName)]);
+                sendInput('r');
+            }
+        });
+
+        assertRecordMigrated(parsedOutput, account.id);
+        expect(capturedOutput.filter(event => event.type === 'apex_script_error')).toHaveLength(1);
+        expect(capturedOutput.filter(event => event.type === 'running_apex_script')).toHaveLength(2);
+        expect(await ctx.targetOrg.findIds('Account', { Name: beforeName })).toHaveLength(1);
+    }),
+
+    scenario('a failing apex script before the migration can be skipped', async (ctx: E2EContext) => {
+        const account = await createAccount(ctx.sourceOrg);
+        const afterName = `apex-after-${Math.random()}`;
+
+        const config = createBasicConfig(ctx, [account.id], {
+            apex: {
+                beforeMigration: [writeApexScript('before', [UNCOMPILABLE_APEX])],
+                afterMigration: [writeApexScript('after', [insertAccount(afterName)])]
+            }
+        });
+
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(config, ['y', 's']);
+
+        assertRecordMigrated(parsedOutput, account.id);
+        expect(capturedOutput.some(event => event.type === 'apex_script_skipped')).toBe(true);
+        // the run went on to write records, so the after scripts close it out
+        expect(await ctx.targetOrg.findIds('Account', { Name: afterName })).toHaveLength(1);
+    }),
+
+    scenario('aborting at a failing first apex script leaves the target org untouched', async (ctx: E2EContext) => {
+        const accountName = `Account-${Math.random()}`;
+        const account = await createAccount(ctx.sourceOrg, accountName);
+        const afterName = `apex-after-${Math.random()}`;
+
+        const config = createBasicConfig(ctx, [account.id], {
+            apex: {
+                beforeMigration: [writeApexScript('before', [UNCOMPILABLE_APEX])],
+                afterMigration: [writeApexScript('after', [insertAccount(afterName)])]
+            }
+        });
+
+        const { capturedOutput } = await ctx.runMigration(config, ['y', 'a']);
+
+        expect(capturedOutput.some(event => event.type === 'aborted')).toBe(true);
+        expect(capturedOutput.some(event => event.type === 'saving_records')).toBe(false);
+        expect(await ctx.targetOrg.findIds('Account', { Name: accountName })).toHaveLength(0);
+        // the failed script was rolled back, so there is nothing for the after scripts to undo
+        expect(await ctx.targetOrg.findIds('Account', { Name: afterName })).toHaveLength(0);
+    }),
+
+    scenario('aborting at a failing apex script can run the after scripts to undo the before scripts that ran', async (ctx: E2EContext) => {
+        const accountName = `Account-${Math.random()}`;
+        const account = await createAccount(ctx.sourceOrg, accountName);
+        const names = { before: `apex-before-${Math.random()}`, after: `apex-after-${Math.random()}` };
+
+        const config = createBasicConfig(ctx, [account.id], {
+            apex: {
+                beforeMigration: [
+                    writeApexScript('before1', [insertAccount(names.before)]),
+                    writeApexScript('before2', [UNCOMPILABLE_APEX])
+                ],
+                afterMigration: [writeApexScript('after', [insertAccount(names.after)])]
+            }
+        });
+
+        const { capturedOutput } = await ctx.runMigration(config, ['y', 'ar']);
+
+        // the prompt names the before script that ran, which is what the user decides on
+        const prompt = capturedOutput.find(event => event.type === 'apex_script_error');
+        expect(prompt?.data.ranScripts).toEqual([config.apex.beforeMigration[0]]);
+        expect(prompt?.data.hasAfterScripts).toBe(true);
+        expect(capturedOutput.some(event => event.type === 'aborted')).toBe(true);
+        expect(await ctx.targetOrg.findIds('Account', { Name: accountName })).toHaveLength(0);
+        expect(await ctx.targetOrg.findIds('Account', { Name: names.before })).toHaveLength(1);
+        expect(await ctx.targetOrg.findIds('Account', { Name: names.after })).toHaveLength(1);
+    }),
+
+    scenario('aborting at a failing apex script can leave the after scripts out even once a before script ran', async (ctx: E2EContext) => {
+        const accountName = `Account-${Math.random()}`;
+        const account = await createAccount(ctx.sourceOrg, accountName);
+        const names = { before: `apex-before-${Math.random()}`, after: `apex-after-${Math.random()}` };
+
+        const config = createBasicConfig(ctx, [account.id], {
+            apex: {
+                beforeMigration: [
+                    writeApexScript('before1', [insertAccount(names.before)]),
+                    writeApexScript('before2', [UNCOMPILABLE_APEX])
+                ],
+                afterMigration: [writeApexScript('after', [insertAccount(names.after)])]
+            }
+        });
+
+        const { capturedOutput } = await ctx.runMigration(config, ['y', 'a']);
+
+        expect(capturedOutput.some(event => event.type === 'aborted')).toBe(true);
+        expect(await ctx.targetOrg.findIds('Account', { Name: accountName })).toHaveLength(0);
+        expect(await ctx.targetOrg.findIds('Account', { Name: names.before })).toHaveLength(1);
+        expect(await ctx.targetOrg.findIds('Account', { Name: names.after })).toHaveLength(0);
+    }),
+
+    scenario('aborting and running the after scripts is not an answer without after scripts', async (ctx: E2EContext) => {
+        const accountName = `Account-${Math.random()}`;
+        const account = await createAccount(ctx.sourceOrg, accountName);
+
+        const config = createBasicConfig(ctx, [account.id], {
+            apex: { beforeMigration: [writeApexScript('before', [UNCOMPILABLE_APEX])] }
+        });
+
+        // 'ar' is refused and the question asked again, which 'a' then answers
+        const { capturedOutput } = await ctx.runMigration(config, ['y', 'ar', 'a']);
+
+        expect(capturedOutput.filter(event => event.type === 'apex_script_error')).toHaveLength(2);
+        expect(capturedOutput.some(event => event.type === 'invalid_input' && event.data.input === 'ar')).toBe(true);
+        expect(capturedOutput.some(event => event.type === 'aborted')).toBe(true);
+        expect(await ctx.targetOrg.findIds('Account', { Name: accountName })).toHaveLength(0);
     })
 ];
