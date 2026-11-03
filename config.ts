@@ -29,6 +29,14 @@ interface Options {
     recordQueries?: string[];
     relatedRecordDepthLimit: number;
     maxConcurrentRequests?: number;
+    /**
+     * How many batches of records (up to 200 each) are sent to the target org at
+     * once, by the insert pass and by the update pass that follows it. Defaults to
+     * 1, one batch at a time. The results of every batch sent together are in hand
+     * before any of them is dealt with, and they are dealt with in order - solvers
+     * and prompts never run concurrently.
+     */
+    maxConcurrentBatches?: number;
     matchers: {
         sObjectType: string;
         fieldMappings: {
@@ -258,7 +266,23 @@ function validateRecordQueryOptions(options: Options, isMigrateFromFile: boolean
     }
 }
 
+/**
+ * Rejects a batch limit the run could not honour. Anything but a positive whole
+ * number would either send nothing at all or be rounded into a limit the user
+ * did not write.
+ */
+function validateBatchOptions(options: Options): void {
+    const limit = options.maxConcurrentBatches;
+    if (limit === undefined) {
+        return;
+    }
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) {
+        throw new Error(`maxConcurrentBatches must be a positive whole number, not ${JSON.stringify(limit)}`);
+    }
+}
+
 export {
+    validateBatchOptions,
     validateFullAutoOptions,
     validateSolverOptions,
     validateRecordQueryOptions,

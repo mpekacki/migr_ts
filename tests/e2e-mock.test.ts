@@ -31,6 +31,7 @@ import {
     createAccount,
     createBasicConfig,
     defaultMatchers,
+    fixAlwaysFailsSolver,
     insertAccount,
     toMigrationRunResult,
     writeApexScript
@@ -445,6 +446,82 @@ test('matcher queries run maxConcurrentRequests at a time', async () => {
 
     expect(targetOrg.records('Account')).toHaveLength(15);
     expect(sourceIds.map(id => parsedOutput.allMigratedRecords[id])).toEqual(targetIds);
+});
+
+// The next three read concurrency off event order the same way: the fake org does
+// its work when called, so a batch announces itself (saving_records /
+// updating_record) and is sent before the next one is, and its result comes back
+// only once every request of the wave is out.
+test('inserts send maxConcurrentBatches batches at a time', async () => {
+    const insertEvents = async (maxConcurrentBatches?: number) => {
+        const ctx = createContext();
+        const names = Array.from({ length: 450 }, (_, i) => `Batch-${maxConcurrentBatches}-${i}`);
+        const sourceIds = (await ctx.sourceOrg.createAll('Account', names.map(Name => ({ Name })))).map(result => result.id);
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(createBasicConfig(ctx, sourceIds, { maxConcurrentBatches }));
+        for (const id of sourceIds) {
+            expect(parsedOutput.allMigratedRecords[id]).toBeTruthy();
+        }
+        return capturedOutput.map(event => event.type).filter(type => type === 'saving_records' || type === 'saved_records');
+    };
+
+    // 450 Accounts are three batches: all three go out before the first comes back
+    expect(await insertEvents(3)).toEqual(['saving_records', 'saving_records', 'saving_records', 'saved_records', 'saved_records', 'saved_records']);
+    // and by default one at a time, as ever
+    expect(await insertEvents()).toEqual(['saving_records', 'saved_records', 'saving_records', 'saved_records', 'saving_records', 'saved_records']);
+    expect(targetOrg.records('Account')).toHaveLength(900);
+});
+
+test('updates send maxConcurrentBatches batches at a time', async () => {
+    const ctx = createContext();
+    // Every record is rejected on insert, fixed by the solver and so updated later
+    // - where it is rejected again, fixed again and sent a second time.
+    const sourceIds = (await ctx.sourceOrg.createAll('Custom_Object_D__c', Array.from({ length: 450 }, () => ({ Fussy_Field_1__c: 'fail' }))))
+        .map(result => result.id);
+
+    const { parsedOutput, capturedOutput } = await ctx.runMigration(createBasicConfig(ctx, sourceIds, {
+        solvers: [fixAlwaysFailsSolver],
+        maxConcurrentBatches: 3
+    }));
+
+    const updatePass = capturedOutput.slice(capturedOutput.findIndex(event => event.type === 'updating_record'));
+    // three batches out before the solver gets to the first failure that came back
+    expect(updatePass.slice(0, 4).map(event => event.type)).toEqual(['updating_record', 'updating_record', 'updating_record', 'using_solver']);
+    expect(updatePass.filter(event => event.type === 'updating_record')).toHaveLength(6);
+
+    const targetRecords = targetOrg.records('Custom_Object_D__c');
+    expect(targetRecords).toHaveLength(450);
+    expect(targetRecords.every(record => record.Fussy_Field_1__c === 'ok')).toBe(true);
+    expect(sourceIds.every(id => parsedOutput.allMigratedRecords[id])).toBe(true);
+});
+
+test('quitting at a failure keeps every record the batches sent with it created', async () => {
+    const ctx = createContext();
+    // The failing record is the first of the first batch, so everything created
+    // alongside it - later in its batch and in the batches sent with it - is only
+    // looked at after the run has already been asked to stop.
+    const sourceIds = (await ctx.sourceOrg.createAll('Custom_Object_D__c', [
+        { Fussy_Field_1__c: 'fail' },
+        ...Array.from({ length: 449 }, () => ({}))
+    ])).map(result => result.id);
+
+    const { parsedOutput } = await ctx.runMigration(createBasicConfig(ctx, sourceIds, { maxConcurrentBatches: 3 }), ['y', 'h']);
+
+    expect(targetOrg.records('Custom_Object_D__c')).toHaveLength(449);
+    const [failed, ...created] = sourceIds;
+    expect(parsedOutput.allMigratedRecords[failed]).toBeFalsy();
+    for (const id of created) {
+        expect(parsedOutput.allMigratedRecords[id]).toBeTruthy();
+    }
+});
+
+test('a batch limit that is not a positive whole number fails the run', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    for (const maxConcurrentBatches of [0, -1, 1.5, '3']) {
+        await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], { maxConcurrentBatches })))
+            .rejects.toThrow(/maxConcurrentBatches must be a positive whole number/);
+    }
 });
 
 // Lives here rather than in the shared scenarios because the failure it asserts on
