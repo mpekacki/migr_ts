@@ -190,6 +190,14 @@ export class FakeSalesforceOrg {
     /** Owner assigned to new records, like the running user of a real connection. */
     currentUserId = '';
 
+    /** How many requests the migration's client made, keyed "method:SObject" - for tests that count round trips. */
+    readonly requestCounts: Record<string, number> = {};
+
+    countRequest(method: string, sObjectName: string): void {
+        const key = `${method}:${sObjectName}`;
+        this.requestCounts[key] = (this.requestCounts[key] ?? 0) + 1;
+    }
+
     constructor(config: FakeOrgConfig) {
         this.alias = config.alias;
         this.instanceUrl = config.instanceUrl;
@@ -429,6 +437,43 @@ export class FakeSalesforceOrg {
         return structuredClone(record);
     }
 
+    /**
+     * Several records of one SObject, the way sObject Collections retrieves them:
+     * one entry per id, in order, null for an id that is not there, and only the
+     * fields asked for. A field the SObject does not have fails the whole request,
+     * as do an SObject the API cannot retrieve and a malformed id.
+     */
+    retrieveMany(sObjectName: string, recordIds: string[], fields: string[]): (any | null)[] {
+        const def = this.requireDef(sObjectName);
+        if (def.queryable === false) {
+            throw new SalesforceError(`Cannot retrieve ${def.name} through the REST API`, 'INVALID_TYPE_FOR_OPERATION');
+        }
+        for (const fieldName of fields) {
+            if (!this.field(def, fieldName)) {
+                throw new SalesforceError(`No such column '${fieldName}' on entity '${def.name}'`, 'INVALID_FIELD');
+            }
+        }
+        const malformed = recordIds.find(recordId => !isWellFormedId(recordId));
+        if (malformed) {
+            throw new SalesforceError(`Invalid id: ${malformed}`, 'MALFORMED_ID');
+        }
+        return recordIds.map(recordId => {
+            const record = this.store(def.name).get(recordId);
+            if (!record) {
+                return null;
+            }
+            // A field the stored record never had stays missing, the way the
+            // single retrieve above leaves it out.
+            const projected: any = { attributes: record.attributes };
+            for (const fieldName of fields) {
+                if (fieldName in record) {
+                    projected[fieldName] = record[fieldName];
+                }
+            }
+            return structuredClone(projected);
+        });
+    }
+
     /** The contents of a stored file, base64 encoded, the way the blob endpoint serves it. */
     retrieveBlob(sObjectName: string, recordId: string, fieldName: string): string {
         const def = this.requireDef(sObjectName);
@@ -662,7 +707,13 @@ export class FakeSalesforceClient implements SalesforceClient {
     }
 
     async retrieve(sObjectName: string, recordId: string): Promise<any> {
+        this.org.countRequest('retrieve', sObjectName);
         return this.org.retrieve(sObjectName, recordId);
+    }
+
+    async retrieveMany(sObjectName: string, recordIds: string[], fields: string[]): Promise<(any | null)[]> {
+        this.org.countRequest('retrieveMany', sObjectName);
+        return this.org.retrieveMany(sObjectName, recordIds, fields);
     }
 
     async retrieveBlob(sObjectName: string, recordId: string, fieldName: string): Promise<string> {

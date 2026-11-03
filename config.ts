@@ -30,6 +30,13 @@ interface Options {
     relatedRecordDepthLimit: number;
     maxConcurrentRequests?: number;
     /**
+     * How many records of one SObject the fetch retrieves from the source in a
+     * single request (sObject Collections). Defaults to 200, at most 2000; 1
+     * retrieves every record on its own. SObjects carrying files (a base64
+     * field) are always retrieved one record at a time.
+     */
+    fetchBatchSize?: number;
+    /**
      * How many batches of records (up to 200 each) are sent to the target org at
      * once, by the insert pass and by the update pass that follows it. Defaults to
      * 1, one batch at a time. The results of every batch sent together are in hand
@@ -273,12 +280,20 @@ function validateRecordQueryOptions(options: Options, isMigrateFromFile: boolean
  */
 function validateBatchOptions(options: Options): void {
     const limit = options.maxConcurrentBatches;
-    if (limit === undefined) {
-        return;
-    }
-    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) {
+    if (limit !== undefined && !isPositiveWholeNumber(limit)) {
         throw new Error(`maxConcurrentBatches must be a positive whole number, not ${JSON.stringify(limit)}`);
     }
+    const fetchBatchSize = options.fetchBatchSize;
+    if (fetchBatchSize !== undefined && (!isPositiveWholeNumber(fetchBatchSize) || fetchBatchSize > MAX_FETCH_BATCH_SIZE)) {
+        throw new Error(`fetchBatchSize must be a whole number from 1 to ${MAX_FETCH_BATCH_SIZE}, not ${JSON.stringify(fetchBatchSize)}`);
+    }
+}
+
+/** The most ids one sObject Collections retrieve accepts. */
+const MAX_FETCH_BATCH_SIZE = 2000;
+
+function isPositiveWholeNumber(value: unknown): value is number {
+    return typeof value === 'number' && Number.isInteger(value) && value >= 1;
 }
 
 export {

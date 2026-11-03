@@ -17,6 +17,7 @@ export default class DescribeCache {
     private global: DescribeGlobalResult | null = null;
     private fromFile: any | null = null;
     private readonly sObjects: Record<string, Promise<DescribeSObjectResult>> = {};
+    private readonly sourceSObjects: Record<string, Promise<DescribeSObjectResult>> = {};
 
     constructor(
         private readonly io: IO,
@@ -52,6 +53,19 @@ export default class DescribeCache {
             console.log('error fetching ' + sObjectName + ' SObject describe');
             throw ex;
         }
+    }
+
+    /**
+     * The per-SObject describe of the source org - the exception to the rule
+     * above. Retrieving several records at once means naming the fields to read,
+     * and those have to be fields the source has: the target may have ones it
+     * does not, and asking for one of those fails the whole request.
+     */
+    async getSourceSObject(sObjectName: string): Promise<DescribeSObjectResult> {
+        if (!(sObjectName in this.sourceSObjects)) {
+            this.sourceSObjects[sObjectName] = this.sourceClient!.describeSObject(sObjectName);
+        }
+        return this.sourceSObjects[sObjectName];
     }
 
     /**

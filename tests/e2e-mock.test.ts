@@ -30,15 +30,18 @@ import {
     cleanupMigrationArtifacts,
     createAccount,
     createBasicConfig,
+    createFile,
+    createRecord,
     defaultMatchers,
     fixAlwaysFailsSolver,
     insertAccount,
+    readFile,
     toMigrationRunResult,
     writeApexScript
 } from './e2e-harness';
 import { e2eScenarios } from './e2e-scenarios';
 import { STORE_KEY_ENV, dumpRecordStore } from '../record-store';
-import { FakeSalesforceOrg, createFakeClientFactory } from './fake-salesforce-org';
+import { FakeSalesforceOrg, SalesforceError, createFakeClientFactory } from './fake-salesforce-org';
 import { TARGET_ORG_ALIAS, createSourceOrg, createTargetOrg } from './fake-test-org-schema';
 
 // The live suite prints everything the CLI writes to stdout. Here the whole run
@@ -521,6 +524,94 @@ test('a batch limit that is not a positive whole number fails the run', async ()
     for (const maxConcurrentBatches of [0, -1, 1.5, '3']) {
         await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], { maxConcurrentBatches })))
             .rejects.toThrow(/maxConcurrentBatches must be a positive whole number/);
+    }
+});
+
+// The next few count the requests the fetch makes, which only the in-memory org
+// can tell.
+test('records of one SObject are fetched fetchBatchSize at a time', async () => {
+    const fetchCounts = async (fetchBatchSize?: number) => {
+        sourceOrg = createSourceOrg();
+        targetOrg = createTargetOrg();
+        const ctx = createContext();
+        const sourceIds = (await ctx.sourceOrg.createAll('Account', Array.from({ length: 450 }, (_, i) => ({ Name: `Fetch-${i}` }))))
+            .map(result => result.id);
+        const { parsedOutput } = await ctx.runMigration(createBasicConfig(ctx, sourceIds, { fetchBatchSize }));
+        expect(sourceIds.every(id => parsedOutput.allMigratedRecords[id])).toBe(true);
+        return { many: sourceOrg.requestCounts['retrieveMany:Account'], single: sourceOrg.requestCounts['retrieve:Account'] };
+    };
+
+    expect(await fetchCounts()).toEqual({ many: 3, single: undefined });
+    expect(await fetchCounts(450)).toEqual({ many: 1, single: undefined });
+    expect(await fetchCounts(1)).toEqual({ many: undefined, single: 450 });
+});
+
+test('a record missing from a fetch batch is reported and the rest of the batch migrates', async () => {
+    const ctx = createContext();
+    const [kept, deleted] = await ctx.sourceOrg.createAll('Account', [{ Name: 'Kept' }, { Name: 'Deleted' }]);
+    await ctx.sourceOrg.delete('Account', deleted.id);
+
+    const { parsedOutput, capturedOutput } = await ctx.runMigration(createBasicConfig(ctx, [kept.id, deleted.id]));
+
+    expect(parsedOutput.allMigratedRecords[kept.id]).toBeTruthy();
+    expect(capturedOutput.filter(event => event.type === 'record_not_found').map(event => event.data.recordId)).toEqual([deleted.id]);
+    expect(sourceOrg.requestCounts['retrieve:Account']).toBeUndefined();
+});
+
+test('a fetch batch the org refuses is retrieved one record at a time', async () => {
+    const ctx = createContext();
+    const sibling = await createAccount(ctx.sourceOrg, 'Sibling');
+    // Same key prefix as an Account, wrong checksum: a single retrieve says the id
+    // is malformed, and a collection retrieve with it refuses the whole batch.
+    const malformed = sibling.id.slice(0, 15) + (sibling.id.endsWith('ZZZ') ? 'YYY' : 'ZZZ');
+    const parent = await createRecord(ctx.sourceOrg, 'Account', { Name: 'Parent', Description: `${sibling.id} ${malformed}` });
+
+    const { parsedOutput, capturedOutput } = await ctx.runMigration(createBasicConfig(ctx, [parent.id]));
+
+    expect(parsedOutput.allMigratedRecords[parent.id]).toBeTruthy();
+    expect(parsedOutput.allMigratedRecords[sibling.id]).toBeTruthy();
+    expect(capturedOutput.filter(event => event.type === 'malformed_id').map(event => event.data.recordId)).toEqual([malformed]);
+    // Two batches - the parent, then the sibling with the malformed id - and the
+    // refused one again record by record.
+    expect(sourceOrg.requestCounts['retrieveMany:Account']).toBe(2);
+    expect(sourceOrg.requestCounts['retrieve:Account']).toBe(2);
+});
+
+test('an SObject whose fetch batch is refused for its fields is retrieved one record at a time from then on', async () => {
+    const ctx = createContext();
+    const child = await createAccount(ctx.sourceOrg, 'Child');
+    const parent = await createRecord(ctx.sourceOrg, 'Account', { Name: 'Parent', Description: child.id });
+    jest.spyOn(sourceOrg, 'retrieveMany').mockImplementation(() => {
+        throw new SalesforceError('No such column on entity', 'INVALID_FIELD');
+    });
+
+    const { parsedOutput } = await ctx.runMigration(createBasicConfig(ctx, [parent.id]));
+
+    expect(parsedOutput.allMigratedRecords[parent.id]).toBeTruthy();
+    expect(parsedOutput.allMigratedRecords[child.id]).toBeTruthy();
+    // refused once, for the parent; the child's wave does not try again
+    expect(sourceOrg.requestCounts['retrieveMany:Account']).toBe(1);
+    expect(sourceOrg.requestCounts['retrieve:Account']).toBe(2);
+});
+
+test('records carrying files are fetched one at a time, so their files still come along', async () => {
+    const ctx = createContext();
+    const file = await createFile(ctx.sourceOrg, 'batched', 'file contents');
+
+    const { parsedOutput } = await ctx.runMigration(createBasicConfig(ctx, [file.versionId]));
+
+    expect(await readFile(ctx.targetOrg, parsedOutput.allMigratedRecords[file.versionId])).toBe('file contents');
+    expect(sourceOrg.requestCounts['retrieveMany:ContentVersion']).toBeUndefined();
+    expect(sourceOrg.requestCounts['retrieve:ContentVersion']).toBe(1);
+});
+
+test('a fetch batch size outside 1 to 2000 fails the run', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+
+    for (const fetchBatchSize of [0, 2001, 1.5, '3']) {
+        await expect(ctx.runMigration(createBasicConfig(ctx, [account.id], { fetchBatchSize })))
+            .rejects.toThrow(/fetchBatchSize must be a whole number from 1 to 2000/);
     }
 });
 

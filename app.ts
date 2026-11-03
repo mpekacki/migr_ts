@@ -1,4 +1,4 @@
-import { Field, Schema, SObjectRecord } from 'jsforce';
+import { DescribeSObjectResult, Field, Schema, SObjectRecord } from 'jsforce';
 import { SalesforceClient, DefaultSalesforceClient, AuthConfig, SaveError, SaveResult } from './salesforce-client';
 import * as fs from 'fs';
 import { breakCircularDependencies, CircularRecord, Dependency } from './circular';
@@ -100,6 +100,21 @@ interface Discovery {
     kind: OriginKind;
     name: string;
 }
+
+/**
+ * What retrieving a record of a fetch wave came to: the record, null when there
+ * is none to migrate (not found, not retrievable - already reported), or what
+ * went wrong reading it.
+ */
+type Retrieval = { sObjectName: string, record: any | null } | { error: unknown };
+
+/** Records of one SObject per retrieve request, unless fetchBatchSize says otherwise. */
+const DEFAULT_FETCH_BATCH_SIZE = 200;
+/**
+ * Refusals of a collection retrieve that are about the SObject or its fields
+ * rather than the records asked for, so would come back for every batch of it.
+ */
+const UNBATCHABLE_ERROR_CODES = ['INVALID_TYPE_FOR_OPERATION', 'INVALID_TYPE', 'INVALID_FIELD', 'NOT_FOUND', 'METHOD_NOT_ALLOWED'];
 
 /** Whether a value lookup has anything to look for - an empty value names no record. */
 function hasValue(value: any): boolean {
@@ -212,6 +227,8 @@ class MigrationRunner {
      * is checked against, 1 being the configured recordIds.
      */
     private fetchDepthsByIds: Record<string, number> = {};
+    /** SObjects the source refused to retrieve several records of at once - see retrieveWave. */
+    private readonly unbatchableTypes = new Set<string>();
     /** fetchDepthsByIds counted per depth, kept as it fills so progress is cheap to report. */
     private recordCountsByDepth: Record<number, number> = {};
     /**
@@ -562,7 +579,11 @@ class MigrationRunner {
             depth++;
             this.io.recordsSoFar(this.queued.size, depth, { ...this.recordCountsByDepth });
 
-            const fetchFunctions = recordIdsToFetch.map(recordId => () => this.fetchRecordAndDiscoverIds(recordId, depth));
+            // Only the first wave can name a record twice - the config listing it
+            // twice - and it is fetched once all the same.
+            recordIdsToFetch = [...new Set(recordIdsToFetch)];
+            const retrieved = await this.retrieveWave(recordIdsToFetch);
+            const fetchFunctions = recordIdsToFetch.map(recordId => () => this.processFetchedRecord(recordId, depth, retrieved.get(recordId)!));
 
             const rawResults = await executeConcurrently(fetchFunctions, this.maxConcurrency);
 
@@ -625,14 +646,127 @@ class MigrationRunner {
         return retrieved;
     }
 
-    private async fetchRecordAndDiscoverIds(recordId: string, depth: number): Promise<Discovery[]> {
-        const sObjectName = await this.describes.getSObjectType(recordId);
-        const sobjectDescribe = await this.describes.getSObject(sObjectName);
+    /** How many records of one SObject a single retrieve request asks for. */
+    private get fetchBatchSize(): number {
+        return this.options.fetchBatchSize ?? DEFAULT_FETCH_BATCH_SIZE;
+    }
+
+    /**
+     * Retrieves every record of a fetch wave, as few requests as it takes: the
+     * ids are grouped by SObject and each group is asked for `fetchBatchSize` at
+     * a time through sObject Collections, `maxConcurrentRequests` requests in
+     * flight. What cannot go that way is retrieved one record at a time, as it
+     * always was - see batchableFields for which SObjects those are, and a batch
+     * the org refuses has its records retried one by one, so every error a single
+     * retrieve knows how to tell apart (retrieveRecord) is still told apart.
+     *
+     * Each id is in the answer once, however many times the wave lists it.
+     */
+    private async retrieveWave(recordIds: string[]): Promise<Map<string, Retrieval>> {
+        const results = new Map<string, Retrieval>();
+        const idsByType = new Map<string, string[]>();
+        for (const recordId of new Set(recordIds)) {
+            try {
+                const sObjectName = await this.describes.getSObjectType(recordId);
+                if (!idsByType.has(sObjectName)) {
+                    idsByType.set(sObjectName, []);
+                }
+                idsByType.get(sObjectName)!.push(recordId);
+            } catch (error) {
+                results.set(recordId, { error });
+            }
+        }
+
+        const jobs: (() => Promise<void>)[] = [];
+        const retryOneByOne: { recordId: string, sObjectName: string }[] = [];
+        for (const [sObjectName, ids] of idsByType) {
+            const fields = await this.batchableFields(sObjectName);
+            if (!fields) {
+                jobs.push(...ids.map(recordId => async () => {
+                    this.announceFetch(recordId, sObjectName);
+                    await this.retrieveOne(recordId, sObjectName, results);
+                }));
+                continue;
+            }
+            for (let start = 0; start < ids.length; start += this.fetchBatchSize) {
+                const batch = ids.slice(start, start + this.fetchBatchSize);
+                jobs.push(async () => {
+                    batch.forEach(recordId => this.announceFetch(recordId, sObjectName));
+                    try {
+                        const records = await this.sourceClient!.retrieveMany(sObjectName, batch, fields);
+                        batch.forEach((recordId, i) => {
+                            const record = records[i] ?? null;
+                            if (!record) {
+                                this.io.recordNotFound(recordId, sObjectName);
+                            }
+                            results.set(recordId, { sObjectName, record });
+                        });
+                    } catch (error) {
+                        if (UNBATCHABLE_ERROR_CODES.includes(error?.errorCode)) {
+                            this.unbatchableTypes.add(sObjectName);
+                        }
+                        retryOneByOne.push(...batch.map(recordId => ({ recordId, sObjectName })));
+                    }
+                });
+            }
+        }
+        await executeConcurrently(jobs, this.maxConcurrency);
+        await executeConcurrently(
+            retryOneByOne.map(({ recordId, sObjectName }) => () => this.retrieveOne(recordId, sObjectName, results)),
+            this.maxConcurrency);
+        return results;
+    }
+
+    /**
+     * The fields to name when retrieving records of an SObject several at a time,
+     * or null when its records are to be retrieved one by one:
+     *
+     * - when batching is turned off (`fetchBatchSize: 1`);
+     * - when the SObject carries files. A single retrieve hands a blob field back
+     *   as the path of the endpoint serving the file, which is what files.download
+     *   goes by; what a collection retrieve hands back there is not that;
+     * - when the org has already refused a batch of them this run, so later waves
+     *   do not fail one batch after another before going one by one anyway;
+     * - when the source cannot be described - retrieving the record on its own
+     *   then reports what is actually wrong.
+     */
+    private async batchableFields(sObjectName: string): Promise<string[] | null> {
+        if (this.fetchBatchSize <= 1 || this.unbatchableTypes.has(sObjectName)) {
+            return null;
+        }
+        let describe: DescribeSObjectResult;
+        try {
+            describe = await this.describes.getSourceSObject(sObjectName);
+        } catch {
+            return null;
+        }
+        if (describe.fields.some(field => field.type === 'base64')) {
+            return null;
+        }
+        return describe.fields.map(field => field.name);
+    }
+
+    private announceFetch(recordId: string, sObjectName: string): void {
         this.io.fetchingRecord(recordId, sObjectName, this.pathTo(recordId, sObjectName));
-        const recordFields = await this.retrieveRecord(recordId, sObjectName);
+    }
+
+    private async retrieveOne(recordId: string, sObjectName: string, results: Map<string, Retrieval>): Promise<void> {
+        try {
+            results.set(recordId, { sObjectName, record: await this.retrieveRecord(recordId, sObjectName) });
+        } catch (error) {
+            results.set(recordId, { error });
+        }
+    }
+
+    private async processFetchedRecord(recordId: string, depth: number, retrieval: Retrieval): Promise<Discovery[]> {
+        if ('error' in retrieval) {
+            throw retrieval.error;
+        }
+        const { sObjectName, record: recordFields } = retrieval;
         if (!recordFields) {
             return [];
         }
+        const sobjectDescribe = await this.describes.getSObject(sObjectName);
         // Set now, as the mark that the record has arrived, and again below once
         // the download has filled its files in.
         this.fetched.set(recordId, recordFields);
@@ -649,12 +783,8 @@ class MigrationRunner {
         await this.files.download(recordId, sObjectName, record, recordFields);
         this.fetched.set(recordId, recordFields);
         this.queueRecord(recordId, record);
-        // The first wave is not de-duplicated, so a record id listed twice in the
-        // config is fetched twice - and must still be counted once.
-        if (!(recordId in this.fetchDepthsByIds)) {
-            this.fetchDepthsByIds[recordId] = depth;
-            this.recordCountsByDepth[depth] = (this.recordCountsByDepth[depth] || 0) + 1;
-        }
+        this.fetchDepthsByIds[recordId] = depth;
+        this.recordCountsByDepth[depth] = (this.recordCountsByDepth[depth] || 0) + 1;
         // The record itself goes out with the count, so the records view can grow
         // while fetching is still going. Its origin is already settled - the wave
         // before this one assigned it - and the history file was read before the
