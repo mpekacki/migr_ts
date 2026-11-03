@@ -164,8 +164,14 @@ function blobKey(sObjectName: string, recordId: string, fieldName: string): stri
     return `${sObjectName}:${recordId}:${fieldName}`;
 }
 
-/** Field values are compared as strings so booleans and numbers match their string form, like SOQL does. */
+/**
+ * Field values are compared as strings so booleans and numbers match their
+ * string form, like SOQL does. A list is an IN condition: any of its values.
+ */
 function valueMatches(recordValue: any, conditionValue: any): boolean {
+    if (Array.isArray(conditionValue)) {
+        return conditionValue.some(value => valueMatches(recordValue, value));
+    }
     if (isBlank(recordValue)) {
         return isBlank(conditionValue);
     }
@@ -196,6 +202,36 @@ export class FakeSalesforceOrg {
     countRequest(method: string, sObjectName: string): void {
         const key = `${method}:${sObjectName}`;
         this.requestCounts[key] = (this.requestCounts[key] ?? 0) + 1;
+    }
+
+    /**
+     * How many children a subquery result carries before the rest is left behind
+     * a nextRecordsUrl - unlimited unless a test sets it, the way a real org only
+     * pages a subquery for a parent with a great many children.
+     */
+    childPageSize = Infinity;
+    /** The children each outstanding nextRecordsUrl still stands for. */
+    private readonly pendingPages = new Map<string, any[]>();
+
+    /** A subquery result for these children, paged at childPageSize. */
+    subqueryResult(children: any[]): any {
+        const records = children.map(child => ({ attributes: child.attributes, Id: child.Id }));
+        if (records.length <= this.childPageSize) {
+            return { totalSize: records.length, done: true, records };
+        }
+        const nextRecordsUrl = `/services/data/v${FAKE_API_VERSION}/query/01g${this.pendingPages.size}-${this.childPageSize}`;
+        this.pendingPages.set(nextRecordsUrl, records.slice(this.childPageSize));
+        return { totalSize: records.length, done: false, nextRecordsUrl, records: records.slice(0, this.childPageSize) };
+    }
+
+    /** Every record left behind a nextRecordsUrl, the way an autoFetch queryMore gathers them. */
+    queryMore(nextRecordsUrl: string): any[] {
+        const records = this.pendingPages.get(nextRecordsUrl);
+        if (!records) {
+            throw new SalesforceError(`invalid query locator: ${nextRecordsUrl}`, 'INVALID_QUERY_LOCATOR');
+        }
+        this.pendingPages.delete(nextRecordsUrl);
+        return records;
     }
 
     constructor(config: FakeOrgConfig) {
@@ -613,6 +649,11 @@ function parseWhereClause(whereClause: string | undefined): Record<string, any> 
         return conditions;
     }
     for (const part of whereClause.split(/\s+AND\s+/i)) {
+        const inList = /^\s*(\w+)\s+IN\s*\(([^)]*)\)\s*$/i.exec(part);
+        if (inList) {
+            conditions[inList[1]] = inList[2].split(',').map(value => value.trim().replace(/^'|'$/g, ''));
+            continue;
+        }
         const match = /^\s*(\w+)\s*=\s*'?([^']*)'?\s*$/.exec(part);
         if (!match) {
             throw new SalesforceError(`Unsupported WHERE clause: ${part}`, 'MALFORMED_QUERY');
@@ -645,7 +686,9 @@ export class FakeQuery {
     constructor(
         private readonly org: FakeSalesforceOrg,
         private readonly sObjectType: string,
-        private readonly conditions: Record<string, any> = {}
+        private readonly conditions: Record<string, any> = {},
+        /** Which client method built the query, for FakeSalesforceOrg.requestCounts. */
+        private readonly method: string = 'query'
     ) {}
 
     select(): FakeQuery {
@@ -673,6 +716,7 @@ export class FakeQuery {
     }
 
     async execute(): Promise<any[]> {
+        this.org.countRequest(this.method, this.sObjectType);
         const conditions = { ...this.conditions };
         for (const clause of this.whereClauses) {
             Object.assign(conditions, parseWhereClause(clause));
@@ -682,9 +726,7 @@ export class FakeQuery {
             for (const relationshipName of this.includes) {
                 const children = this.org.childRecords(this.sObjectType, relationshipName, record.Id);
                 // Salesforce returns null, not an empty list, when a subquery has no rows.
-                result[relationshipName] = children.length > 0
-                    ? { totalSize: children.length, done: true, records: children.map(child => ({ attributes: child.attributes, Id: child.Id })) }
-                    : null;
+                result[relationshipName] = children.length > 0 ? this.org.subqueryResult(children) : null;
             }
             return result;
         });
@@ -721,15 +763,20 @@ export class FakeSalesforceClient implements SalesforceClient {
     }
 
     find(sObjectName: string, conditions: Record<string, string>): FakeQuery {
-        return new FakeQuery(this.org, sObjectName, conditions);
+        return new FakeQuery(this.org, sObjectName, conditions, 'find');
     }
 
     select(sObjectName: string): FakeQuery {
-        return new FakeQuery(this.org, sObjectName);
+        return new FakeQuery(this.org, sObjectName, {}, 'select');
     }
 
     async query(soql: string): Promise<any> {
         return this.org.query(soql);
+    }
+
+    async queryMore(nextRecordsUrl: string): Promise<any[]> {
+        this.org.countRequest('queryMore', '');
+        return this.org.queryMore(nextRecordsUrl);
     }
 
     async bulkCreate(records: any[]): Promise<SaveResult[]> {

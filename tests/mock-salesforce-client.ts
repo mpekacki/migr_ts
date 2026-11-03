@@ -2,7 +2,7 @@ import { SalesforceClient, DefaultSalesforceClient, AuthConfig, ApexExecutionRes
 
 interface ErrorConfig {
     recordId: string;
-    operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'retrieveMany' | 'retrieveBlob' | 'query' | 'update' | 'executeAnonymous' | 'describeSObject' | 'describeGlobal' | 'find' | 'select';
+    operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'retrieveMany' | 'retrieveBlob' | 'query' | 'queryMore' | 'update' | 'executeAnonymous' | 'describeSObject' | 'describeGlobal' | 'find' | 'select';
     error: Error;
 }
 
@@ -26,7 +26,7 @@ export class MockSalesforceClient implements SalesforceClient {
     /**
      * Configure the client to throw an error for a specific record ID and operation
      */
-    configureError(recordId: string, operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'retrieveMany' | 'retrieveBlob' | 'query' | 'update' | 'executeAnonymous' | 'describeSObject' | 'describeGlobal' | 'find' | 'select', error: Error): void {
+    configureError(recordId: string, operation: 'bulkCreate' | 'bulkUpdate' | 'retrieve' | 'retrieveMany' | 'retrieveBlob' | 'query' | 'queryMore' | 'update' | 'executeAnonymous' | 'describeSObject' | 'describeGlobal' | 'find' | 'select', error: Error): void {
         this.errorConfigs.push({ recordId, operation, error });
     }
 
@@ -112,6 +112,12 @@ export class MockSalesforceClient implements SalesforceClient {
         const error = this.shouldThrowError('query');
         if (error) throw error;
         return this.defaultClient.query(soql);
+    }
+
+    async queryMore(nextRecordsUrl: string): Promise<any[]> {
+        const error = this.shouldThrowError('queryMore');
+        if (error) throw error;
+        return this.defaultClient.queryMore(nextRecordsUrl);
     }
 
     async bulkCreate(records: any[]): Promise<Array<{ id: string, success: boolean, errors: { message: string, fields: string[] }[] }>> {
