@@ -41,6 +41,7 @@ export interface SalesforceClient {
     describeGlobal(): Promise<DescribeGlobalResult>;
     describeSObject(sObjectName: string): Promise<DescribeSObjectResult>;
     retrieve(sObjectName: string, recordId: string): Promise<any>;
+    retrieveMany(sObjectName: string, recordIds: string[], fields: string[]): Promise<(any | null)[]>;
     retrieveBlob(sObjectName: string, recordId: string, fieldName: string): Promise<string>;
     find(sObjectName: string, conditions: Record<string, string>): any;
     select(sObjectName: string): any;
@@ -93,6 +94,22 @@ export class DefaultSalesforceClient implements SalesforceClient {
 
     async retrieve(sObjectName: string, recordId: string): Promise<any> {
         return await this.connection.sobject(sObjectName).retrieve(recordId);
+    }
+
+    /**
+     * Several records of one SObject in a single request (sObject Collections,
+     * up to 2000 ids). The answer has one entry per id, in the order asked, with
+     * null for an id that is not there or not visible. Unlike a single retrieve
+     * the fields have to be named; a field the org does not have, or the user
+     * cannot read, fails the whole request. POST rather than GET because the ids
+     * go in the body: a GET runs out of URL long before 2000 of them.
+     */
+    async retrieveMany(sObjectName: string, recordIds: string[], fields: string[]): Promise<(any | null)[]> {
+        return (await this.connection.request({
+            method: 'POST',
+            url: `/services/data/v${this.connection.version}/composite/sobjects/${sObjectName}`,
+            body: JSON.stringify({ ids: recordIds, fields })
+        })) as (any | null)[];
     }
 
     /**
