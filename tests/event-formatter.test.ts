@@ -178,6 +178,34 @@ describe('event-formatter', () => {
             expect(format(event)).toBe('apex script ./setup.apex failed: Unexpected token \'x\'. (line 3, column 1)');
         });
 
+        it('should format apex_script_error with both ways to abort when there are after scripts', () => {
+            const event = new IOEvent('input', 'apex_script_error', {
+                phase: 'before', filePath: './second.apex', failure: 'boom', ranScripts: ['./first.apex'], hasAfterScripts: true
+            });
+            const text = format(event);
+            expect(text).toContain('apex script ./second.apex (apex.beforeMigration) failed: boom');
+            expect(text).toContain('Before scripts that already ran: ./first.apex');
+            expect(text).toContain('Retry (r)');
+            expect(text).toContain('Skip (s)');
+            expect(text).toContain('Abort (a) - stop the migration without running the afterMigration scripts');
+            expect(text).toContain('Abort and run after scripts (ar) - stop the migration, then run the afterMigration scripts:');
+        });
+
+        it('should format apex_script_error with a single abort when there are no after scripts', () => {
+            const event = new IOEvent('input', 'apex_script_error', {
+                phase: 'before', filePath: './setup.apex', failure: 'boom', ranScripts: [], hasAfterScripts: false
+            });
+            const text = format(event);
+            expect(text).toContain('No before script has run yet.');
+            expect(text).toContain('Abort (a) - stop the migration:');
+            expect(text).not.toContain('(ar)');
+        });
+
+        it('should format apex_script_skipped', () => {
+            const event = new IOEvent('output', 'apex_script_skipped', { phase: 'before', filePath: './setup.apex' });
+            expect(format(event)).toBe('apex script ./setup.apex skipped');
+        });
+
         it('should format using_solver with fix action', () => {
             const event = new IOEvent('output', 'using_solver', { error: 'err', solverMessage: 'fix it', solverAction: 'fix' });
             expect(format(event)).toBe('fixing using solver: fix it');

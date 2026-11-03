@@ -351,6 +351,9 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             state.errors++;
             push(state, 'err', `Apex script ${d.filePath} failed: ${firstLine(d.failure)}`);
             break;
+        case 'apex_script_skipped':
+            push(state, 'warn', `Apex script ${d.filePath} skipped`);
+            break;
         case 'error':
             state.errors++;
             push(state, 'err', d.message ?? 'error');

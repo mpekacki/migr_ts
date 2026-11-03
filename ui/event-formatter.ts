@@ -160,6 +160,10 @@ function formatEvent(event: IOEvent): string {
             return `apex script ${d?.filePath} finished`;
         case 'apex_script_failed':
             return `apex script ${d?.filePath} failed: ${d?.failure}`;
+        case 'apex_script_error':
+            return formatApexScriptPrompt(d);
+        case 'apex_script_skipped':
+            return `apex script ${d?.filePath} skipped`;
         case 'error_updating_record': {
             // Show the whole error payload (status code, fields, stack, ...), the way
             // the insert path logs its SaveErrors - interpolating the object here used
@@ -221,6 +225,34 @@ function formatErrorPrompt(isInsert: boolean, d: any): string {
     const errorText = d.errorDetails ? JSON.stringify(d.errorDetails) : d.error;
     const phase = isInsert ? 'inserting' : 'updating';
     return `recordId: ${d.recordId}, no solver found for error ${phase} record: ${errorText}\nPlease provide input to resolve the error:\nAvailable options:\n${optionsList}:`;
+}
+
+/**
+ * The question put to the user when a before script fails. Nothing has been
+ * migrated at this point, so aborting loses nothing but the run itself. Whether
+ * the after scripts run on the way out is the user's call - there are two ways to
+ * abort when there are after scripts - so the prompt lists the before scripts that
+ * already ran, which are what the after scripts would be undoing.
+ */
+function formatApexScriptPrompt(d: any): string {
+    const ranScripts: string[] = Array.isArray(d?.ranScripts) ? d.ranScripts : [];
+    const ran = ranScripts.length > 0
+        ? `Before scripts that already ran: ${ranScripts.join(', ')}`
+        : 'No before script has run yet.';
+    const abort = d?.hasAfterScripts
+        ? [
+            '- Abort (a) - stop the migration without running the afterMigration scripts',
+            '- Abort and run after scripts (ar) - stop the migration, then run the afterMigration scripts:'
+        ]
+        : ['- Abort (a) - stop the migration:'];
+    return [
+        `apex script ${d?.filePath} (apex.beforeMigration) failed: ${d?.failure}`,
+        `Nothing has been migrated yet. ${ran}`,
+        'Available options:',
+        '- Retry (r) - run the file again, so it can be fixed first',
+        '- Skip (s) - continue without it',
+        ...abort
+    ].join('\n');
 }
 
 /** IO serializes errors to plain objects; anything else is printed as it comes. */

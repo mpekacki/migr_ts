@@ -334,7 +334,17 @@ class MigrationRunner {
             // which ApexScripts then runs down every way out, the abandoned run
             // included.
             if (!nothingToMigrate) {
-                await this.apex.runBefore();
+                const proceed = await this.runBeforeScripts();
+                if (!proceed) {
+                    // The user aborted at a failing before script. Nothing was
+                    // migrated, so there is no report to write. Whether the after
+                    // scripts run is what the user chose when aborting (runAfter is
+                    // a no-op if they chose not to). They go first: 'aborted' is
+                    // what the UI takes for the end of the run.
+                    await this.apex.runAfter();
+                    this.io.aborted();
+                    return;
+                }
             }
             const completed = await this.migrateToOrg();
             if (!completed) {
@@ -357,6 +367,25 @@ class MigrationRunner {
             // reach main()'s error handling rather than escape as an unhandled
             // rejection.
             await this.migrateToFile();
+        }
+    }
+
+    /**
+     * The before scripts. A failure the user is not there to answer (fullAuto) is
+     * fatal, but a before script that ran ahead of it may have switched something
+     * off, so the after scripts get to undo it first. Their own failure is only
+     * reported: the before script's failure is the one the run fails with.
+     */
+    private async runBeforeScripts(): Promise<boolean> {
+        try {
+            return await this.apex.runBefore();
+        } catch (error) {
+            try {
+                await this.apex.runAfter();
+            } catch (afterError) {
+                this.io.error(afterError.message);
+            }
+            throw error;
         }
     }
 

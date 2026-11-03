@@ -363,6 +363,11 @@ describe('migration state reducer', () => {
         expect(s.feed[s.feed.length - 1].glyph).toBe('err');
         // only the first line of the failure reaches the feed
         expect(s.feed[s.feed.length - 1].text).toBe('Apex script ./teardown.apex failed: boom');
+
+        feed(s, 'apex_script_skipped', { phase: 'before', filePath: './setup.apex' });
+        expect(s.feed[s.feed.length - 1].glyph).toBe('warn');
+        expect(s.feed[s.feed.length - 1].text).toBe('Apex script ./setup.apex skipped');
+        expect(s.errors).toBe(1);
     });
 
     it('demotes a previous running entry when a new event arrives', () => {

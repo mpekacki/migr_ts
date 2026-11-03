@@ -54,6 +54,8 @@ export type IOEventType =
     | 'running_apex_script'
     | 'apex_script_done'
     | 'apex_script_failed'
+    | 'apex_script_error'
+    | 'apex_script_skipped'
     | 'record_store_opened'
     | 'record_store_closed';
 

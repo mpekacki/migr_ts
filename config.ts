@@ -84,7 +84,11 @@ interface Options {
      * order they are listed.
      */
     apex?: {
-        /** Run after the migration is confirmed, before the first record is inserted. */
+        /**
+         * Run after the migration is confirmed, before the first record is inserted.
+         * A failing script is put to the user - retry, skip or abort - unless
+         * `fullAuto.enabled`, where it fails the run.
+         */
         beforeMigration?: string[];
         /** Run once every record has been inserted and the deferred updates are done. */
         afterMigration?: string[];
