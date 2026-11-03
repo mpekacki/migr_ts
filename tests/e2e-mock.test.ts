@@ -605,6 +605,69 @@ test('records carrying files are fetched one at a time, so their files still com
     expect(sourceOrg.requestCounts['retrieve:ContentVersion']).toBe(1);
 });
 
+test('relationship queries name a batch of parents each, and every child is credited to its own parent', async () => {
+    const queryCounts = async (fetchBatchSize?: number) => {
+        sourceOrg = createSourceOrg();
+        targetOrg = createTargetOrg();
+        const ctx = createContext();
+        const accountIds = (await ctx.sourceOrg.createAll('Account', Array.from({ length: 450 }, (_, i) => ({ Name: `Parent-${i}` }))))
+            .map(result => result.id);
+        const contactIds = (await ctx.sourceOrg.createAll('Contact', accountIds.map((AccountId, i) => ({ LastName: `Child-${i}`, AccountId }))))
+            .map(result => result.id);
+
+        const { parsedOutput, capturedOutput } = await ctx.runMigration(createBasicConfig(ctx, accountIds, {
+            relationships: { Account: [{ name: 'Contacts' }] },
+            relatedRecordDepthLimit: 2,
+            fetchBatchSize
+        }));
+
+        expect(contactIds.every(id => parsedOutput.allMigratedRecords[id])).toBe(true);
+        const retrieved = capturedOutput.find(event => event.type === 'retrieved_records')!.data.records;
+        const originOf = new Map(retrieved.map((record: any) => [record.id, record.origin]));
+        contactIds.forEach((contactId, i) => {
+            expect(originOf.get(contactId)).toEqual({ from: accountIds[i], kind: 'child', name: 'Contacts' });
+        });
+        const counted = capturedOutput.filter(event => event.type === 'related_records')
+            .reduce((sum, event) => sum + event.data.count, 0);
+        expect(counted).toBe(450);
+        return sourceOrg.requestCounts['select:Account'];
+    };
+
+    expect(await queryCounts()).toBe(3);
+    // capped below fetchBatchSize: the query goes in the URL
+    expect(await queryCounts(2000)).toBe(2);
+    expect(await queryCounts(1)).toBe(450);
+});
+
+test('relationship queries stop at the depth limit', async () => {
+    const ctx = createContext();
+    const parent = await createAccount(ctx.sourceOrg, 'Parent');
+    const child = await createRecord(ctx.sourceOrg, 'Account', { Name: 'Child', ParentId: parent.id });
+
+    await ctx.runMigration(createBasicConfig(ctx, [child.id], {
+        relationships: { Account: [{ name: 'ChildAccounts' }] },
+        relatedRecordDepthLimit: 1
+    }));
+
+    expect(sourceOrg.requestCounts['select:Account']).toBeUndefined();
+});
+
+test('children past the first page of a relationship query are followed', async () => {
+    const ctx = createContext();
+    const account = await createAccount(ctx.sourceOrg);
+    const contactIds = (await ctx.sourceOrg.createAll('Contact', Array.from({ length: 5 }, (_, i) => ({ LastName: `Paged-${i}`, AccountId: account.id }))))
+        .map(result => result.id);
+    sourceOrg.childPageSize = 2;
+
+    const { parsedOutput } = await ctx.runMigration(createBasicConfig(ctx, [account.id], {
+        relationships: { Account: [{ name: 'Contacts' }] },
+        relatedRecordDepthLimit: 2
+    }));
+
+    expect(contactIds.every(id => parsedOutput.allMigratedRecords[id])).toBe(true);
+    expect(sourceOrg.requestCounts['queryMore:']).toBe(1);
+});
+
 test('a fetch batch size outside 1 to 2000 fails the run', async () => {
     const ctx = createContext();
     const account = await createAccount(ctx.sourceOrg);

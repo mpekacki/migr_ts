@@ -114,12 +114,23 @@ describe('migration state reducer', () => {
         feed(s, 'querying_related_records', {
             soql: "SELECT Id, (SELECT Id FROM Contacts) FROM Account WHERE Id = '0015g00000QqWxYAAV'",
             sObjectName: 'Account',
-            recordId: '0015g00000QqWxYAAV',
+            recordIds: ['0015g00000QqWxYAAV'],
             relationships: ['Contacts', 'Opportunities'],
         });
         expect(s.phase).toBe('Fetching');
         expect(s.feed[s.feed.length - 1].text)
             .toBe('Querying related records of Account 0015g00000QqWxYAAV (Contacts, Opportunities)');
+    });
+
+    it('counts the records of a batched related-records query rather than naming them', () => {
+        const s = initialState();
+        feed(s, 'querying_related_records', {
+            soql: "SELECT Id, (SELECT Id FROM Contacts) FROM Account WHERE Id IN ('001A', '001B', '001C')",
+            sObjectName: 'Account',
+            recordIds: ['001A', '001B', '001C'],
+            relationships: ['Contacts'],
+        });
+        expect(s.feed[s.feed.length - 1].text).toBe('Querying related records of 3 Account records (Contacts)');
     });
 
     it('names the object, record and matcher criteria of an existing-record query', () => {

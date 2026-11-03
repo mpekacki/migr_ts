@@ -108,8 +108,29 @@ interface Discovery {
  */
 type Retrieval = { sObjectName: string, record: any | null } | { error: unknown };
 
+/** A fetched record on its way through discoverWave, with what it has been found to lead to so far. */
+interface FetchedRecord {
+    recordId: string;
+    sObjectName: string;
+    fetchedRecord: any;
+    found: Map<string, Discovery>;
+}
+
+/** What a record of a fetch wave led to, or why it could not be taken in. */
+type WaveOutcome = { discoveries: Discovery[] } | { error: unknown };
+
+function errorMessage(error: any): string {
+    return error?.message ?? String(error);
+}
+
 /** Records of one SObject per retrieve request, unless fetchBatchSize says otherwise. */
 const DEFAULT_FETCH_BATCH_SIZE = 200;
+/**
+ * The most record ids one relationship query names. The query goes in the URL,
+ * and Salesforce refuses one past about 16 KB (HTTP 414) - 2000 ids is well over
+ * that, 300 well under.
+ */
+const MAX_IDS_PER_RELATIONSHIP_QUERY = 300;
 /**
  * Refusals of a collection retrieve that are about the SObject or its fields
  * rather than the records asked for, so would come back for every batch of it.
@@ -583,18 +604,16 @@ class MigrationRunner {
             // twice - and it is fetched once all the same.
             recordIdsToFetch = [...new Set(recordIdsToFetch)];
             const retrieved = await this.retrieveWave(recordIdsToFetch);
-            const fetchFunctions = recordIdsToFetch.map(recordId => () => this.processFetchedRecord(recordId, depth, retrieved.get(recordId)!));
-
-            const rawResults = await executeConcurrently(fetchFunctions, this.maxConcurrency);
+            const outcomes = await this.discoverWave(recordIdsToFetch, retrieved, depth);
 
             const newRecordIdsToFetch = new Set<string>();
-            for (let i = 0; i < rawResults.length; i++) {
-                const result = rawResults[i];
-                if (result instanceof Error) {
-                    this.io.error(`Error fetching record ${recordIdsToFetch[i]}: ${result.message}`);
+            for (let i = 0; i < outcomes.length; i++) {
+                const outcome = outcomes[i];
+                if ('error' in outcome) {
+                    this.io.error(`Error fetching record ${recordIdsToFetch[i]}: ${errorMessage(outcome.error)}`);
                     continue;
                 }
-                for (const discovery of result) {
+                for (const discovery of outcome.discoveries) {
                     if (this.fetched.has(discovery.id)) {
                         continue;
                     }
@@ -758,13 +777,48 @@ class MigrationRunner {
         }
     }
 
-    private async processFetchedRecord(recordId: string, depth: number, retrieval: Retrieval): Promise<Discovery[]> {
+    /**
+     * What every record of a wave leads to, in the order of `recordIds`, in three
+     * steps: each record on its own (processFetchedRecord: lookups, files), then
+     * the child relationships of the whole wave in as few queries as it takes
+     * (collectRelatedRecordIds), then each record's value lookups. The steps keep
+     * the order a single record always found things in, so an id two routes lead
+     * to is credited to the same one as ever.
+     */
+    private async discoverWave(recordIds: string[], retrieved: Map<string, Retrieval>, depth: number): Promise<WaveOutcome[]> {
+        const processed = await executeConcurrently(recordIds.map(recordId => async (): Promise<FetchedRecord | null | { error: unknown }> => {
+            try {
+                return await this.processFetchedRecord(recordId, depth, retrieved.get(recordId)!);
+            } catch (error) {
+                return { error };
+            }
+        }), this.maxConcurrency);
+        const fetchedRecords = processed.filter((entry): entry is FetchedRecord => entry !== null && !('error' in entry));
+        await this.collectRelatedRecordIds(fetchedRecords, depth);
+        return executeConcurrently(processed.map(entry => async (): Promise<WaveOutcome> => {
+            if (entry === null) {
+                return { discoveries: [] };
+            }
+            if ('error' in entry) {
+                return entry;
+            }
+            try {
+                await this.collectValueLookupIds(entry.recordId, entry.sObjectName, depth, entry.fetchedRecord, entry.found);
+            } catch (error) {
+                return { error };
+            }
+            return { discoveries: [...entry.found.values()] };
+        }), this.maxConcurrency);
+    }
+
+    /** Takes a retrieved record into the run, and what its own fields lead to; null when there was no record. */
+    private async processFetchedRecord(recordId: string, depth: number, retrieval: Retrieval): Promise<FetchedRecord | null> {
         if ('error' in retrieval) {
             throw retrieval.error;
         }
         const { sObjectName, record: recordFields } = retrieval;
         if (!recordFields) {
-            return [];
+            return null;
         }
         const sobjectDescribe = await this.describes.getSObject(sObjectName);
         // Set now, as the mark that the record has arrived, and again below once
@@ -798,9 +852,7 @@ class MigrationRunner {
         const found = new Map<string, Discovery>();
         await this.discoverReferencedIds(record, creatableFields, found);
         this.collectFileVersionId(recordId, sObjectName, recordFields, found);
-        await this.collectRelatedRecordIds(recordId, sObjectName, depth, found);
-        await this.collectValueLookupIds(recordId, sObjectName, depth, recordFields, found);
-        return [...found.values()];
+        return { recordId, sObjectName, fetchedRecord: recordFields, found };
     }
 
     /**
@@ -866,54 +918,107 @@ class MigrationRunner {
         }
     }
 
-    private async collectRelatedRecordIds(recordId: string, sObjectName: string, depth: number, found: Map<string, Discovery>): Promise<void> {
-        const relationships = this.options.relationships?.[sObjectName];
-        if (!relationships || !this.childrenAllowedAt(depth)) {
+    /**
+     * The children (`relationships`) of a wave's records, one query per SObject
+     * and batch of ids rather than one per record: the ids of up to
+     * `fetchBatchSize` records go into a single `Id IN (...)` - capped at
+     * MAX_IDS_PER_RELATIONSHIP_QUERY, because the query travels in the URL - and
+     * each child lands in the `found` of the record it came under.
+     */
+    private async collectRelatedRecordIds(records: FetchedRecord[], depth: number): Promise<void> {
+        if (!this.childrenAllowedAt(depth)) {
             return;
         }
+        const recordsByType = new Map<string, FetchedRecord[]>();
+        for (const record of records) {
+            if (this.options.relationships?.[record.sObjectName]) {
+                if (!recordsByType.has(record.sObjectName)) {
+                    recordsByType.set(record.sObjectName, []);
+                }
+                recordsByType.get(record.sObjectName)!.push(record);
+            }
+        }
+        const batchSize = Math.min(this.fetchBatchSize, MAX_IDS_PER_RELATIONSHIP_QUERY);
+        const jobs: (() => Promise<void>)[] = [];
+        for (const [sObjectName, ofType] of recordsByType) {
+            for (let start = 0; start < ofType.length; start += batchSize) {
+                const batch = ofType.slice(start, start + batchSize);
+                jobs.push(() => this.queryChildren(sObjectName, batch));
+            }
+        }
+        // executeConcurrently hands a failure back in place of the job's result
+        const results: unknown[] = await executeConcurrently(jobs, this.maxConcurrency);
+        for (const result of results) {
+            if (result instanceof Error) {
+                this.io.error(`Error querying related records: ${result.message}`);
+            }
+        }
+    }
+
+    private async queryChildren(sObjectName: string, records: FetchedRecord[]): Promise<void> {
+        const relationships = this.options.relationships[sObjectName];
+        const recordIds = records.map(record => record.recordId);
         const selector = this.sourceClient!.select(sObjectName);
         for (const relationship of relationships) {
             selector.include(relationship.name).select('Id').end();
         }
-        selector.where(`Id = '${recordId}'`);
-        this.io.queryingForRelatedRecords(await selector.toSOQL(), sObjectName, recordId, relationships.map(r => r.name));
-        let relsResults: any[] = [];
-
+        selector.where(`Id IN (${recordIds.map(id => `'${id}'`).join(', ')})`);
+        this.io.queryingForRelatedRecords(await selector.toSOQL(), sObjectName, recordIds, relationships.map(r => r.name));
+        const which = recordIds.length === 1 ? recordIds[0] : `${recordIds.length} ${sObjectName} records`;
+        // A query with subqueries may come back a page of parents at a time.
+        const execute = () => selector.execute({ autoFetch: true, maxFetch: Number.MAX_SAFE_INTEGER });
+        let rows: any[] = [];
         try {
-            relsResults = await selector.execute();
+            rows = await execute();
         } catch (jsforceError) {
             try {
-                const errorResult = await this.handleJsforceError(
-                    jsforceError,
-                    `query related records for ${recordId}`,
-                    () => selector.execute()
-                );
-
+                const errorResult = await this.handleJsforceError(jsforceError, `query related records for ${which}`, execute);
                 if (errorResult.success && errorResult.result) {
-                    relsResults = errorResult.result;
+                    rows = errorResult.result;
                 } else if (errorResult.shouldSkip) {
-                    this.io.error(`Skipping related records query for ${recordId} due to jsforce error: ${jsforceError.message}`);
-                    relsResults = [];
+                    this.io.error(`Skipping related records query for ${which} due to jsforce error: ${jsforceError.message}`);
                 } else {
                     throw jsforceError;
                 }
             } catch {
                 this.io.error(`Unhandled jsforce error in related records query: ${jsforceError.message}`);
-                relsResults = [];
             }
         }
-        const recordRelationships = relsResults[0];
+        // By the 15 character id, which both a 15 and an 18 character one start
+        // with - a requested record may be named either way in the config.
+        const rowsById = new Map(rows.map(row => [String(row.Id).slice(0, 15), row]));
         for (const relationship of relationships) {
-            const relatedRecords = recordRelationships![relationship.name]?.records;
-            this.io.relatedRecords(relationship.name, relatedRecords?.length);
-            if (relatedRecords) {
-                for (const relatedRecord of relatedRecords) {
-                    if (!this.queued.has(relatedRecord.Id!) && !found.has(relatedRecord.Id!)) {
-                        found.set(relatedRecord.Id!, { id: relatedRecord.Id!, kind: 'child', name: relationship.name });
+            let count = 0;
+            for (const record of records) {
+                const row = rowsById.get(record.recordId.slice(0, 15));
+                const children = await this.childrenOf(row, relationship.name, record.recordId);
+                count += children.length;
+                for (const child of children) {
+                    if (!this.queued.has(child.Id) && !record.found.has(child.Id)) {
+                        record.found.set(child.Id, { id: child.Id, kind: 'child', name: relationship.name });
                     }
                 }
             }
+            this.io.relatedRecords(relationship.name, count);
         }
+    }
+
+    /**
+     * A record's children through one relationship. A parent with a great many
+     * of them gets only the first page in the query result, with the rest behind
+     * a nextRecordsUrl of its own, which is followed here.
+     */
+    private async childrenOf(row: any, relationshipName: string, parentId: string): Promise<any[]> {
+        const result = row?.[relationshipName];
+        const children = [...(result?.records ?? [])];
+        if (result && result.done === false && result.nextRecordsUrl) {
+            try {
+                children.push(...await this.sourceClient!.queryMore(result.nextRecordsUrl));
+            } catch (error) {
+                this.io.error(`Could not read every ${relationshipName} record of ${parentId}, only the first ${children.length}: ${errorMessage(error)}`);
+            }
+        }
+        return children;
     }
 
     /**

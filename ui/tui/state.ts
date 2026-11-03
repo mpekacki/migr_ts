@@ -227,7 +227,9 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
         case 'querying_related_records': {
             state.phase = 'Fetching';
             const rels = Array.isArray(d.relationships) && d.relationships.length ? ` (${d.relationships.join(', ')})` : '';
-            push(state, 'run', `Querying related records of ${d.sObjectName} ${d.recordId}${rels}`);
+            const ids: string[] = Array.isArray(d.recordIds) ? d.recordIds : [];
+            const which = ids.length === 1 ? `${d.sObjectName} ${ids[0]}` : `${ids.length} ${d.sObjectName} records`;
+            push(state, 'run', `Querying related records of ${which}${rels}`);
             break;
         }
         case 'related_records':

@@ -1,5 +1,6 @@
 import { Connection, AuthInfo } from '@salesforce/core';
 import { DescribeSObjectResult, DescribeGlobalResult } from 'jsforce';
+import type { QueryOptions } from 'jsforce/lib/query';
 
 export interface AuthConfig {
     orgAlias?: string;
@@ -46,6 +47,7 @@ export interface SalesforceClient {
     find(sObjectName: string, conditions: Record<string, string>): any;
     select(sObjectName: string): any;
     query(soql: string): Promise<any>;
+    queryMore(nextRecordsUrl: string): Promise<any[]>;
     bulkCreate(records: any[]): Promise<SaveResult[]>;
     bulkUpdate(records: any[]): Promise<SaveResult[]>;
     update(sObjectName: string, record: any): Promise<void>;
@@ -150,6 +152,17 @@ export class DefaultSalesforceClient implements SalesforceClient {
      */
     async query(soql: string): Promise<any> {
         return await this.connection.query(soql, { autoFetch: true, maxFetch: Number.MAX_SAFE_INTEGER });
+    }
+
+    /**
+     * Every record left behind a nextRecordsUrl - in particular the one a
+     * subquery result carries when a parent has more children than fit its first
+     * page, which no autoFetch of the parent query follows.
+     */
+    async queryMore(nextRecordsUrl: string): Promise<any[]> {
+        // queryMore is typed to want every option, though like query it fills in the rest
+        const options: Partial<QueryOptions> = { autoFetch: true, maxFetch: Number.MAX_SAFE_INTEGER };
+        return (await this.connection.queryMore(nextRecordsUrl, options as QueryOptions)).records;
     }
 
     async bulkCreate(records: any[]): Promise<SaveResult[]> {

@@ -163,10 +163,12 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'queried_records', { soql, count }));
     }
 
-    public queryingForRelatedRecords(soql: string, sObjectName: string, recordId: string, relationships: string[]) {
-        this.onOutput(this.buildIOEvent('output', 'querying_related_records', { soql, sObjectName, recordId, relationships }));
+    /** A query for the children of a batch of records of one SObject, one or many. */
+    public queryingForRelatedRecords(soql: string, sObjectName: string, recordIds: string[], relationships: string[]) {
+        this.onOutput(this.buildIOEvent('output', 'querying_related_records', { soql, sObjectName, recordIds, relationships }));
     }
 
+    /** How many children one relationship query found through a relationship, across its whole batch. */
     public relatedRecords(relationshipName: string, count: number) {
         this.onOutput(this.buildIOEvent('output', 'related_records', { relationshipName, count }));
     }
