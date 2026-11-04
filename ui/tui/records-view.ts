@@ -12,6 +12,12 @@ import { ansi, padTo, stripAnsi, truncate, visibleLength } from './ansi';
 export interface RecordGroup {
     sObjectType: string;
     ids: string[];
+    /**
+     * How many of the group's records came each way - the last hop of their paths,
+     * as the path pane lists it on the group. Counted as records join, because the
+     * pane is redrawn every frame and a group can hold tens of thousands.
+     */
+    ways: Map<string, number>;
 }
 
 /**
@@ -56,17 +62,54 @@ export function emptyIndex(fromFile: boolean, complete: boolean): RecordIndex {
     return { byId: new Map(), depths: new Map(), groups: new Map(), fromFile, complete, version: 0 };
 }
 
-/** The complete list at once. Every record is known before any depth is taken, so the order they come in does not matter. */
+/**
+ * Compares the way `localeCompare` does with no arguments - same default locale,
+ * same options - without setting up a collator on every call, which is what made
+ * `localeCompare` the cost of indexing a large record set.
+ */
+const compareText = new Intl.Collator().compare;
+
+/** Nearest record first, then by id: the order of a group's ids. */
+function compareInGroup(index: RecordIndex, a: string, b: string): number {
+    return index.depths.get(a)! - index.depths.get(b)! || compareText(a, b);
+}
+
+/**
+ * The complete list at once. Every record is known before any depth is taken, so
+ * the order they come in does not matter - and each group is sorted once, rather
+ * than every record being inserted into its place.
+ */
 export function indexRecords(records: RetrievedRecord[], fromFile: boolean): RecordIndex {
     const index = emptyIndex(fromFile, true);
     for (const record of records) {
         index.byId.set(record.id, record);
     }
     for (const record of index.byId.values()) {
-        insertIntoGroup(index, record);
+        index.depths.set(record.id, tracePath(record.id, id => index.byId.get(id)).length);
+        const group = groupOf(index, record.sObjectType);
+        group.ids.push(record.id);
+        countWay(index, group, record);
+    }
+    for (const group of index.groups.values()) {
+        group.ids.sort((a, b) => compareInGroup(index, a, b));
     }
     index.version = index.byId.size;
     return index;
+}
+
+function groupOf(index: RecordIndex, sObjectType: string): RecordGroup {
+    let group = index.groups.get(sObjectType);
+    if (!group) {
+        group = { sObjectType, ids: [], ways: new Map() };
+        index.groups.set(sObjectType, group);
+    }
+    return group;
+}
+
+/** Counts the record under the way it was reached. The record it came from is already indexed, so its type is known. */
+function countWay(index: RecordIndex, group: RecordGroup, record: RetrievedRecord): void {
+    const way = record.origin ? `via ${lastHop(index, record)}` : lastHop(index, record);
+    group.ways.set(way, (group.ways.get(way) ?? 0) + 1);
 }
 
 /**
@@ -84,25 +127,17 @@ export function addRecord(index: RecordIndex, record: RetrievedRecord): void {
 }
 
 function insertIntoGroup(index: RecordIndex, record: RetrievedRecord): void {
-    const depth = tracePath(record.id, id => index.byId.get(id)).length;
-    index.depths.set(record.id, depth);
-    let group = index.groups.get(record.sObjectType);
-    if (!group) {
-        group = { sObjectType: record.sObjectType, ids: [] };
-        index.groups.set(record.sObjectType, group);
-    }
+    index.depths.set(record.id, tracePath(record.id, id => index.byId.get(id)).length);
+    const group = groupOf(index, record.sObjectType);
+    countWay(index, group, record);
     // Binary search for its place, nearest first and then by id: the order does
     // not depend on which fetch of a wave happened to finish first.
-    const comesBefore = (other: string) => {
-        const otherDepth = index.depths.get(other)!;
-        return otherDepth < depth || (otherDepth === depth && other.localeCompare(record.id) < 0);
-    };
     const ids = group.ids;
     let lo = 0;
     let hi = ids.length;
     while (lo < hi) {
         const mid = (lo + hi) >> 1;
-        if (comesBefore(ids[mid])) lo = mid + 1;
+        if (compareInGroup(index, ids[mid], record.id) < 0) lo = mid + 1;
         else hi = mid;
     }
     ids.splice(lo, 0, record.id);
@@ -111,7 +146,7 @@ function insertIntoGroup(index: RecordIndex, record: RetrievedRecord): void {
 /** Largest group first, the way the confirmation lists them. Sorted per call: there are few groups, and they keep growing. */
 export function sortedGroups(index: RecordIndex): RecordGroup[] {
     return [...index.groups.values()]
-        .sort((a, b) => b.ids.length - a.ids.length || a.sObjectType.localeCompare(b.sObjectType));
+        .sort((a, b) => b.ids.length - a.ids.length || compareText(a.sObjectType, b.sObjectType));
 }
 
 export function initialRecordsView(): RecordsViewState {
@@ -124,8 +159,38 @@ function matchesFilter(record: RetrievedRecord, filter: string): boolean {
         || (record.label?.toLowerCase().includes(filter) ?? false);
 }
 
-/** The rows the list holds right now: every group with something to show, and the records of the open ones. */
+/** The rows last listed for a view, and what they were listed from. */
+interface ListedRows {
+    index: RecordIndex;
+    version: number;
+    filter: string;
+    expanded: string;
+    rows: RecordRow[];
+}
+
+const listedRows = new WeakMap<RecordsViewState, ListedRows>();
+
+/**
+ * The rows the list holds right now: every group with something to show, and the
+ * records of the open ones. A frame asks for them several times over - to find
+ * the selection again, to keep it in the window, to draw - and an open group can
+ * hold tens of thousands of records, so they are listed again only once the
+ * index, the filter or the open groups have changed. The rows are shared: read
+ * them, never change them.
+ */
 export function recordRows(index: RecordIndex, view: RecordsViewState): RecordRow[] {
+    const expanded = [...view.expanded].sort().join('\n');
+    const listed = listedRows.get(view);
+    if (listed && listed.index === index && listed.version === index.version
+        && listed.filter === view.filter && listed.expanded === expanded) {
+        return listed.rows;
+    }
+    const rows = listRows(index, view);
+    listedRows.set(view, { index, version: index.version, filter: view.filter, expanded, rows });
+    return rows;
+}
+
+function listRows(index: RecordIndex, view: RecordsViewState): RecordRow[] {
     const filter = view.filter.toLowerCase();
     const rows: RecordRow[] = [];
     for (const group of sortedGroups(index)) {
@@ -325,7 +390,7 @@ export function renderRecords(index: RecordIndex, view: RecordsViewState, inner:
             : 'Path · Field: lookup · Relationship[]: child records';
         const rule = truncate(`── ${title} `, inner);
         lines.push(ansi.gray(rule + '─'.repeat(Math.max(0, inner - visibleLength(rule)))));
-        const detail = !row ? [] : row.kind === 'group' ? groupDetail(index, row.group, pathHeight) : pathDetail(index, row.id, pathHeight);
+        const detail = !row ? [] : row.kind === 'group' ? groupDetail(row.group, pathHeight) : pathDetail(index, row.id, pathHeight);
         for (let i = 0; i < pathHeight; i++) {
             lines.push(truncate(detail[i] ?? '', inner));
         }
@@ -368,11 +433,16 @@ function renderRow(index: RecordIndex, row: RecordRow, selected: boolean, inner:
 
 /** The last hop of a record's path, the way its row in the list shows it. */
 function reachedBy(index: RecordIndex, record: RetrievedRecord): string {
+    return record.origin ? `← ${lastHop(index, record)}` : lastHop(index, record);
+}
+
+/** `Account.Contacts[]` - or, for a record nothing led to, why it is here at all. */
+function lastHop(index: RecordIndex, record: RetrievedRecord): string {
     if (!record.origin) {
         return index.fromFile ? 'loaded from file' : 'requested';
     }
     const from = index.byId.get(record.origin.from);
-    return `← ${from?.sObjectType ?? record.origin.from}.${edgeLabel(record.origin)}`;
+    return `${from?.sObjectType ?? record.origin.from}.${edgeLabel(record.origin)}`;
 }
 
 /**
@@ -404,13 +474,8 @@ function pathDetail(index: RecordIndex, id: string, height: number): string[] {
 }
 
 /** Each way the group's records were reached - the last hop of their paths - with how many came that way. */
-function groupDetail(index: RecordIndex, group: RecordGroup, height: number): string[] {
-    const counts = new Map<string, number>();
-    for (const id of group.ids) {
-        const way = reachedBy(index, index.byId.get(id)!).replace(/^← /, 'via ');
-        counts.set(way, (counts.get(way) ?? 0) + 1);
-    }
-    const entries = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+function groupDetail(group: RecordGroup, height: number): string[] {
+    const entries = [...group.ways.entries()].sort((a, b) => b[1] - a[1] || compareText(a[0], b[0]));
     const width = Math.max(...entries.map(([, count]) => String(count).length));
     const lines = entries.map(([way, count]) => `${String(count).padStart(width)}  ${way}`);
     if (lines.length <= height) {

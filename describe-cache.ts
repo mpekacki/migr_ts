@@ -80,13 +80,52 @@ export default class DescribeCache {
         }
         const describeGlobal = await this.getGlobal();
         if (describeGlobal) {
-            const prefix = recordId.substring(0, 3);
-            const sobject = describeGlobal.sobjects.find((sobject: any) => sobject.keyPrefix === prefix);
-            if (!sobject) {
-                throw new Error(`SObject with prefix ${prefix} not found`);
+            const name = this.namesByPrefix(describeGlobal).get(recordId.substring(0, 3));
+            if (name === undefined) {
+                throw new Error(`SObject with prefix ${recordId.substring(0, 3)} not found`);
             }
-            return sobject.name;
+            return name;
         }
         throw new Error('Unable to determine SObject type');
+    }
+
+    /**
+     * The SObject an id's key prefix belongs to, or undefined when no SObject
+     * claims it (or there is nothing to ask). For the id scan, which tries every
+     * 18-character run of every text field and is mostly told "not an id" - an
+     * answer not worth an Error and its stack each time.
+     */
+    async findSObjectType(recordId: string): Promise<string | undefined> {
+        let describeGlobal: any;
+        try {
+            describeGlobal = await this.getGlobal();
+        } catch {
+            return undefined;
+        }
+        return describeGlobal ? this.namesByPrefix(describeGlobal).get(recordId.substring(0, 3)) : undefined;
+    }
+
+    private prefixes: { describe: any, size: number, names: Map<string, string> } | null = null;
+
+    /**
+     * Key prefix to SObject name, the first SObject listing a prefix winning, as a
+     * search of the list would have it. Built once rather than searching ~1500
+     * SObjects per id. A file source's stand-in describe grows while its records
+     * load, so the map is rebuilt whenever the list has changed size.
+     */
+    private namesByPrefix(describeGlobal: any): Map<string, string> {
+        const sobjects: any[] = describeGlobal.sobjects;
+        const cached = this.prefixes;
+        if (cached && cached.describe === describeGlobal && cached.size === sobjects.length) {
+            return cached.names;
+        }
+        const names = new Map<string, string>();
+        for (const sobject of sobjects) {
+            if (typeof sobject.keyPrefix === 'string' && !names.has(sobject.keyPrefix)) {
+                names.set(sobject.keyPrefix, sobject.name);
+            }
+        }
+        this.prefixes = { describe: describeGlobal, size: sobjects.length, names };
+        return names;
     }
 }

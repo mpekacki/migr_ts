@@ -321,10 +321,14 @@ export class TuiUI implements UI {
     /**
      * Repaint for an event: now if the last frame is at least FRAME_MS old,
      * otherwise once that much time has passed, taking in every event since.
+     *
+     * A frame already due is painted now even with its timer still pending: a run
+     * of events that never hands the event loop back keeps the timer from firing,
+     * and the screen would otherwise stand still until the run is over.
      */
     private requestRedraw(): void {
-        if (this.frameTimer) return;
         const wait = this.lastFrame + FRAME_MS - Date.now();
+        if (this.frameTimer && wait > 0) return;
         if (wait <= 0) {
             this.redraw();
             return;

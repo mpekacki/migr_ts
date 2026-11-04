@@ -15,6 +15,7 @@ import { applySolver, handleJsforceError as solveJsforceError, SolverPhase } fro
 import ApexScripts, { validateApexOptions } from './apex';
 import { OriginKind, PathStep, RecordOrigin, RetrievedRecord, recordLabel, tracePath } from './record-paths';
 import { RecordStore, RecordTable, createRecordStore, validateRecordStoreOptions } from './record-store';
+import { makeBreather } from './event-loop';
 
 export interface ClientFactory {
     createSourceClient(orgAlias: string | undefined, orgUrl: string | undefined, orgToken: string | undefined): Promise<SalesforceClient>;
@@ -156,6 +157,9 @@ function setUpdateField(record: any, field: string, value: string | null): void 
     }
 }
 
+/** How long the fetch keeps the event loop at most before handing it back - about one TUI frame. */
+const BREATHE_INTERVAL_MS = 30;
+
 // Utility function to limit concurrent promise execution
 async function executeConcurrently<T>(
     promises: (() => Promise<T>)[],
@@ -250,6 +254,13 @@ class MigrationRunner {
     private fetchDepthsByIds: Record<string, number> = {};
     /** SObjects the source refused to retrieve several records of at once - see retrieveWave. */
     private readonly unbatchableTypes = new Set<string>();
+    /**
+     * Called between the records of a fetch wave. A wave arrives a few hundred
+     * records per request, and what is then done with each one only awaits what is
+     * cached, so without this a large wave runs start to end without the screen
+     * being repainted once - see event-loop.ts.
+     */
+    private readonly breathe = makeBreather(BREATHE_INTERVAL_MS);
     /** fetchDepthsByIds counted per depth, kept as it fills so progress is cheap to report. */
     private recordCountsByDepth: Record<number, number> = {};
     /**
@@ -647,15 +658,27 @@ class MigrationRunner {
      * Every record the run retrieved, with how it got there. Taken once fetching
      * is over and before anything settles, while the fetched records are all still
      * there - including the ones an earlier run migrated, which are part of the
-     * path to the records under them.
+     * path to the records under them. Read off the summaries and the store's
+     * index, never the record bodies: from a store on disk that would be reading
+     * (and decrypting) every record at once just for its type and label.
      */
     private listRetrievedRecords(): RetrievedRecord[] {
-        return [...this.fetched.entries()]
-            .map(([id, record]) => this.retrievedRecord(id, record, !this.queued.has(id)));
+        return [...this.fetched.ids()]
+            .map(id => this.retrievedRecord(id, this.summaryOf(id), !this.queued.has(id)));
     }
 
-    private retrievedRecord(id: string, fetchedRecord: SObjectRecord<Schema, string>, alreadyMigrated: boolean): RetrievedRecord {
-        const retrieved: RetrievedRecord = { id, sObjectType: fetchedRecord.attributes!.type, label: recordLabel(fetchedRecord) };
+    /** The summary of a fetched record; one the run has none for is read off its body. */
+    private summaryOf(id: string): { sObjectType: string, label?: string } {
+        const summary = this.summaries.get(id);
+        if (summary) {
+            return summary;
+        }
+        const record = this.fetched.get(id)!;
+        return { sObjectType: record.attributes!.type, label: recordLabel(record) };
+    }
+
+    private retrievedRecord(id: string, summary: { sObjectType: string, label?: string }, alreadyMigrated: boolean): RetrievedRecord {
+        const retrieved: RetrievedRecord = { id, sObjectType: summary.sObjectType, label: summary.label };
         if (this.origins[id]) {
             retrieved.origin = this.origins[id];
         }
@@ -685,6 +708,7 @@ class MigrationRunner {
         const results = new Map<string, Retrieval>();
         const idsByType = new Map<string, string[]>();
         for (const recordId of new Set(recordIds)) {
+            await this.breathe();
             try {
                 const sObjectName = await this.describes.getSObjectType(recordId);
                 if (!idsByType.has(sObjectName)) {
@@ -710,6 +734,7 @@ class MigrationRunner {
             for (let start = 0; start < ids.length; start += this.fetchBatchSize) {
                 const batch = ids.slice(start, start + this.fetchBatchSize);
                 jobs.push(async () => {
+                    await this.breathe();
                     batch.forEach(recordId => this.announceFetch(recordId, sObjectName));
                     try {
                         const records = await this.sourceClient!.retrieveMany(sObjectName, batch, fields);
@@ -787,6 +812,7 @@ class MigrationRunner {
      */
     private async discoverWave(recordIds: string[], retrieved: Map<string, Retrieval>, depth: number): Promise<WaveOutcome[]> {
         const processed = await executeConcurrently(recordIds.map(recordId => async (): Promise<FetchedRecord | null | { error: unknown }> => {
+            await this.breathe();
             try {
                 return await this.processFetchedRecord(recordId, depth, retrieved.get(recordId)!);
             } catch (error) {
@@ -796,6 +822,7 @@ class MigrationRunner {
         const fetchedRecords = processed.filter((entry): entry is FetchedRecord => entry !== null && !('error' in entry));
         await this.collectRelatedRecordIds(fetchedRecords, depth);
         return executeConcurrently(processed.map(entry => async (): Promise<WaveOutcome> => {
+            await this.breathe();
             if (entry === null) {
                 return { discoveries: [] };
             }
@@ -824,7 +851,8 @@ class MigrationRunner {
         // Set now, as the mark that the record has arrived, and again below once
         // the download has filled its files in.
         this.fetched.set(recordId, recordFields);
-        this.summaries.set(recordId, { sObjectType: recordFields.attributes!.type, label: recordLabel(recordFields) });
+        const summary = { sObjectType: recordFields.attributes!.type, label: recordLabel(recordFields) };
+        this.summaries.set(recordId, summary);
         const creatableFields = (await this.describes.getSObject(sObjectName)).fields.filter(field => field.createable);
         const record: SObjectRecord<Schema, string> = {};
         for (const field of creatableFields) {
@@ -844,7 +872,7 @@ class MigrationRunner {
         // before this one assigned it - and the history file was read before the
         // fetch began, so it already says whether an earlier run migrated it.
         this.io.recordsSoFar(this.queued.size, depth, { ...this.recordCountsByDepth },
-            this.retrievedRecord(recordId, recordFields, this.history.has(recordId)));
+            this.retrievedRecord(recordId, summary, this.history.has(recordId)));
         const lookupFields = sobjectDescribe.fields.filter(field => field.type === 'reference');
         if (lookupFields.length > 0) {
             this.lookupFieldsBySObjectType[sObjectName] = lookupFields;
@@ -904,13 +932,9 @@ class MigrationRunner {
                 const matches = String(record[field.name])?.match(ID_REGEX);
                 if (matches) {
                     for (const match of matches) {
-                        if (!this.queued.has(match) && !found.has(match)) {
-                            try {
-                                await this.describes.getSObjectType(match);
-                                found.set(match, { id: match, kind: 'lookup', name: field.name });
-                            } catch {
-                                // do nothing, it was some random string
-                            }
+                        // An id no SObject's key prefix claims is just some 18-character string.
+                        if (!this.queued.has(match) && !found.has(match) && await this.describes.findSObjectType(match) !== undefined) {
+                            found.set(match, { id: match, kind: 'lookup', name: field.name });
                         }
                     }
                 }

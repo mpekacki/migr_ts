@@ -1,3 +1,5 @@
+import { yieldToEventLoop } from './event-loop';
+
 /** A record still waiting to be migrated. */
 export interface CircularRecord {
     id: string;
@@ -82,7 +84,7 @@ export const breakCircularDependencies = async (
     };
 
     /** Hand the event loop back, so what was just reported gets painted. */
-    const breathe = () => new Promise(resolve => setImmediate(resolve));
+    const breathe = yieldToEventLoop;
 
     const n = records.length;
     const nodeOf = new Map<string, number>();
