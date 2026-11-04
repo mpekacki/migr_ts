@@ -546,6 +546,42 @@ test('records of one SObject are fetched fetchBatchSize at a time', async () => 
     expect(await fetchCounts(1)).toEqual({ many: undefined, single: 450 });
 });
 
+// A wave comes back a batch per request and what is done with each record after
+// that only awaits what is at hand, so nothing but the fetch itself hands the
+// event loop back - and the in-memory org never does. A UI spending a couple of
+// milliseconds on every arriving record then holds the loop for the whole wave,
+// and the TUI's frames and spinner, which are timers, never get to run.
+test('a large fetch wave hands the event loop back while its records are processed', async () => {
+    const ctx = createContext();
+    const sourceIds = (await ctx.sourceOrg.createAll('Account', Array.from({ length: 100 }, (_, i) => ({ Name: `Wave-${i}` }))))
+        .map(result => result.id);
+
+    let ticks = 0;
+    let ticksAtFirstRecord: number | null = null;
+    let ticksAtLastRecord = 0;
+    const ticker = setInterval(() => ticks++, 5);
+    try {
+        const onOutput = (event: IOEvent) => {
+            if (event.type !== 'records_so_far' || !event.data?.record) {
+                return;
+            }
+            ticksAtFirstRecord ??= ticks;
+            ticksAtLastRecord = ticks;
+            const until = Date.now() + 2;
+            while (Date.now() < until) {
+                // what a busy UI costs per record
+            }
+        };
+        await main(createBasicConfig(ctx, sourceIds) as Options, onOutput, async () => 'y', createFakeClientFactory([sourceOrg, targetOrg]));
+    } finally {
+        clearInterval(ticker);
+    }
+
+    expect(ticksAtFirstRecord).not.toBeNull();
+    // ~200ms of records: the 5ms ticker fires several times unless the loop is held throughout
+    expect(ticksAtLastRecord - ticksAtFirstRecord!).toBeGreaterThanOrEqual(2);
+});
+
 test('a record missing from a fetch batch is reported and the rest of the batch migrates', async () => {
     const ctx = createContext();
     const [kept, deleted] = await ctx.sourceOrg.createAll('Account', [{ Name: 'Kept' }, { Name: 'Deleted' }]);
