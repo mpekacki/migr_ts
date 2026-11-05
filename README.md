@@ -59,6 +59,8 @@ Two cheap ways to rehearse: set `targetSqlite` (or `targetFile`) to export the r
 
 [config.json](config.json) is a starting point rather than an exhaustive one: it carries a curated set of matchers for the standard and setup objects a migration usually drags in, plus a couple of solvers. The full field list is below.
 
+The config is read as JSON with comments: `//` line comments, `/* */` block comments and trailing commas are all accepted, so you can annotate entries or switch one off by commenting it out. Editors flag comments in a `.json` file unless they are told it is JSONC (in VS Code, the language mode in the status bar), or you can name the file `.jsonc` — the tool does not look at the extension.
+
 | Field | Description |
 |-------|-------------|
 | `sourceOrg` / `targetOrg` | Org aliases (as known to the Salesforce CLI) |

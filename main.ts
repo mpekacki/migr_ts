@@ -9,6 +9,7 @@ import { TerminalKitUI } from './ui/terminal-kit/terminal';
 import { TuiUI } from './ui/tui/tui';
 import { VERSION } from './version';
 import { dumpRecordStore } from './record-store';
+import { loadConfigFile } from './config-file';
 
 program
     .version(VERSION, '-v, --version', 'Print the version and exit')
@@ -37,12 +38,21 @@ if (opts.dumpStore) {
 }
 
 function runCli() {
+    // Read the config before any UI exists, so a broken file is reported as one
+    // line on a normal terminal (the config accepts comments - see config-file.ts).
+    let options: Options;
+    try {
+        options = loadConfigFile(opts.configJson);
+    } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+        return;
+    }
+
     // The full-screen TUI is the default. Debug mode and --plain fall back to the
     // line-based UI, which is friendlier for piping and reading raw JSON.
     const usePlain = opts.plain || opts.debug;
     const ui: UI = usePlain ? new TerminalKitUI(opts.debug) : new TuiUI(opts.debug);
-
-    const options: Options = JSON.parse(fs.readFileSync(opts.configJson, 'utf8')) as Options;
 
     let outputStream: fs.WriteStream | undefined;
     if (opts.outputFile) {
