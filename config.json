@@ -1,10 +1,15 @@
+// Example migr_ts config. Comments (// and /* */) and trailing commas are allowed,
+// so an entry can be switched off by commenting it out.
 {
+  // Org aliases as known to the Salesforce CLI.
   "sourceOrg": "myDevOrg",
   "targetOrg": "myScratchOrg",
   "recordIds": [
     "001XXXXXXXXXXXXXXX"
   ],
+  // "recordQueries": ["SELECT Id FROM Account WHERE Industry = 'Banking'"],
   "relatedRecordDepthLimit": 5,
+  // Matchers find records that already exist in the target org instead of creating duplicates.
   "matchers": [
     {
       "sObjectType": "Profile",
@@ -647,5 +652,6 @@
   "files": {
     "enabled": true,
     "maxFileSizeMb": 25
-  }
+  },
+  // "fullAuto": { "enabled": true },
 }
