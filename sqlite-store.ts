@@ -1,4 +1,11 @@
-import type { DatabaseSync, StatementSync, SupportedValueType } from 'node:sqlite';
+import type { DatabaseSync, StatementSync } from 'node:sqlite';
+
+/**
+ * A value node:sqlite binds to a parameter or hands back from a column. Spelled
+ * out rather than imported: @types/node has named it SupportedValueType and
+ * later split it into SQLInputValue / SQLOutputValue, and this is what both agree on.
+ */
+type SupportedValueType = null | number | bigint | string | Uint8Array;
 import * as fs from 'fs';
 
 /**
