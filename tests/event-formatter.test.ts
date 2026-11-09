@@ -10,6 +10,17 @@ describe('event-formatter', () => {
             expect(format(event)).toBe('starting migration: {"recordIds":["123"]}');
         });
 
+        it('should format finished with more requested records than a call takes arguments', () => {
+            const requestedRecords: Record<string, string> = {};
+            for (let i = 0; i < 200000; i++) {
+                requestedRecords[`001${String(i).padStart(15, '0')}`] = '';
+            }
+            requestedRecords['001SHORT'] = '001NEW';
+            const text = format(new IOEvent('output', 'finished', JSON.stringify({ errors: {}, requestedRecords })));
+            // padded to the longest id
+            expect(text).toContain('  001SHORT            ->  001NEW');
+        });
+
         it('should format describing_sobject', () => {
             const event = new IOEvent('output', 'describing_sobject', { sObjectName: 'Account' });
             expect(format(event)).toBe('describing SObject Account');

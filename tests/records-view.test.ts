@@ -1,4 +1,4 @@
-import { RetrievedRecord } from '../record-paths';
+import { RetrievedRecord, tracePath } from '../record-paths';
 import { stripAnsi, visibleLength } from '../ui/tui/ansi';
 import {
     addRecord, emptyIndex, focusRecord, handleRecordsKey, indexRecords, initialRecordsView, reanchor, RECORDS_KEYS, recordRows, recordsLayout,
@@ -41,6 +41,26 @@ describe('records view', () => {
         expect(sortedGroups(index).map(group => group.sObjectType)).toEqual(['Contact', 'Account', 'Case', 'User']);
         // Jane is one hop from the requested account, John two
         expect(index.groups.get('Contact')!.ids).toEqual(['003B', '003C']);
+    });
+
+    it('takes every depth as the length of the record\'s path, looping or broken origins included', () => {
+        const odd: RetrievedRecord[] = [
+            ...records,
+            // origins that loop - which they never should - and a chain hanging off the loop
+            { id: '001L', sObjectType: 'Account', origin: { from: '001M', kind: 'lookup', name: 'ParentId' } },
+            { id: '001M', sObjectType: 'Account', origin: { from: '001L', kind: 'lookup', name: 'ParentId' } },
+            { id: '003T', sObjectType: 'Contact', origin: { from: '001M', kind: 'child', name: 'Contacts' } },
+            { id: '500T', sObjectType: 'Case', origin: { from: '003T', kind: 'child', name: 'Cases' } },
+            // an origin that was never retrieved
+            { id: '003X', sObjectType: 'Contact', origin: { from: '001Z', kind: 'child', name: 'Contacts' } },
+        ];
+        // in more than one order, so the walk starts at different ends of each chain
+        for (const order of [odd, [...odd].reverse()]) {
+            const index = indexRecords(order, false);
+            for (const record of order) {
+                expect([record.id, index.depths.get(record.id)]).toEqual([record.id, tracePath(record.id, id => index.byId.get(id)).length]);
+            }
+        }
     });
 
     describe('while fetching', () => {

@@ -323,6 +323,11 @@ class SqliteStore implements RecordStore {
             // that matters, so durability is traded for speed.
             db.exec('PRAGMA journal_mode = MEMORY');
             db.exec('PRAGMA synchronous = OFF');
+            // Nothing else opens the database while the run has it, so the lock is
+            // taken once rather than for every statement - each of which is a
+            // transaction of its own, and a file lock taken and released each
+            // time made reading and writing records the cost of a large run.
+            db.exec('PRAGMA locking_mode = EXCLUSIVE');
             db.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)');
             for (const table of TABLES) {
                 db.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, data)`);

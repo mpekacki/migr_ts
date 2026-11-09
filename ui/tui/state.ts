@@ -72,6 +72,11 @@ export interface MigrationState {
      */
     retrieved: RecordIndex | null;
     done: boolean;
+    /**
+     * The feed's in-progress entry, if it has one - kept so the next line can
+     * demote it without walking the feed for it, once per event.
+     */
+    running?: FeedEntry;
 }
 
 const FEED_CAP = 500;
@@ -106,11 +111,15 @@ function push(state: MigrationState, glyph: Glyph, text: string, indent = 0) {
         last.count = (last.count ?? 1) + 1;
         return;
     }
-    // Demote any previous in-progress entry now that something new happened.
-    for (const e of state.feed) {
-        if (e.glyph === 'run') e.glyph = 'info';
+    // Demote the previous in-progress entry now that something new happened. Only
+    // this function makes one, and it demotes the one before as it does, so there
+    // is never more than one: the one `running` holds.
+    if (state.running?.glyph === 'run') {
+        state.running.glyph = 'info';
     }
-    state.feed.push({ glyph, indent, text });
+    const entry: FeedEntry = { glyph, indent, text };
+    state.running = glyph === 'run' ? entry : undefined;
+    state.feed.push(entry);
     if (state.feed.length > FEED_CAP) {
         state.feed.splice(0, state.feed.length - FEED_CAP);
     }
@@ -471,7 +480,9 @@ export function buildFinalSummary(data: unknown, alreadyMigrated?: Record<string
     lines.push(...errorSection(errors, unresolved));
 
     if (ids.length > 0) {
-        const idWidth = Math.max(...ids.map(id => id.length));
+        // Not Math.max(...ids): one argument per requested record overflows the
+        // stack once there are a hundred thousand or so of them.
+        const idWidth = ids.reduce((width, id) => Math.max(width, id.length), 0);
         const migrated = ids.filter(id => requested[id]).length;
         const note = alreadyMigrated ? 'migrated earlier' : 'migrated';
         lines.push(`${ansi.boldOn('Requested records')} ${ansi.gray(`(${migrated}/${ids.length} ${note})`)}`, '');

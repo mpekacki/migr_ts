@@ -42,6 +42,32 @@ describe('MigrationHistory', () => {
         writes.mockRestore();
     });
 
+    it('waits longer between writes once a write takes long', () => {
+        const history = create();
+        const realWrite = fs.writeFileSync;
+        // A large history: the write takes half a second.
+        const writes = jest.spyOn(fs, 'writeFileSync').mockImplementation((...args: Parameters<typeof fs.writeFileSync>) => {
+            realWrite(...args);
+            jest.setSystemTime(Date.now() + 500);
+        });
+
+        history.settle('a', '1');
+        expect(onDisk()).toEqual({ a: '1' });
+
+        history.settle('b', '2');
+        jest.advanceTimersByTime(1000);
+        // Ten times the last write, not the usual second.
+        expect(onDisk()).toEqual({ a: '1' });
+        jest.advanceTimersByTime(4000);
+        expect(onDisk()).toEqual({ a: '1', b: '2' });
+
+        // A flush is not held back by it.
+        history.settle('c', '3');
+        history.flush();
+        expect(onDisk()).toEqual({ a: '1', b: '2', c: '3' });
+        writes.mockRestore();
+    });
+
     it('writes pending records at once when flushed, and nothing when there are none', () => {
         const history = create();
         history.settle('a', '1');
