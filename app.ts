@@ -245,6 +245,23 @@ class MigrationRunner {
      */
     private origins: Record<string, RecordOrigin> = {};
     private toUpdateLater: Record<string, SObjectRecord<Schema, string>> = {};
+    /**
+     * The queued records the insert loop has to look at again, because something
+     * that decides whether they are ready may have changed since it last did:
+     * every queued record when migrateToOrg starts, and after that only the
+     * records `waitingOn` hands back and the ones whose own fields changed. The
+     * rest were found waiting and are still waiting - none of what they wait on
+     * has left the queue - so reading them again (a disk read, an id scan of
+     * every field) would only say so again. See collectRecordsReadyToInsert.
+     */
+    private readinessPending = new Set<string>();
+    /**
+     * Queued id -> the records last found waiting on it. Its leaving the queue
+     * (dequeueRecord) is what can make them ready, so that is when they go back
+     * to `readinessPending`. Entries can be stale - the record found ready since
+     * by way of another id - which costs one needless look, never a wrong one.
+     */
+    private waitingOn = new Map<string, Set<string>>();
     /** Fetched records dropped by removeAlreadyMigratedRecords, counted per SObject type. */
     private alreadyMigratedCountsBySObjectType: Record<string, number> = {};
     /**
@@ -354,8 +371,8 @@ class MigrationRunner {
         }
 
         await this.fetchRecords(recordIdsToFetch);
-        this.removeAlreadyMigratedRecords();
-        this.applyPreprocessing();
+        await this.removeAlreadyMigratedRecords();
+        await this.applyPreprocessing();
 
         this.io.fetchedRecords(this.queued.size, this.countRemainingRecordsByDepth());
         this.io.retrievedRecords(this.listRetrievedRecords(), this.isMigrateFromFile);
@@ -725,10 +742,14 @@ class MigrationRunner {
         for (const [sObjectName, ids] of idsByType) {
             const fields = await this.batchableFields(sObjectName);
             if (!fields) {
-                jobs.push(...ids.map(recordId => async () => {
-                    this.announceFetch(recordId, sObjectName);
-                    await this.retrieveOne(recordId, sObjectName, results);
-                }));
+                // A loop rather than push(...ids.map(...)): a wave can hold more
+                // records of one type than a call can take arguments.
+                for (const recordId of ids) {
+                    jobs.push(async () => {
+                        this.announceFetch(recordId, sObjectName);
+                        await this.retrieveOne(recordId, sObjectName, results);
+                    });
+                }
                 continue;
             }
             for (let start = 0; start < ids.length; start += this.fetchBatchSize) {
@@ -1037,7 +1058,11 @@ class MigrationRunner {
         const children = [...(result?.records ?? [])];
         if (result && result.done === false && result.nextRecordsUrl) {
             try {
-                children.push(...await this.sourceClient!.queryMore(result.nextRecordsUrl));
+                // Not push(...more): a parent can have more children than a call
+                // can take arguments.
+                for (const child of await this.sourceClient!.queryMore(result.nextRecordsUrl)) {
+                    children.push(child);
+                }
             } catch (error) {
                 this.io.error(`Could not read every ${relationshipName} record of ${parentId}, only the first ${children.length}: ${errorMessage(error)}`);
             }
@@ -1115,8 +1140,9 @@ class MigrationRunner {
         return !(this.options.relatedRecordDepthLimit && depth >= this.options.relatedRecordDepthLimit);
     }
 
-    private removeAlreadyMigratedRecords(): void {
+    private async removeAlreadyMigratedRecords(): Promise<void> {
         for (const recordId of this.history.ids()) {
+            await this.breathe();
             if (this.queued.has(recordId)) {
                 const sObjectType = this.queued.typeOf(recordId);
                 if (sObjectType) {
@@ -1131,8 +1157,23 @@ class MigrationRunner {
         this.queued.set(recordId, record);
     }
 
+    /**
+     * Every record leaves the queue through here, which makes this the one place
+     * a record waiting on it can become ready - see isWaitingOn - and so the one
+     * place those go back to be looked at again.
+     */
     private dequeueRecord(recordId: string): void {
         this.queued.delete(recordId);
+        this.readinessPending.delete(recordId);
+        const waiting = this.waitingOn.get(recordId);
+        if (waiting) {
+            this.waitingOn.delete(recordId);
+            for (const id of waiting) {
+                if (this.queued.has(id)) {
+                    this.readinessPending.add(id);
+                }
+            }
+        }
     }
 
     /**
@@ -1151,7 +1192,7 @@ class MigrationRunner {
         return counts;
     }
 
-    private applyPreprocessing(): void {
+    private async applyPreprocessing(): Promise<void> {
         if (this.options.anonymization?.emailFields?.mode) {
             const preprocess = createPreprocessor({
                 emailAnonymization: {
@@ -1162,13 +1203,14 @@ class MigrationRunner {
             if (!preprocess) {
                 return;
             }
-            const preprocessTable = (table: RecordTable) => {
+            const preprocessTable = async (table: RecordTable) => {
                 for (const [id, record] of table.entries()) {
+                    await this.breathe();
                     preprocess(record);
                     table.set(id, record);
                 }
             };
-            preprocessTable(this.queued);
+            await preprocessTable(this.queued);
             if (this.isMigrateToFile) {
                 // The export carries the fetched record, not just its creatable
                 // fields, so the fields only that map holds have to be anonymized
@@ -1176,7 +1218,7 @@ class MigrationRunner {
                 // deterministic, so the fields they share end up identical - which
                 // is why this runs per map rather than over the merged export,
                 // where an already obfuscated address would be obfuscated again.
-                preprocessTable(this.fetched);
+                await preprocessTable(this.fetched);
             }
         }
     }
@@ -1205,6 +1247,8 @@ class MigrationRunner {
     }
 
     private async migrateToOrg(): Promise<boolean> {
+        this.readinessPending = new Set(this.queued.ids());
+        this.waitingOn.clear();
         while (this.queued.size > 0) {
             this.io.remainingRecords(this.queued.size);
             const { toInsert, anyRecordProcessed } = await this.collectRecordsReadyToInsert();
@@ -1213,6 +1257,14 @@ class MigrationRunner {
                 const { exit, solverAdded } = await this.insertRecords(toInsert);
                 if (exit) {
                     return false;
+                }
+                // A record still queued after its insert is going round again,
+                // with whatever the solvers or the user changed on it - which may
+                // be what it waits on.
+                for (const { id } of toInsert) {
+                    if (this.queued.has(id)) {
+                        this.readinessPending.add(id);
+                    }
                 }
                 recordProcessed = recordProcessed || solverAdded;
             }
@@ -1234,6 +1286,12 @@ class MigrationRunner {
      * What it hands back is the plan for each record to insert, not the record:
      * insertRecords reads the records a chunk at a time, so a store on disk never
      * has the whole ready set in memory.
+     *
+     * Only the records in `readinessPending` are read: on a large record set with
+     * deep hierarchies the loop goes round once per level, and reading every
+     * queued record each time made the pass quadratic. The queue is still walked
+     * in its own order, so the order records are found ready in - and so the
+     * chunks - is what a scan of the whole queue would give.
      */
     private async collectRecordsReadyToInsert(): Promise<{ toInsert: ChunkEntry[], anyRecordProcessed: boolean }> {
         let anyRecordProcessed = false;
@@ -1244,23 +1302,41 @@ class MigrationRunner {
             settledAny = false;
             const ready: { recordId: string, sObjectName: string, bytes: number }[] = [];
             for (const recordId of this.queued.ids()) {
-                if (toInsertIds.has(recordId)) {
+                if (!this.readinessPending.has(recordId)) {
                     continue;
                 }
-                const record = this.queued.get(recordId)!;
-                const sObjectName = await this.describes.getSObjectType(recordId, record);
+                await this.breathe();
+                if (toInsertIds.has(recordId)) {
+                    // Brought back by a stale waitingOn entry; it is going in already.
+                    this.readinessPending.delete(recordId);
+                    continue;
+                }
                 if (this.files.isHeld(recordId)) {
                     // A ContentDocument has no createable field: it comes into being with
                     // the ContentVersion carrying its file. It waits here until that
                     // version lands and hands over the id the target gave the document.
+                    // It stays pending - a set lookup each pass - rather than be
+                    // forgotten should it ever be released without being settled.
                     continue;
                 }
-                const { ready: isReady, changed } = await this.resolveRecordReferences(recordId, record, sObjectName);
+                const record = this.queued.get(recordId)!;
+                const sObjectName = await this.describes.getSObjectType(recordId, record);
+                const { blockers, changed } = await this.resolveRecordReferences(recordId, record, sObjectName);
                 if (changed) {
                     this.queued.set(recordId, record);
                 }
-                if (isReady) {
+                this.readinessPending.delete(recordId);
+                if (blockers.length === 0) {
                     ready.push({ recordId, sObjectName, bytes: this.chunking.countsBytes ? recordSize(record) : 0 });
+                } else {
+                    for (const blocker of blockers) {
+                        let waiting = this.waitingOn.get(blocker);
+                        if (!waiting) {
+                            waiting = new Set();
+                            this.waitingOn.set(blocker, waiting);
+                        }
+                        waiting.add(recordId);
+                    }
                 }
             }
             if (ready.length === 0) {
@@ -1280,6 +1356,7 @@ class MigrationRunner {
             }
 
             for (let i = 0; i < ready.length; i++) {
+                await this.breathe();
                 const { recordId, sObjectName, bytes } = ready[i];
                 const { migratedRecordId, skipRecord } = outcomes[i];
                 const isObjectCreatable = (await this.describes.getSObject(sObjectName)).createable;
@@ -1296,16 +1373,17 @@ class MigrationRunner {
     }
 
     /**
-     * Points the record's references at the records they settled into, and says
-     * whether any is still waiting to. `changed` is for the caller to write the
-     * record back, which a store on disk needs, and only then.
+     * Points the record's references at the records they settled into, and names
+     * the ones still waiting to - the record is ready when there are none.
+     * `changed` is for the caller to write the record back, which a store on disk
+     * needs, and only then.
      */
-    private async resolveRecordReferences(recordId: string, record: SObjectRecord<Schema, string>, sObjectName: string): Promise<{ ready: boolean, changed: boolean }> {
-        let ready = true;
+    private async resolveRecordReferences(recordId: string, record: SObjectRecord<Schema, string>, sObjectName: string): Promise<{ blockers: string[], changed: boolean }> {
+        const blockers: string[] = [];
         let changed = false;
         await this.forEachReferencedId(record, sObjectName, (field, id) => {
             if (this.isWaitingOn(recordId, id)) {
-                ready = false;
+                blockers.push(id);
             } else if (this.history.has(id)) {
                 record[field] = record[field].replace(id, this.history.get(id));
                 if (record[field] === '') {
@@ -1314,7 +1392,7 @@ class MigrationRunner {
                 changed = true;
             }
         });
-        return { ready, changed };
+        return { blockers, changed };
     }
 
     /**
@@ -1330,10 +1408,8 @@ class MigrationRunner {
                 continue;
             }
             for (const match of String(record[field]).match(ID_REGEX) ?? []) {
-                try {
-                    await this.describes.getSObjectType(match);
-                } catch {
-                    // do nothing, it was some random string
+                // No SObject claims the prefix: some other 18-character string.
+                if (await this.describes.findSObjectType(match) === undefined) {
                     continue;
                 }
                 visit(field, match);
@@ -1341,7 +1417,12 @@ class MigrationRunner {
         }
     }
 
-    /** Whether `id` names a record still in the queue, which `recordId` then has to wait for. */
+    /**
+     * Whether `id` names a record still in the queue, which `recordId` then has to
+     * wait for. Only `id` leaving the queue can change the answer: a record is
+     * settled into the history in the same step it is dequeued (setNewRecordId).
+     * The insert loop's readiness tracking (`waitingOn`) relies on exactly that.
+     */
     private isWaitingOn(recordId: string, id: string): boolean {
         return !this.history.has(id) && this.queued.has(id) && id !== recordId;
     }
@@ -1447,6 +1528,7 @@ class MigrationRunner {
 
             for (const { recordId, savedRecord } of results) {
                 if (savedRecord.success) {
+                    await this.breathe();
                     await this.settleSaveResult(recordId, savedRecord, false);
                 }
             }
@@ -1454,6 +1536,7 @@ class MigrationRunner {
                 if (savedRecord.success) {
                     continue;
                 }
+                await this.breathe();
                 const result = await this.settleSaveResult(recordId, savedRecord, retryAll);
                 if (result.exit) {
                     return { exit: true, solverAdded };
@@ -1785,6 +1868,7 @@ class MigrationRunner {
         const records: CircularRecord[] = [];
         const dependencies: Dependency[] = [];
         for (const [recordId, record] of this.queued.entries()) {
+            await this.breathe();
             const sObjectType = record.attributes!.type;
             const requiredLookups = requiredLookupFieldsBySObjectType[sObjectType];
             records.push({ id: recordId, sObjectType, stashed: recordId in this.toUpdateLater });
@@ -1812,6 +1896,8 @@ class MigrationRunner {
                 const record = this.queued.get(clear.recordId)!;
                 this.setFieldWithLaterUpdate(clear.recordId, record, clear.field, '');
                 this.queued.set(clear.recordId, record);
+                // No longer waiting through that field, which is the point of clearing it.
+                this.readinessPending.add(clear.recordId);
             }
         } else if (unbreakable.length > 0) {
             const cycles = unbreakable.map(cycle => cycle.map(step => `${step.recordId}.${step.field} -> ${step.dependsOn}`).join(', '));

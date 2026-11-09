@@ -408,6 +408,17 @@ describe('final summary', () => {
         expect(lines.join('\n')).toContain('(1/2 migrated)');
     });
 
+    it('lists more requested records than a call takes arguments', () => {
+        const requestedRecords: Record<string, string> = {};
+        for (let i = 0; i < 200000; i++) {
+            requestedRecords[`001${String(i).padStart(15, '0')}`] = '';
+        }
+        requestedRecords['001SHORT'] = '001NEW';
+        const lines = buildFinalSummary(JSON.stringify({ errors: {}, requestedRecords })).map(stripAnsi);
+        // padded to the longest id
+        expect(lines).toContain('  001SHORT           → 001NEW');
+    });
+
     it('lists the unresolved errors above the mapping and counts the fixed ones', () => {
         const lines = buildFinalSummary(JSON.stringify({
             errors: {

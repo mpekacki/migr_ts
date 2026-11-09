@@ -85,7 +85,7 @@ export function indexRecords(records: RetrievedRecord[], fromFile: boolean): Rec
         index.byId.set(record.id, record);
     }
     for (const record of index.byId.values()) {
-        index.depths.set(record.id, tracePath(record.id, id => index.byId.get(id)).length);
+        setDepth(index, record.id);
         const group = groupOf(index, record.sObjectType);
         group.ids.push(record.id);
         countWay(index, group, record);
@@ -126,8 +126,48 @@ export function addRecord(index: RecordIndex, record: RetrievedRecord): void {
     }
 }
 
+/**
+ * The length of the record's path - what `tracePath(id).length` would say -
+ * kept in `index.depths` for it and every record on the way up whose depth was
+ * not known yet. The walk stops at the first record whose depth is, so indexing
+ * a large set costs a step or two per record rather than its whole path, which
+ * also built a path's worth of steps per record only to count them.
+ *
+ * Origins should never loop; if they do, the records on that walk get their
+ * depths from tracePath itself, which knows where to stop.
+ */
+function setDepth(index: RecordIndex, id: string): void {
+    const chain: string[] = [];
+    const seen = new Set<string>();
+    let base = 0;
+    let current: string | undefined = id;
+    while (current !== undefined) {
+        const known = index.depths.get(current);
+        if (known !== undefined) {
+            base = known;
+            break;
+        }
+        if (seen.has(current)) {
+            for (const looped of chain) {
+                index.depths.set(looped, tracePath(looped, step => index.byId.get(step)).length);
+            }
+            return;
+        }
+        const record = index.byId.get(current);
+        if (!record) {
+            break;
+        }
+        seen.add(current);
+        chain.push(current);
+        current = record.origin?.from;
+    }
+    for (let i = chain.length - 1; i >= 0; i--) {
+        index.depths.set(chain[i], base + chain.length - i);
+    }
+}
+
 function insertIntoGroup(index: RecordIndex, record: RetrievedRecord): void {
-    index.depths.set(record.id, tracePath(record.id, id => index.byId.get(id)).length);
+    setDepth(index, record.id);
     const group = groupOf(index, record.sObjectType);
     countWay(index, group, record);
     // Binary search for its place, nearest first and then by id: the order does

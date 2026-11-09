@@ -371,7 +371,9 @@ function formatFinished(d: any): string {
     const requestedRecords: Record<string, string> = data.requestedRecords || {};
     if (Object.keys(requestedRecords).length > 0) {
         lines.push('Requested records:');
-        const maxIdLen = Math.max(...Object.keys(requestedRecords).map(k => k.length));
+        // Not Math.max(...ids): one argument per requested record overflows the
+        // stack once there are a hundred thousand or so of them.
+        const maxIdLen = Object.keys(requestedRecords).reduce((width, id) => Math.max(width, id.length), 0);
         for (const [oldId, newId] of Object.entries(requestedRecords)) {
             lines.push(`  ${oldId.padEnd(maxIdLen)}  ->  ${newId || '(not migrated)'}`);
         }

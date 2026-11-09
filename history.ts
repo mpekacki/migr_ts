@@ -17,6 +17,10 @@ import { Options } from './config';
  * at most once every SAVE_INTERVAL_MS instead, and a timer catches up on what
  * the last write left out. The process exiting writes whatever is still pending,
  * so an interrupted run loses nothing a normal exit would have kept.
+ *
+ * A history of a few hundred thousand records still takes long enough to write
+ * that once a second is a stall every second, so the interval also stretches
+ * with the write: never less than WRITE_SHARE times what the last one took.
  */
 export default class MigrationHistory {
     private readonly filePath: string;
@@ -25,6 +29,8 @@ export default class MigrationHistory {
     /** Settled mappings not yet in the file. */
     private dirty = false;
     private lastSave = 0;
+    /** How long after the last write `settle` may write again - see WRITE_SHARE. */
+    private saveInterval = SAVE_INTERVAL_MS;
     private saveTimer: NodeJS.Timeout | null = null;
     /**
      * A write the timer attempted and failed. It has no caller to throw to, so
@@ -106,7 +112,7 @@ export default class MigrationHistory {
         // Only once the record is pending, so a run that fails here still has
         // the exit write's chance of getting it into the file.
         this.throwPendingError();
-        const wait = this.lastSave + SAVE_INTERVAL_MS - Date.now();
+        const wait = this.lastSave + this.saveInterval - Date.now();
         if (wait <= 0) {
             this.save();
         } else if (!this.saveTimer) {
@@ -143,8 +149,10 @@ export default class MigrationHistory {
             clearTimeout(this.saveTimer);
             this.saveTimer = null;
         }
+        const start = Date.now();
         fs.writeFileSync(this.filePath, JSON.stringify(this.old2new, null, 2));
         this.lastSave = Date.now();
+        this.saveInterval = Math.max(SAVE_INTERVAL_MS, WRITE_SHARE * (this.lastSave - start));
         if (this.dirty) {
             this.dirty = false;
             process.removeListener('exit', this.saveOnExit);
@@ -166,6 +174,14 @@ export default class MigrationHistory {
  * enough that the file is never far behind the target org.
  */
 const SAVE_INTERVAL_MS = 1000;
+
+/**
+ * The least multiple of the last write's duration that has to pass before
+ * `settle` writes again, so a growing history never spends more than about a
+ * tenth of the run writing itself. `flush` and `save` - before a prompt, at the
+ * end of the run - write regardless.
+ */
+const WRITE_SHARE = 10;
 
 /**
  * historyFilePath may name the file itself or the directory to put it in; a path
