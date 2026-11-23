@@ -383,6 +383,11 @@ export function applyEvent(state: MigrationState, event: IOEvent): void {
             if (attempted) push(state, 'sub', attempted, 1);
             break;
         }
+        case 'skipping_unhandled_error':
+            // The error itself is already counted and in the feed; this says why
+            // nobody was asked about it.
+            push(state, 'warn', `Skipped ${d.recordId} (${d.untilEnd ? 'auto skip' : 'skip all'})`);
+            break;
         case 'record_no_id':
             // Not an error, but the update it was queued for silently never happens.
             push(state, 'warn', `Update skipped ${d.recordId} (no target ID)`);

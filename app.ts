@@ -31,6 +31,8 @@ const USER_INPUTS = {
     saveAndExit: 'h',
     addSolver: 'a',
     skip: 's',
+    skipAll: 'sa',
+    skipAllUntilEnd: 'as',
 };
 /**
  * SObjects that travel in chunks of their own, never sharing a composite insert
@@ -286,6 +288,19 @@ class MigrationRunner {
      * requestedRecords maps.
      */
     private requestedRecordIds: string[];
+    /**
+     * The user's answers to skip, without asking, every failure no solver deals
+     * with: `skipAllInBatch` for the rest of the current insert batch or update
+     * pass - the span retryAll covers, and reset where it is - and
+     * `skipAllUntilEnd` for the rest of the run. Solvers still get their turn
+     * first; only the question is answered in advance.
+     */
+    private skipAllInBatch = false;
+    private skipAllUntilEnd = false;
+
+    private get skippingUnhandledErrors(): boolean {
+        return this.skipAllInBatch || this.skipAllUntilEnd;
+    }
 
     constructor(options: Options, onOutput: (output: IOEvent) => void, onInput: (question: IOEvent) => Promise<string>, clientFactory?: ClientFactory) {
         this.options = options;
@@ -1517,6 +1532,7 @@ class MigrationRunner {
      */
     private async insertRecords(toInsert: ChunkEntry[]): Promise<{ exit: boolean, solverAdded: boolean }> {
         let retryAll = false;
+        this.skipAllInBatch = false;
         let solverAdded = false;
         const chunks = this.chunking.getChunkIds(toInsert);
         for (let start = 0; start < chunks.length; start += this.maxConcurrentBatches) {
@@ -1738,7 +1754,11 @@ class MigrationRunner {
             if (!applied.solver?.hideError) {
                 this.io.error(JSON.stringify(e));
             }
-            if (!this.options.fullAuto?.enabled) {
+            if (this.skippingUnhandledErrors) {
+                // The user already answered skip for this one: fall through and
+                // record the error, as a skip answered here would.
+                this.io.skippingUnhandledError(recordId, 'insert', this.skipAllUntilEnd);
+            } else if (!this.options.fullAuto?.enabled) {
                 const resolution = await this.handleErrorInteractively(recordId, record, e, 'insert');
                 if (resolution.exit) {
                     return { retry, retryAll, matchedId, solverAdded: false, exit: true, hidden: false };
@@ -1847,6 +1867,13 @@ class MigrationRunner {
                 result.retry = true;
             } else if (userInput === USER_INPUTS.skip) {
                 // skip record, don't do anything
+            } else if (userInput === USER_INPUTS.skipAll) {
+                // Skip this record, and every later failure of this batch that no
+                // solver deals with - the batch being what retryAll covers.
+                this.skipAllInBatch = true;
+            } else if (userInput === USER_INPUTS.skipAllUntilEnd) {
+                // As skipAll, but for the rest of the run, update pass included.
+                this.skipAllUntilEnd = true;
             } else {
                 this.io.invalidInput(userInput);
                 inputOk = false;
@@ -1987,6 +2014,7 @@ class MigrationRunner {
     private async updateRecords(records: Record<string, any>): Promise<{ pending: Record<string, any>, exit: boolean }> {
         const toRetry: Record<string, any> = {};
         let retryAll = false;
+        this.skipAllInBatch = false;
         const chunks: Record<string, any>[] = this.chunking.getChunks(records);
         for (let start = 0; start < chunks.length; start += this.maxConcurrentBatches) {
             const wave = chunks.slice(start, start + this.maxConcurrentBatches);
@@ -2087,7 +2115,9 @@ class MigrationRunner {
             if (outcome.errorFixed) {
                 continue;
             }
-            if (!this.options.fullAuto?.enabled) {
+            if (this.skippingUnhandledErrors) {
+                this.io.skippingUnhandledError(recordId, 'update', this.skipAllUntilEnd);
+            } else if (!this.options.fullAuto?.enabled) {
                 const resolution = await this.handleErrorInteractively(recordId, record, e, 'update');
                 if (resolution.exit) {
                     return { retry: false, retryAll, exit: true };

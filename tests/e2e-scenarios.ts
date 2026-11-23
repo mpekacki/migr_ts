@@ -76,6 +76,22 @@ async function createFullAutoTestRecords(sourceOrg: TestOrg) {
 // A Custom_Object_C__c holding `ref` in External_Id__c, and Accounts naming it by
 // that value in Related_Ref__c - plus one naming something else. C leads to A and
 // B (C -> A -> B -> C) because those have required lookups in the live orgs.
+/**
+ * Custom_Object_C__c records in the source, each with a twin in the target
+ * holding the same External_Id__c - so every one of them fails to insert as a
+ * duplicate, all in the same batch. Returns the source ids.
+ */
+async function createDuplicatedCustomObjects(ctx: E2EContext, count: number): Promise<string[]> {
+    const ids: string[] = [];
+    for (let i = 0; i < count; i++) {
+        const externalId = `ext-${Math.random()}`;
+        const record = await createRecord(ctx.sourceOrg, 'Custom_Object_C__c', { External_Id__c: externalId });
+        await createRecord(ctx.targetOrg, 'Custom_Object_C__c', { External_Id__c: externalId });
+        ids.push(record.id);
+    }
+    return ids;
+}
+
 async function createValueLookupChildren(sourceOrg: TestOrg) {
     // External_Id__c holds at most 32 characters.
     const ref = `vl-${Math.random().toString(36).slice(2, 14)}`;
@@ -770,6 +786,61 @@ export const e2eScenarios: E2EScenario[] = [
         for (const record of records1) {
             assertRecordMigrated(parsedOutput, record.id);
         }
+    }),
+
+    scenario('manually skip all failing records in a batch', async (ctx: E2EContext) => {
+        const duplicated = await createDuplicatedCustomObjects(ctx, 5);
+        // The contract fails on its status one dependency level later - in a batch
+        // of its own, which skip all does not reach.
+        const account = await createAccount(ctx.sourceOrg, 'Cloud Kicks');
+        const contract = await createActivatedContract(ctx.sourceOrg, account.id);
+
+        const config = createBasicConfig(ctx, [...duplicated, contract.id]);
+
+        const prompted: string[] = [];
+        const { parsedOutput } = await ctx.runMigration(config, async (ioEvent, sendInput) => {
+            if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
+                sendInput('y');
+            } else if (ioEvent.category === 'input' && ioEvent.type === 'insert_error') {
+                prompted.push(ioEvent.data.recordId);
+                sendInput(ioEvent.data.recordId === contract.id ? 's' : 'sa');
+            }
+        });
+        // one question for the five duplicates, one for the contract
+        expect(prompted).toHaveLength(2);
+        expect(prompted[1]).toBe(contract.id);
+
+        for (const recordId of [...duplicated, contract.id]) {
+            assertRecordSkipped(parsedOutput, recordId);
+            expect(parsedOutput.errors[recordId][0].fixed).toBeFalsy();
+        }
+        assertRecordMigrated(parsedOutput, account.id);
+    }),
+
+    scenario('auto skip failing records until end of run', async (ctx: E2EContext) => {
+        const duplicated = await createDuplicatedCustomObjects(ctx, 3);
+        const account = await createAccount(ctx.sourceOrg, 'Cloud Kicks');
+        const contract = await createActivatedContract(ctx.sourceOrg, account.id);
+
+        const config = createBasicConfig(ctx, [...duplicated, contract.id]);
+
+        let promptCount = 0;
+        const { parsedOutput } = await ctx.runMigration(config, async (ioEvent, sendInput) => {
+            if (ioEvent.category === 'input' && ioEvent.type === 'confirm_migration') {
+                sendInput('y');
+            } else if (ioEvent.category === 'input' && ioEvent.type === 'insert_error') {
+                promptCount++;
+                sendInput('as');
+            }
+        });
+        // the contract, in a later batch, is skipped without asking too
+        expect(promptCount).toBe(1);
+
+        for (const recordId of [...duplicated, contract.id]) {
+            assertRecordSkipped(parsedOutput, recordId);
+            expect(parsedOutput.errors[recordId][0].fixed).toBeFalsy();
+        }
+        assertRecordMigrated(parsedOutput, account.id);
     }),
 
     scenario('migrate record with error - quit and save results so far', async (ctx: E2EContext) => {

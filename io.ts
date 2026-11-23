@@ -315,6 +315,11 @@ class IO {
         this.onOutput(this.buildIOEvent('output', 'hidden_error', { recordId }));
     }
 
+    /** A failure no solver dealt with, skipped because the user answered skip all (`untilEnd`: for the rest of the run). */
+    public skippingUnhandledError(recordId: string, phase: ErrorPhase, untilEnd: boolean) {
+        this.onOutput(this.buildIOEvent('output', 'skipping_unhandled_error', { recordId, phase, untilEnd }));
+    }
+
     public async askForInput(phase: ErrorPhase, recordId: string, message: string, errorDetails?: any): Promise<string> {
         return await this.onInput(this.buildIOEvent('input', errorEvent(phase), { recordId, error: message, errorDetails }));
     }
