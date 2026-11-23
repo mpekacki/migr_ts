@@ -46,6 +46,7 @@ export type IOEventType =
     | 'record_no_id'
     | 'error_updating_record'
     | 'hidden_error'
+    | 'skipping_unhandled_error'
     | 'downloading_file'
     | 'file_too_large'
     | 'file_download_failed'

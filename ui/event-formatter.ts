@@ -118,6 +118,8 @@ function formatEvent(event: IOEvent): string {
             return `error: ${d?.message}`;
         case 'hidden_error':
             return `error on record ${d?.recordId} hidden by solver`;
+        case 'skipping_unhandled_error':
+            return `skipping ${d?.phase === 'update' ? 'update of ' : ''}record ${d?.recordId}: skip all ${d?.untilEnd ? 'until end of run' : 'in this batch'}`;
         case 'insert_error':
         case 'update_error':
             return formatErrorPrompt(event.type === 'insert_error', d);
@@ -218,7 +220,9 @@ function formatErrorPrompt(isInsert: boolean, d: any): string {
         ...(isInsert ? [{ key: 'm', label: 'Match' }] : []),
         { key: 'h', label: 'Save and Exit' },
         { key: 'a', label: 'Add Solver' },
-        { key: 's', label: 'Skip' }
+        { key: 's', label: 'Skip' },
+        { key: 'sa', label: 'Skip All' },
+        { key: 'as', label: 'Auto Skip (until end of run)' }
     ];
     const optionsList = options.map(opt => `- ${opt.label} (${opt.key})`).join('\n');
     // show the whole error payload (status code, fields, ...) - the same data the activity log shows

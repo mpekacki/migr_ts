@@ -126,6 +126,15 @@ describe('event-formatter', () => {
             expect(result).toContain('duplicate value');
             expect(result).toContain('Fix (f)');
             expect(result).toContain('Skip (s)');
+            expect(result).toContain('Skip All (sa)');
+            expect(result).toContain('Auto Skip (until end of run) (as)');
+        });
+
+        it('should format skipping_unhandled_error', () => {
+            expect(format(new IOEvent('output', 'skipping_unhandled_error', { recordId: '001', phase: 'insert', untilEnd: false })))
+                .toBe('skipping record 001: skip all in this batch');
+            expect(format(new IOEvent('output', 'skipping_unhandled_error', { recordId: '001', phase: 'update', untilEnd: true })))
+                .toBe('skipping update of record 001: skip all until end of run');
         });
 
         it('should format insert_error with the full error payload when available', () => {
