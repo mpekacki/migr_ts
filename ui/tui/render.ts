@@ -1,6 +1,7 @@
 import { ansi, padTo, takeLastColumns, truncate, visibleLength, wrapAnsi } from './ansi';
 import { FeedEntry, Glyph, MigrationState, Phase } from './state';
 import { RecordsViewState, renderRecords } from './records-view';
+import { helperChoices, JsonHelper, oneLine } from '../json-helper';
 import { VERSION } from '../../version';
 
 /**
@@ -331,6 +332,42 @@ export function wrapToWidth(lines: string[], inner: number): string[] {
     const out: string[] = [];
     for (const raw of lines) out.push(...wrapAnsi(raw, inner));
     return out;
+}
+
+/**
+ * The helper in the body: its question over the answers to it, as many as fit
+ * around the selected one. Never taller than the body unless a title or a result
+ * is - and then it scrolls only for the result, which has no list to move in.
+ */
+export function renderHelper(helper: JsonHelper, input: string, cursor: number, inner: number, height: number): string[] {
+    const step = helper.step;
+    if (!step) {
+        return [
+            ansi.boldOn('This is the JSON to send:'),
+            ...JSON.stringify(JSON.parse(helper.result!), null, 2).split('\n').map(line => ansi.cyan(line)),
+            ansi.gray('Enter send (edit it below first if needed) · Esc back'),
+        ];
+    }
+    const keys = step.kind === 'choose' ? '↑↓ select · type to filter · Enter choose · Esc back' : 'Enter accept · Esc back';
+    const head = [
+        truncate(ansi.red(oneLine(helper.context.error)), inner),
+        ...wrapAnsi(ansi.boldOn(step.title), inner),
+        truncate(ansi.gray(keys), inner),
+    ];
+    if (helper.problem) head.push(...wrapAnsi(ansi.yellow(helper.problem), inner));
+    if (step.kind === 'text') return head;
+
+    const choices = helperChoices(step, input);
+    if (choices.length === 0) return [...head, ansi.yellow('Nothing matches')];
+    // On a tiny terminal the list wins: without it the question cannot be answered.
+    const kept = head.slice(0, Math.max(0, Math.min(head.length, height - 3)));
+    const rows = Math.max(1, height - kept.length);
+    const start = Math.max(0, Math.min(cursor - Math.floor(rows / 2), choices.length - rows));
+    return [...kept, ...choices.slice(start, start + rows).map(({ label, hint }, i) => {
+        const selected = start + i === cursor;
+        const line = `${selected ? '❯' : ' '} ${label}${hint ? `  ${selected ? hint : ansi.gray(hint)}` : ''}`;
+        return truncate(selected ? ansi.inverse(line) : line, inner);
+    })];
 }
 
 /** Reserve room after the "> " prompt for the live input. */

@@ -1,8 +1,9 @@
-import IOEvent from '../../ioevent';
+import IOEvent, { JsonHelperContext } from '../../ioevent';
 import { UI } from '../ui';
 import { getFormatter } from '../event-formatter';
+import { helperChoices, HelperStep, JsonHelper } from '../json-helper';
 import { ansi, screen } from './ansi';
-import { BodyView, bodyHeightFor, buildFrame, inputCursorCol, maxFeedScrollOffset, maxScrollOffset, nextView } from './render';
+import { BodyView, bodyHeightFor, buildFrame, innerWidth, inputCursorCol, maxFeedScrollOffset, maxScrollOffset, nextView, renderHelper } from './render';
 import { focusRecord, handleRecordsKey, initialRecordsView, reanchor, RecordIndex, RecordsViewState } from './records-view';
 import { applyEvent, initialState, MigrationState, pushConsole } from './state';
 
@@ -48,6 +49,13 @@ export class TuiUI implements UI {
     private anchoredVersion = -1;
     /** The record the current prompt is about: the records view opens on it, the first time. */
     private pendingFocus: string | null = null;
+    /** Set while the prompt is one for JSON: what the helper is started from. */
+    private helperContext: JsonHelperContext | null = null;
+    /** The helper building the answer. Without a step left it has built it, and the input line holds the result. */
+    private helper: JsonHelper | null = null;
+    private helperCursor = 0;
+    /** The overlay the prompt itself puts up, which the helper stands in for. */
+    private promptOverlay: string[] = [];
     private resolvePrompt: ((answer: string) => void) | null = null;
     private resolveExit: (() => void) | null = null;
     private listening = false;
@@ -98,7 +106,10 @@ export class TuiUI implements UI {
         // a line of input at the pinned input box. Long prompts can be scrolled
         // with ↑/↓ and PgUp/PgDn while typing the answer; Tab goes round the
         // records and the activity feed, so both stay reachable while answering.
-        this.state.overlay = this.formatter(question).split('\n');
+        this.promptOverlay = this.formatter(question).split('\n');
+        this.state.overlay = this.promptOverlay;
+        this.helperContext = question.data?.helper ?? null;
+        this.helper = null;
         this.promptActive = true;
         this.inputBuffer = '';
         this.scrollOffset = 0; // start at the top of the summary
@@ -119,6 +130,8 @@ export class TuiUI implements UI {
         this.resolvePrompt = null;
         this.promptActive = false;
         this.state.overlay = null;
+        this.helperContext = null;
+        this.helper = null;
         this.inputBuffer = '';
         this.scrollOffset = 0;
         this.view = 'main';
@@ -181,7 +194,21 @@ export class TuiUI implements UI {
             this.handleViewKey(s);
             return false;
         }
-        if (s === '\r' || s === '\n') return true;                   // Enter
+        if (this.helper && this.view !== 'main') {
+            // Over the activity log nothing is answered: the question is out of sight.
+            if (s === '\r' || s === '\n') this.switchView('main');
+            else this.handleViewKey(s);
+            return false;
+        }
+        if (this.helper && this.handleHelperKey(this.helper, s)) return false;
+        if (s === '\r' || s === '\n') {                              // Enter
+            // Nothing to send is how the helper is asked for.
+            if (!this.helperContext || this.inputBuffer.trim() !== '') return true;
+            this.switchView('main');
+            this.helper = new JsonHelper(this.helperContext);
+            this.showHelper();
+            return false;
+        }
         if (s === '\x7f' || s === '\b') {                            // Backspace
             this.inputBuffer = this.inputBuffer.slice(0, -1);
             return false;
@@ -193,6 +220,51 @@ export class TuiUI implements UI {
         const printable = s.replace(/[\x00-\x1f]/g, '');
         if (printable) this.inputBuffer += printable;
         return false;
+    }
+
+    /** Apply one key to the helper. False for the keys that mean what they always do: typing, Tab. */
+    private handleHelperKey(helper: JsonHelper, s: string): boolean {
+        if (s === '\x1b') {
+            if (!helper.back()) {
+                this.helper = null;
+                this.state.overlay = this.promptOverlay;
+            }
+            this.showHelper();
+            return true;
+        }
+        const step = helper.step;
+        if (!step) return false;
+        const choices = helperChoices(step, this.inputBuffer);
+        if (s === '\r' || s === '\n') {
+            if (step.kind === 'choose') {
+                if (choices.length === 0) return true;
+                helper.answer(choices[this.helperCursor].answer);
+            } else {
+                helper.answer({ text: this.inputBuffer });
+                // Left to be corrected rather than typed again.
+                if (helper.problem) return true;
+            }
+            this.showHelper();
+            return true;
+        }
+        const moves: Record<string, number> = {
+            '\x1b[A': -1, '\x1b[B': 1, '\x1b[5~': -this.pageSize(), '\x1b[6~': this.pageSize(),
+        };
+        if (s in moves) {
+            this.helperCursor = Math.max(0, Math.min(choices.length - 1, this.helperCursor + moves[s]));
+            return true;
+        }
+        // Anything else that changes the input changes the list.
+        if (s === '\x7f' || s === '\b' || (s !== '\t' && !s.startsWith('\x1b'))) this.helperCursor = 0;
+        return false;
+    }
+
+    /** Puts the input line and the selection where the helper's current step wants them. */
+    private showHelper(): void {
+        const step: HelperStep | null = this.helper?.step ?? null;
+        this.helperCursor = 0;
+        this.scrollOffset = 0;
+        this.inputBuffer = step ? (step.kind === 'text' ? step.initial ?? '' : '') : this.helper?.result ?? '';
     }
 
     /**
@@ -349,6 +421,9 @@ export class TuiUI implements UI {
         this.lastFrame = Date.now();
         if (this.view === 'records') this.syncRecordsView();
         const { width, height } = this.dims();
+        if (this.helper) {
+            this.state.overlay = renderHelper(this.helper, this.inputBuffer, this.helperCursor, innerWidth(width), bodyHeightFor(height));
+        }
         const frame = buildFrame(
             this.state, this.spinnerFrame, width, height,
             this.promptActive, this.awaitingExit, this.inputBuffer, this.scrollOffset,
