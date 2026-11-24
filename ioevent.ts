@@ -60,6 +60,32 @@ export type IOEventType =
     | 'record_store_opened'
     | 'record_store_closed';
 
+/** A field the user may set on the record an error is about. */
+export interface HelperField {
+    name: string;
+    label?: string;
+    type?: string;
+    /** Active values only. */
+    picklistValues?: string[];
+}
+
+/**
+ * What a UI needs to help the user build the JSON an error prompt asks for. Sent
+ * as `helper` with that prompt - a UI is free to ignore it, as any answer is
+ * still just the JSON.
+ */
+export interface JsonHelperContext {
+    kind: 'fix' | 'solver';
+    phase: 'insert' | 'update';
+    error: string;
+    /** The fields the error itself names. */
+    errorFields: string[];
+    /** The record as the failed attempt sent it, long values cut short. */
+    values: Record<string, unknown>;
+    /** The fields that can be written in this phase. Empty when they are not known. */
+    fields: HelperField[];
+}
+
 class IOEvent {
     constructor(
         public category: 'output' | 'input',

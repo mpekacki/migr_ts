@@ -3,7 +3,7 @@ import { SalesforceClient, DefaultSalesforceClient, AuthConfig, SaveError, SaveR
 import * as fs from 'fs';
 import { breakCircularDependencies, CircularRecord, Dependency } from './circular';
 import Chunks, { ChunkEntry, recordSize } from './chunks';
-import IOEvent from './ioevent';
+import IOEvent, { HelperField, JsonHelperContext } from './ioevent';
 import IO, { serializeError, updatedFields } from './io';
 import { createPreprocessor } from './preprocess-data';
 import { iterateRecordsInSqlite, writeRecordsToSqlite } from './sqlite-store';
@@ -158,6 +158,9 @@ function setUpdateField(record: any, field: string, value: string | null): void 
         record[field] = value;
     }
 }
+
+/** The most of a field's value the fix and solver helpers are shown. */
+const MAX_HELPER_VALUE_LENGTH = 100;
 
 /** How long the fetch keeps the event loop at most before handing it back - about one TUI frame. */
 const BREATHE_INTERVAL_MS = 30;
@@ -1811,9 +1814,10 @@ class MigrationRunner {
             inputOk = true;
             const userInput = await this.io.askForInput(phase, recordId, e.message, e);
             if (userInput === USER_INPUTS.fix) {
+                const helper = await this.jsonHelperContext('fix', record, e, phase);
                 let fieldsToUpdate;
                 while (!fieldsToUpdate) {
-                    const fieldsJson = await this.io.askForFieldsToUpdate(phase);
+                    const fieldsJson = await this.io.askForFieldsToUpdate(phase, helper);
                     try {
                         fieldsToUpdate = JSON.parse(fieldsJson);
                     } catch {
@@ -1843,9 +1847,10 @@ class MigrationRunner {
                 await this.saveAndExit();
                 result.exit = true;
             } else if (userInput === USER_INPUTS.addSolver) {
+                const helper = await this.jsonHelperContext('solver', record, e, phase);
                 let newSolver;
                 while (!newSolver) {
-                    const solverJson = await this.io.askForSolver(phase);
+                    const solverJson = await this.io.askForSolver(phase, helper);
                     try {
                         newSolver = JSON.parse(solverJson);
                         // An exact solver's message is never compiled, so it is
@@ -1880,6 +1885,37 @@ class MigrationRunner {
             }
         } while (!inputOk);
         return result;
+    }
+
+    /** What the UI helps the user write a fix or a solver from. Help only: a failing describe leaves it without fields. */
+    private async jsonHelperContext(kind: JsonHelperContext['kind'], record: SObjectRecord<Schema, string>, e: SaveError, phase: SolverPhase): Promise<JsonHelperContext> {
+        const sObjectType = record.attributes?.type;
+        let fields: HelperField[] = [];
+        try {
+            if (sObjectType) {
+                fields = (await this.describes.getSObject(sObjectType)).fields
+                    .filter(field => phase === 'insert' ? field.createable : field.updateable)
+                    .map(field => ({
+                        name: field.name,
+                        label: field.label,
+                        type: field.type,
+                        picklistValues: field.picklistValues?.filter(value => value.active).map(value => value.value),
+                    }));
+            }
+        } catch {
+            // The user can still type the names of the fields.
+        }
+        const values: Record<string, unknown> = {};
+        for (const [field, value] of Object.entries(record)) {
+            if (field === 'attributes' || field === 'Id') {
+                continue;
+            }
+            // Cut short: it is only there to be recognized, and may be a whole file.
+            values[field] = typeof value === 'string' && value.length > MAX_HELPER_VALUE_LENGTH
+                ? value.substring(0, MAX_HELPER_VALUE_LENGTH) + '...'
+                : value;
+        }
+        return { kind, phase, error: e.message, errorFields: e.fields ?? [], values, fields };
     }
 
     private async resolveCircularDependencies(): Promise<void> {

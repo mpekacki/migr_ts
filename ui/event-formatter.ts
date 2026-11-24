@@ -1,4 +1,4 @@
-import IOEvent from '../ioevent';
+import IOEvent, { JsonHelperContext } from '../ioevent';
 import { describePathWithIds } from '../record-paths';
 import { formatLevelCounts } from './tui/state';
 
@@ -199,19 +199,27 @@ function formatBytes(bytes: number | undefined): string {
     return `${value.toFixed(1)} ${units[unit]}`;
 }
 
+/** The follow-up question of the two answers that take JSON. */
+function formatJsonPrompt(helper: JsonHelperContext): string {
+    const what = helper.kind === 'fix'
+        ? 'Enter the fields to change as JSON, e.g. {"Status": "Draft"}'
+        : 'Enter the solver as JSON, e.g. {"action": "skip", "message": "..."}';
+    return `Error: ${helper.error}\n${what}\nor press Enter on an empty line to build it step by step:`;
+}
+
 /**
  * The question put to the user when no solver could deal with an error, and the
  * answers it takes. The update pass offers one option fewer: there is no record
  * to match away to - the record an update is addressed to is the one the run
  * created - so `m` is not among its answers either.
  *
- * Without a record and a message the event is one of the follow-up questions
- * (the fields to change, the solver to add), which speak for themselves in the
- * line that asked them.
+ * Without a record and a message the event is one of the follow-up questions:
+ * the fields to change and the solver to add carry a `helper`, the record to
+ * match carries nothing.
  */
 function formatErrorPrompt(isInsert: boolean, d: any): string {
     if (!d?.recordId || !d?.error) {
-        return `Enter input:`;
+        return d?.helper ? formatJsonPrompt(d.helper) : `Enter input:`;
     }
     const options = [
         { key: 'f', label: 'Fix' },
@@ -395,7 +403,10 @@ function formatTypeCounts(recordCountsByType: Record<string, number> | undefined
 
 export function getFormatter(debug: boolean): (event: IOEvent) => string {
     if (debug) {
-        return (event: IOEvent) => JSON.stringify(event);
+        // The fields a helper offers are the whole describe of an SObject: too much for a log line.
+        return (event: IOEvent) => JSON.stringify(event.data?.helper
+            ? { ...event, data: { ...event.data, helper: { ...event.data.helper, fields: undefined } } }
+            : event);
     }
     return formatEvent;
 }

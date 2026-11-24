@@ -1,6 +1,6 @@
 import { SObjectRecord, Schema } from "jsforce";
 import { Options } from "./config";
-import IOEvent, { IOEventType } from "./ioevent";
+import IOEvent, { IOEventType, JsonHelperContext } from "./ioevent";
 import { OriginKind, PathStep, RetrievedRecord } from "./record-paths";
 
 /**
@@ -324,8 +324,8 @@ class IO {
         return await this.onInput(this.buildIOEvent('input', errorEvent(phase), { recordId, error: message, errorDetails }));
     }
 
-    public async askForFieldsToUpdate(phase: ErrorPhase): Promise<string> {
-        return await this.onInput(this.buildIOEvent('input', errorEvent(phase), {}));
+    public async askForFieldsToUpdate(phase: ErrorPhase, helper: JsonHelperContext): Promise<string> {
+        return await this.onInput(this.buildIOEvent('input', errorEvent(phase), { helper }));
     }
 
     public invalidJson() {
@@ -337,8 +337,8 @@ class IO {
         return await this.onInput(this.buildIOEvent('input', 'insert_error', {}));
     }
 
-    public async askForSolver(phase: ErrorPhase): Promise<string> {
-        return await this.onInput(this.buildIOEvent('input', errorEvent(phase), {}));
+    public async askForSolver(phase: ErrorPhase, helper: JsonHelperContext): Promise<string> {
+        return await this.onInput(this.buildIOEvent('input', errorEvent(phase), { helper }));
     }
 
     public invalidRegex() {
